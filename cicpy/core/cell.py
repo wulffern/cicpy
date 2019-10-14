@@ -1,13 +1,15 @@
-from .rect import Rect
+from .rect import *
 
 class Cell(Rect): 
 
         def __init__ (self,name=""):
             super().__init__()
             self.subckt = None
-            self.boundaryIgnoreRouting = False
+            self.ignoreBoundaryRouting = False
             self.physicalOnly = False
             self.children  = list()
+            self.ports = dict()
+            self.routes = list()
 
         # Find the first rectangle in this cell that uses layer
         def getRect(self,layer):
@@ -21,40 +23,69 @@ class Cell(Rect):
             
             #TODO: What did I use children_by_type for?
 
-            #TODO: I handle Ports specially
-
-            #TODO: I handled Routes specially
+            if(child.isPort()):
+                self.ports[port.name] = child
 
             if(not child in self.children):
+                if(child.isRoute()):
+                    self.routes.append(child)
                 child.parent = self
                 self.children.append(child)
                 child.connect(self.updateBoundingRect)
 
         
         # Move this cell, and all children by dx and dy
-        def translate( dx, dy):
-            raise Exception("Not implemented")
-            pass
+        def translate(self, dx, dy):
+            super().translate(dx,dy)
+            for child in self.children:
+                child.translate(dx,dy)
+            self.updateBoundingRect()
+            self.emit_updated()
 
         # Mirror this cell, and all children around ax
-        def mirrorX(ax):
-            raise Exception("Not implemented")
-            pass
+        def mirrorX(self,ax):
+            super().mirrorX(ax)
+            for child in self.children:
+                child.mirrorX(ax)
+            for port in self.ports:
+                port.mirrorX(ax)
+            self.updateBoundingRect()
+            self.emit_updated()
+
 
         # Mirror this cell, and all children around ay
-        def mirrorY(ay):
-            raise Exception("Not implemented")
-            pass
+        def mirrorY(self,ay):
+            super().mirrorY(ay)
+            for child in self.children:
+                child.mirrorY(ay)
+            for port in self.ports:
+                port.mirrorY()
+            self.updateBoundingRect()
+            self.emit_updated
+            
 
         # Move this cell, and all children to ax and ay
-        def moveTo(ax, ay):
-            raise Exception("Not implemented")
-            pass
+        def moveTo(self,ax, ay):
+            x1 = self.x1
+            y1 = self.y1
+            super().moveTo(ax,ay)
+            for child in self.children:
+                child.translate(ax - x1, ay - y1)
+            self.updateBoundingRect
+            self.emit_updated()
+            
 
         # Center this cell, and all children on ax and ay
-        def moveCenter(ax, ay):
-            raise Exception("Not implemented")
-            pass
+        def moveCenter(self,ax, ay):
+            self.updateBoundingRect()
+
+            xc1 = self.centerX
+            yc1 = self.centerY
+
+            xpos = self.left - (xc1 - ax)
+            ypos = self.bottom - (yc1 - ay)
+
+            self.moveTo(xpos,ypos)
 
         # Shortcut for adding ports
         def addPort(name, rect):
@@ -67,21 +98,49 @@ class Cell(Rect):
             pass
             
             
-        def mirrorCenterY():
+        def mirrorCenterY(self):
             self.mirrorY(self.centerX)
             pass
 
         def updateBoundingRect(self):
+            r = self.calcBoundingRect()
+            r.setRect(r)
             pass
 
         # Calculate the extent of this cell. Should be overriden by children
-        def calcBoundingRect():
-            raise Exception("Not implemented")
-            pass
+        def calcBoundingRect(self):
+            x1 = INT_MAX
+            y1 = INT_MAX
+            x2 = INT_MIN
+            y2 = INT_MIN
+            if(len(self.children) == 0):
+                x1 = y1 = x2 = y2 = 0
+            for child in self.children:
+                if(self.ignoreBoundaryRouting and 
+                    (not(child.isInstance()) or not(child.isCut()) ) ):
+                    continue
+                cx1 = child.x1
+                cx2 = child.x2
+                cy1 = child.y1
+                cy2 = child.y2
 
-        def isEmpty():
-            raise Exception("Not implemented")
-            pass
+                if(cx1 < x1):
+                    x1 = cx1
+                if(cy1 > y1):
+                    y1 = cy1
+                if(cx2 > x2):
+                    x2 = cx2
+                if(cy2 > cy2):
+                    y2 = cy2
+            r = Rect()
+            r.setPoint1(x1,y1)
+            r.setPoint2(x2,y2)
+            return r
+
+        def isEmpty(self):
+            if(self.name == ""):
+                return True
+            return False
         
 
         #- Abstract methods

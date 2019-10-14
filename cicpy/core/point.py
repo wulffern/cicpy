@@ -12,8 +12,8 @@ class Point:
 
     def rotate(self,org_x,org_y,angle):
         angle_ = angle*2*math.asin(1)/180.0
-        self.x = math.cos(angle_)*(x - org_x) - math.sin(angle_)*(y - org_y) + org_x
-        self.y = math.sin(angle_) *(x - org_x) + math.cos(angle_) * (y- org_y) + org_y
+        self.x = math.cos(angle_)*(self.x - org_x) - math.sin(angle_)*(self.y - org_y) + org_x
+        self.y = math.sin(angle_) *(self.y - org_x) + math.cos(angle_) * (self.y- org_y) + org_y
 
     def translate(self,dx,dy):
         self.x = self.x + dx

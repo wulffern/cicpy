@@ -135,22 +135,22 @@ class Rect:
         return self.y1  + self.height/2
 
     def moveTo(self,x,y):
-        width = self.width
-        height = self.height
+        w = self.width()
+        h = self.height()
         self.x1 = x
         self.y1 = y
-        self.x2 = x + width
-        self.y2 = y + width
-        emit_updated()
+        self.x2 = x + w
+        self.y2 = y + h
+        self.emit_updated()
 
     def moveCenter(self,xc,yc):
-        width = self.width
-        height = self.height
-        self.x1 = xc - width/2
-        self.y1 = yc - height/2
-        self.x2 = self.x1 + width
-        self.y2 = self.y1 + height
-        emit_updated()
+        w = self.width()
+        h = self.height()
+        self.x1 = xc - w/2
+        self.y1 = yc - h/2
+        self.x2 = self.x1 + w
+        self.y2 = self.y1 + h
+        self.emit_updated()
 
     def empty(self):
         if (self.x1 == self.x2 or self.y1 == self.y2):
@@ -177,7 +177,7 @@ class Rect:
         self.x1 += ax
         self.y1 += ax
         self.y2 += ax
-        emit_updated()
+        self.emit_updated()
 
     def isHorizontal(self):
         if(self.width >= self.height):
@@ -189,7 +189,7 @@ class Rect:
             return True
         return False    
     
-    def setParent(rect):
+    def setParent(self,rect):
         self.parent = rect
         return rect
     
@@ -225,7 +225,7 @@ class Rect:
         self.x2 = p2.x
         self.y1 = p1.y
         self.y2 = p2.y
-        emit_updated()
+        self.emit_updated()
 
     def adjustedOnce(self,xp1):
         rect = Rect(self.layer,self.x1 - xp1, self.y1- xp1, self.width + 2*xp1, self.height + 2*xp1)
@@ -241,7 +241,7 @@ class Rect:
             self.setLeft(self.right())
             self.setRight(tmp)
         
-        emit_updated()
+        self.emit_updated()
     
 
 
@@ -254,7 +254,7 @@ class Rect:
             tmp = self.top()
             self.setTop(self.bottom())
             self.setBottom(tmp)
-        emit_updated()
+        self.emit_updated()
 
     def abutsLeft(self,r):
         if(self.x2 == r.x1 and self.y1 == r.y1 and self.y2 == r.y2):
@@ -301,82 +301,37 @@ class Rect:
 
     #TODO: Need to figure out how to check what type of instance this is
 
-    # # Check if this is an cIcCore::Instance object
-    # def isInstance(self):
-    #     if()
-    #     if(self.metaObject()->className() == "cIcCore::Instance"){
-    #         return true;
-    #     }else if(self.inherits("cIcCore::Instance")){
-    #         //
-    #         return true;
-    #     }
-    #     return false;
-    # }
+    def isType(self,typename):
+        if(self.__class__.__name__ == typename):
+            return True
+        elif(super() and (super().__class__.__name__ == typename)):
+            return True
+        return False
 
-    # //! Check if this is a cIcCore::Routeobject
-    # bool Rect::isRoute(){
-    #     if(self.metaObject()->className() == "cIcCore::Route"){
-    #         return true;
-    #     }else if(self.inherits("cIcCore::Route")){
-    #         return true;
-    #     }
-    #     return false;
-    # }
+    def isInstance(self):
+        return self.isType("Instance")
 
-    # //! Check if this is a cIcCore::Cut object
-    # bool Rect::isCut(){
-    #     if(self.metaObject()->className() == "cIcCore::Cut"){
-    #         return true;
-    #     }else if(self.inherits("cIcCore::Cut")){
-    #         return true;
-    #     }else if(self.metaObject()->className() == "cIcCore::InstanceCut"){
-    #         return true;
-    #     }else if(self.inherits("cIcCore::InstanceCut")){
-    #         return true;
-    #     }
-    #     return false;
-    # }
+    def isPort(self):
+        return self.isType("Port")
 
-    # //! Check if this is a cIcCore::Cell object
-    # bool Rect::isCell(){
-    #     if(self.metaObject()->className() == "cIcCore::Cell" ){
+    def isPort(self):
+        return self.isType("Route")
 
-    #         return true;
-    #     }else  if(self.inherits("cIcCore::Cell")){
-    #         return true;
-    #     }
-    #     return false;
-    # }
+    def isCut(self):
+        return self.isType("Cut")
 
-    # //! Check if this is a cIcCore::LayoutCell object
-    # bool Rect::isLayoutCell(){
-    #     if(self.metaObject()->className() == "cIcCore::LayoutCell" ){
-    #         return true;
-    #     }else  if(self.inherits("cIcCore::LayoutCell")){
-    #         return true;
-    #     }
-    #     return false;
-    # }
+    def isCut(self):
+        return self.isType("Cell")
+
+    def isLayoutCell(self):
+        return self.isType("LayoutCell")
+
+    def isRoute(self):
+        return self.isType("Route")
+
+    def isText(self):
+        return self.isType("Text")
 
 
-    # //! Check if this is a cIcCore::Port object
-    # bool Rect::isPort(){
-    #     if(self.metaObject()->className() == "cIcCore::Port" ){
-    #         return true;
-    #     }else if(self.inherits("cIcCore::Port")){
-    #         return true;
-    #     }
-    #     return false;
-
-    # }
-
-    # //! Check if this is a cIcCore::Text object
-    # bool Rect::isText(){
-    #     if(self.metaObject()->className() == "cIcCore::Text"){
-    #         return true;
-    #     }else if(self.inherits("cIcCore::Text")){
-    #         return true;
-    #     }
-    #     return false;
-
-    # }
+    
+    

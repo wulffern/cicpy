@@ -26,7 +26,7 @@ class Cell(Rect):
         #TODO: What did I use children_by_type for?
 
         if(child.isPort()):
-            self.ports[port.name] = child
+            self.ports[child.name] = child
 
         if(not child in self.children):
             if(child.isRoute()):
@@ -161,33 +161,6 @@ class Cell(Rect):
         self.name = o["name"]
         self.has_pr = o["has_pr"]
 
-        #- Handle subckt
-        if("ckt" in o):
-            pass
-
-        for child in o["children"]:
-            cl = child["class"]
-            if(cl == "Rect"):
-                c = Rect()
-                c.fromJson(child)
-                self.add(c)
-            elif(cl == "Port"):
-                c  = Port()
-                c.fromJson(child)
-                self.add(c)
-            elif(cl == "Text"):
-                c  = Text()
-                c.fromJson(child)
-                self.add(c)
-            elif(ce)
-
-            #TODO: How the hell will I handle Cells? Only LayoutCell can contain instances
-            elif(cl == "Cell" or cl== "cIcCore::Route" or cl == "cIcCore::RouteRing" or cl == "cIcCore::Guard" or cl == "cIcCore::Cell"):
-                l = LayoutCell()
-                l.fromJson(child)
-                self.add(l)
-            else:
-                print(f"Unkown class {cl}")
 
     def toJson(self):
         o = super().toJson()

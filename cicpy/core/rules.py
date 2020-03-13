@@ -24,29 +24,47 @@
 ##  SOFTWARE.
 ##  
 ######################################################################
+import sys
+import os
+import json
 
-from .point import Point
-from .cell import Cell
 
-class Instance(Cell):
 
-    def __init__(self):
-        self.instanceName = ""
-        self.cell = ""
-        self.angle = ""
-        self.xcell = 0
-        self.ycell = 0
-        super().__init__()
+
+class Rules:
+
+    rules = False
     
-    def fromJson(self,o):
-        super().fromJson(o)
-        self.instanceName = o["instanceName"]
-        self.angle = o["angle"]
-        self.cell = o["cell"]
-        self.xcell = o["xcell"]
-        self.ycell = o["ycell"]
+    def __init__(self,filename):
+
+        if(not Rules.rules):
+            with open(filename,"r") as f:
+                Rules.rules = json.load(f)
 
 
-    def getCellPoint(self):
-        p = Point(self.x1 + self.xcell, self.y1 + self.ycell)
-        return p
+    def getField(self,category, key, field):
+        if(category in Rules.rules):
+            obj = Rules.rules[category]
+            if(key in obj):
+                lay = obj[key]
+                if(field in lay):
+                    return lay[field]
+                else:
+                    raise Exception(f"RuleError: {category}->{key} does not contain {field}")
+            else:
+                raise Exception(f"RuleError: {category} does not contain {key}")
+        else:
+            raise Exception(f"RuleError: Rulefile does not have category {category}")
+    
+
+        
+    def layerToNumber(self,layer):
+        return self.getField("layers",layer,"number")
+
+    def layerToDataType(self,layer):
+        return self.getField("layers",layer,"datatype")
+    
+                
+        
+        
+        

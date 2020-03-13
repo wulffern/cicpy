@@ -25,28 +25,32 @@
 ##  
 ######################################################################
 
-from .point import Point
-from .cell import Cell
+import click
+import os, sys
+sys.path.append(os.path.dirname(sys.argv[0]))
+import cicpy as cic
 
-class Instance(Cell):
 
-    def __init__(self):
-        self.instanceName = ""
-        self.cell = ""
-        self.angle = ""
-        self.xcell = 0
-        self.ycell = 0
-        super().__init__()
+
+@click.group()
+@click.pass_context
+def cli(ctx):
+    pass
+
+@cli.command("skill")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("library")
+def skill(ctx,cicfile,techfile,library):
+    d = cic.Design()
+    d.fromJsonFile(cicfile)
+    r = cic.Rules(techfile)
+    s = cic.SkillLayPrinter(library,r)
+    s.print(d)
+
+
+if __name__ == '__main__':
+    cli(obj={})
+
     
-    def fromJson(self,o):
-        super().fromJson(o)
-        self.instanceName = o["instanceName"]
-        self.angle = o["angle"]
-        self.cell = o["cell"]
-        self.xcell = o["xcell"]
-        self.ycell = o["ycell"]
-
-
-    def getCellPoint(self):
-        p = Point(self.x1 + self.xcell, self.y1 + self.ycell)
-        return p

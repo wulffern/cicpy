@@ -4,7 +4,11 @@ from .cell import Cell
 from .layoutcell import LayoutCell
 import json
 
-class Design(Cell):
+class Design():
+
+    def __init__(self):
+        self.cells = dict()
+        self.cellnames = list()
 
     def fromJsonFile(self,fname):
         jobj = None
@@ -12,10 +16,16 @@ class Design(Cell):
             jobj = json.load(f)
         for o in jobj["cells"]:
             c = LayoutCell()
-            c.fromJson(o)
-            #c.rotate(1000)
-            self.add(c)
-            
+            c.fromJson(o)  
+            self.cells[c.name] = c
+            self.cellnames.append(c.name)          
+    
+    def cellNames(self):
+        return self.cellnames
+    
+    def getCell(self,name):
+        return self.cells[name]
+
 
 
         

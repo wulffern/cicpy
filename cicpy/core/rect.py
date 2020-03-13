@@ -278,11 +278,11 @@ class Rect:
         return False
 
     def __str__(self):
-        return "%s: layer=%s X=%d Y=%d W=%d H=%d" %(self.__class__,self.layer,self.x1,self.y1,self.width,self.height)
+        return "%s: layer=%s X=%d Y=%d W=%d H=%d" %(self.__class__,self.layer,self.x1,self.y1,self.width(),self.height())
 
     def fromJson(self,o):
         self.x1 = o["x1"]
-        self.x2_ = o["x2"]
+        self.x2 = o["x2"]
         self.y1 = o["y1"]
         self.y2 = o["y2"]
         self.layer = o["layer"]
@@ -311,16 +311,19 @@ class Rect:
     def isInstance(self):
         return self.isType("Instance")
 
+    def isRect(self):
+        return self.isType("Rect")
+
     def isPort(self):
         return self.isType("Port")
 
-    def isPort(self):
+    def isRoute(self):
         return self.isType("Route")
 
     def isCut(self):
         return self.isType("Cut")
 
-    def isCut(self):
+    def isCell(self):
         return self.isType("Cell")
 
     def isLayoutCell(self):

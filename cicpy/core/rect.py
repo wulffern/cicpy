@@ -320,7 +320,7 @@ class Rect:
     def isCut(self):
         return self.isType("Cut")
 
-    def isCut(self):
+    def isCell(self):
         return self.isType("Cell")
 
     def isLayoutCell(self):

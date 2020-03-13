@@ -13,7 +13,7 @@ class Design(Cell):
         for o in jobj["cells"]:
             c = LayoutCell()
             c.fromJson(o)
-            c.rotate(1000)
+            #c.rotate(1000)
             self.add(c)
             
 

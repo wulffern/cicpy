@@ -1,3 +1,29 @@
+######################################################################
+##        Copyright (c) 2020 Carsten Wulff Software, Norway 
+## ###################################################################
+## Created       : wulff at 2020-3-14
+## ###################################################################
+##  The MIT License (MIT)
+## 
+##  Permission is hereby granted, free of charge, to any person obtaining a copy
+##  of this software and associated documentation files (the "Software"), to deal
+##  in the Software without restriction, including without limitation the rights
+##  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+##  copies of the Software, and to permit persons to whom the Software is
+##  furnished to do so, subject to the following conditions:
+## 
+##  The above copyright notice and this permission notice shall be included in all
+##  copies or substantial portions of the Software.
+## 
+##  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+##  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+##  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+##  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+##  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+##  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+##  SOFTWARE.
+##  
+######################################################################
 from .designprinter import DesignPrinter
 import sys
 from os import path
@@ -12,7 +38,6 @@ class SkillLayPrinter(DesignPrinter):
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
         self.noPortRect = False
-
 
 
     def startLib(self,name):
@@ -35,15 +60,13 @@ class SkillLayPrinter(DesignPrinter):
             self.fcell.close()
 
     def startCell(self,cell):
-
         file_name_cell = self.libname + "/" + cell.name + ".il"
-
         self.f.write("load(\"" + file_name_cell + "\")\n")
 
         self.openCellFile(file_name_cell)
+        
         self.fcell.write(self.libstr)
         self.fcell.write(";- Create cell " + cell.name +  "\n" + "(let (layout net fig )\n layout = dbOpenCellViewByType(gdssLibName \"" + cell.name  + "\" \"layout\" \"maskLayout\" \"w\")\n")
-
 
 
     def endCell(self,cell):
@@ -52,10 +75,8 @@ class SkillLayPrinter(DesignPrinter):
 
         
     def printPort(self,p):
-        direction = "inputOutput"
-        
+        direction = "inputOutput"        
         #- TODO: Add printing of pin
-
         self.fcell.write((f"net = dbCreateNet(layout \"{p.name}\")\n"
                          f"dbCreateTerm( net \"{p.name}\" \"{direction}\")\n"
                          "dbCreatePin(net fig)\n") )
@@ -64,7 +85,7 @@ class SkillLayPrinter(DesignPrinter):
         y1 = self.toMicron(p.y1)
         layerNumber = self.rules.layerToNumber(p.pinLayer)
         dataType = self.rules.layerToDataType(p.pinLayer)
-
+        
         self.fcell.write(f"dbCreateLabel(layout list({layerNumber} {dataType}) {x1}:{y1} \"{p.name}\" \"centerLeft\" \"R0\" \"stick\" 0.1)\n")
 
         
@@ -78,7 +99,6 @@ class SkillLayPrinter(DesignPrinter):
         #- Don't print empty layers
         if(r.layer == ""):
             return
-        
 
         layerNumber = self.rules.layerToNumber(r.layer)
         dataType = self.rules.layerToDataType(r.layer)
@@ -92,7 +112,6 @@ class SkillLayPrinter(DesignPrinter):
         self.fcell.write((f"fig = dbCreateRect(layout list({layerNumber} {dataType}"
                           f") list({x1}:{y1} {x2}:{y2}))\n"))
         
-
     def printReference(self,inst):
         if(not inst or inst.isEmpty()):
             return

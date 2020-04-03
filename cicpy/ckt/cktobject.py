@@ -29,12 +29,16 @@ class CktObject():
 
     def __init__(self):
         self.name = ""
+        self.classname = ""
         self.nodes = list()
         self.properties = dict()
         self.className = ""
 
     def fromJson(self,o):
-        self.name = o["class"]
+        self.classname = o["class"]
         self.name = o["name"]
         self.nodes = o["nodes"]
         self.properties = o["properties"]
+
+    def __repr__(self):
+        return f"{self.classname} {self.name}: nodes = {self.nodes}, props = {self.properties}"

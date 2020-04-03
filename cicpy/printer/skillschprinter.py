@@ -87,24 +87,24 @@ schName = "{cell.name}"
 xcoord = 1
 ycoord = 0
         """)
-
-
+        
         counter = 0
         x = 0
         y = 0
 
-        #- Need ports to come first in the skill file
-        for port in cell.ports:
-            p = cell.ports[port]
-            pinName = port
+        #- Will use the spice defition ports
+        #- TODO: Should it use Ports??
+        for node in cell.ckt.nodes:
+            p = node
+            pinName = p
             pinCommonName = re.sub(r"<|>|:","_",pinName)
-            pinDirection = p.direction
+            pinDirection = "inputOutput"
 
             self.fcell.write(f"""
 my{pinCommonName} = schCreatePin( sch {pinDirection}PinMaster "{pinName}" "{pinDirection}" nil {x}:{y} "R0" )
 myTerm{pinCommonName} = (setof pin sch->terminals (pcreMatchp "{pinName}" pin->name))
 myprebBox{pinCommonName} = car(car(my{pinCommonName}~>master~>terminals~>pins)~>fig~>bBox)
-mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName}) my{pinCommonName}~>transform)
+mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonName}~>transform)
             """)
 
             counter +=1
@@ -145,13 +145,16 @@ unless( ddGetObj(schLibName schName "symbol")
 
 
     def printDevice(self,o):
+
+
+        print(o)
         pass
 
     def printInstance(self,o):
 
         x1 = "xcoord"
         y1 = "ycoord"
-        rotation = "R0"
+        rotation = "R270"
 
         if(o.subcktName not in self.cells.keys()):
             return
@@ -192,7 +195,7 @@ unless( ddGetObj(schLibName schName "symbol")
             bBox = car(car(signal~>pins)~>fig)~>bBox
             pin =dbTransformBBox(bBox schInst~>transform)
 
-            wireId = schCreateWire( sch "draw" "full" list(centerBox(pin) rodAddToX(centerBox(pin) 0.125) )  0.0625 0.0625 0.0 )
+            wireId = schCreateWire( sch "draw" "full" list(centerBox(pin) rodAddToX(centerBox(pin) 0.05) )  0.0625 0.0625 0.0 )
             schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pin) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
             """
 

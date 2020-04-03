@@ -35,19 +35,36 @@ import cicpy as cic
 @click.group()
 @click.pass_context
 def cli(ctx):
+    """ Python toolbox for Custom Integrated Circuit Creator (ciccreator). """
     pass
 
-@cli.command("skill")
+@cli.command("transpose")
 @click.pass_context
 @click.argument("cicfile")
 @click.argument("techfile")
 @click.argument("library")
-def skill(ctx,cicfile,techfile,library):
+@click.option("--layskill",is_flag=True,help="Output Skill Layout file")
+@click.option("--schskill",is_flag=True,help="Output Skill Schematic file")
+@click.option("--spice",is_flag=True,help="Output Spice file")
+@click.option("--spectre",is_flag=True,help="Output Spectre file")
+def transpose(ctx,cicfile,techfile,library,layskill,schskill,spice,spectre):
+    """Translate .cic file into another file format """
     d = cic.Design()
     d.fromJsonFile(cicfile)
     r = cic.Rules(techfile)
-    s = cic.SkillLayPrinter(library,r)
-    s.print(d)
+    
+    if(layskill):
+        la = cic.SkillLayPrinter(library,r)
+        la.print(d)
+
+    if(schskill):
+        sc = cic.SkillSchPrinter(library,r)
+        sc.print(d)
+        pass
+
+    if(spice):
+        pass
+            
 
 
 if __name__ == '__main__':

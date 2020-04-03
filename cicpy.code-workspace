@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "/Users/wulff/pro/cic/ciccreator"
+		},
+		{
+			"path": "/Users/wulff/pro/cic/cic2skill"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"string": "cpp",
+			"*.tcc": "cpp"
+		}
+	}
+}

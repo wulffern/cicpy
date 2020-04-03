@@ -1,7 +1,7 @@
 ######################################################################
 ##        Copyright (c) 2020 Carsten Wulff Software, Norway 
 ## ###################################################################
-## Created       : wulff at 2020-3-14
+## Created       : wulff at 2020-3-21
 ## ###################################################################
 ##  The MIT License (MIT)
 ## 
@@ -24,14 +24,15 @@
 ##  SOFTWARE.
 ##  
 ######################################################################
-#Core
 
-from .core.point import *
-from .core.rect import *
-from .core.cell import *
-from .core.layoutcell import *
-from .core.design import *
-from .core.port import *
-from .core.rules import *
-from .printer.skilllayprinter import *
-from .printer.skillschprinter import *
+from .cktobject import CktObject
+class Device(CktObject):
+    def __init__(self):
+        super().__init__()
+        self.deviceName = ""
+        
+    def fromJson(self,o):
+        super().fromJson(o)
+        self.deviceName = o["deviceName"]
+
+

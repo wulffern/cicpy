@@ -30,19 +30,22 @@ from .cell import Cell
 from .port import Port
 from .instance import Instance
 from .text import Text
+from ..ckt.subckt import Subckt
 
 class LayoutCell(Cell):
 
     def __init__(self):
         super().__init__()
+        self.ckt = None
 
     def fromJson(self,o):
         super().fromJson(o)
 
         #- Handle subckt
         if("ckt" in o):
+            self.ckt = Subckt()
+            self.ckt.fromJson(o["ckt"])
 
-            pass
 
         for child in o["children"]:
             cl = child["class"]

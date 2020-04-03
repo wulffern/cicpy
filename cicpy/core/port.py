@@ -37,6 +37,7 @@ class Port(Rect):
         self.spicePort = True
         self.net = ""
         self.pinLayer = routeLayer
+        self.direction = "inputOutput"
     
     def fromJson(self,o):
 

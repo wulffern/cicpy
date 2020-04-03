@@ -32,16 +32,20 @@ class Subckt(CktObject):
 
     def __init__(self):
         super().__init__()
+        self.devices = list()
+        self.instances = list()
 
     def fromJson(self,o):
         super().fromJson(o)
         for d in o["devices"]:
             dd = Device()
             dd.fromJson(d)
+            self.devices.append(dd)
             pass
 
         for i in o["instances"]:
             ii = CktInstance()
             ii.fromJson(i)
+            self.instances.append(ii)
 
             pass

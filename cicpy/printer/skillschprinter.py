@@ -33,7 +33,8 @@ class SkillSchPrinter(DesignPrinter):
 
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
-        self.techfile = ""
+
+        self.techfile = rules.getValue("technology","techlib")
         self.cells = dict()
 
 
@@ -144,17 +145,11 @@ unless( ddGetObj(schLibName schName "symbol")
         self.endCell(c)
 
 
-    def printDevice(self,o):
-
-
-        print(o)
-        pass
-
     def printInstance(self,o):
 
         x1 = "xcoord"
         y1 = "ycoord"
-        rotation = "R270"
+        rotation = "R180"
 
         if(o.subcktName not in self.cells.keys()):
             return
@@ -169,7 +164,7 @@ unless( ddGetObj(schLibName schName "symbol")
         schInst=dbCreateInst(sch schLib "{o.name}" {x1}:{y1} "{rotation}")
         xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
         if(xcoord > 15 then
-                    xcoord = 1
+                    xcoord = 2
                     ycoord = ycoord +  topEdge(schLib->bBox) - bottomEdge(schLib->bBox) + 1
         )
 
@@ -200,11 +195,6 @@ unless( ddGetObj(schLibName schName "symbol")
             """
 
             self.fcell.write(ss)
-            
-
-        
-
-        
 
         
 
@@ -222,3 +212,167 @@ unless( ddGetObj(schLibName schName "symbol")
 
     #def printReference(self,o):
     #    pass
+
+    def printDevice(self,o):
+
+
+        if("Mosfet" in o.classname):
+            self.printMosfet(o)
+        elif("Resistor" in o.classname):
+            self.printResistor(o)
+
+        #print(o)
+        pass
+
+    def printMosfet(self,o):
+
+        try:
+            odev = self.rules.device(o.deviceName)
+        except Exception as e:
+            raise "Could not find '" + o.deviceName + "' in rule file\n"
+
+
+        typename = odev["name"]
+
+        print(o.deviceName + " " + typename)
+        port0 = odev["ports"][0]
+        port1 = odev["ports"][1]
+        port2 = odev["ports"][2]
+        port3 = odev["ports"][3]
+
+        x1 = "xcoord"
+        y1 = "ycoord"
+
+        
+        rotation = 0
+        deviceCounter = 0
+
+        ss = f"""
+    ;;-------------------------------------------------------------------
+    ;; Create transistor {o.name}
+    ;;-------------------------------------------------------------------
+        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
+        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
+        ndrain = (setof sig schLib~>signals (member "{port0}" sig~>sigNames))
+        ngate  = (setof sig schLib~>signals (member "{port1}" sig~>sigNames))
+        nsource = (setof sig schLib~>signals (member "{port2}" sig~>sigNames))
+        nbulk = (setof sig schLib~>signals (member "{port3}" sig~>sigNames))
+
+        bBoxDrain = car(car(ndrain~>pins)~>fig)~>bBox
+        bBoxSource = car(car(nsource~>pins)~>fig)~>bBox
+        bBoxBulk = car(car(nbulk~>pins)~>fig)~>bBox
+        bBoxGate = car(car(ngate~>pins)~>fig)~>bBox
+
+        schInst=dbCreateInst(sch schLib "{o.name}_{deviceCounter}" {x1}:{y1} "{rotation}")
+        """
+
+        props = list()
+        if("propertymap" in odev):
+            #print(odev["propertymap"])
+            for key in odev["propertymap"]:
+                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
+                props.append(key)
+
+
+
+        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
+
+        
+        ss += f"""
+        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))
+
+        ;;- Create wires
+        pinDrain=dbTransformBBox(bBoxDrain schInst~>transform)
+        pinSource=dbTransformBBox(bBoxSource schInst~>transform)
+        pinGate=dbTransformBBox(bBoxGate schInst~>transform)
+        pinBulk=dbTransformBBox(bBoxBulk schInst~>transform)
+
+        """
+
+
+        for (name,con) in zip(["D","G","S","B"],o.nodes):
+            ss += f"bDest{name} = mybBox{con}\n"
+
+        ss += """
+        schCreateWire( sch "route" "flight" list(centerBox(pinDrain) centerBox(bDestD)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinSource) centerBox(bDestS)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinGate) centerBox(bDestG)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinBulk) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+        """
+
+        self.fcell.write(ss)
+
+        #print("Mosfet " + str(o))
+        pass
+
+    def printResistor(self,o):
+
+        try:
+            odev = self.rules.device(o.deviceName + o.properties["layer"])
+        except Exception as e:
+            raise "Could not find '" + o.deviceName + "' in rule file\n"
+
+
+        typename = odev["name"]
+
+
+        port0 = odev["ports"][0]
+        port1 = odev["ports"][1]
+
+        x1 = "xcoord"
+        y1 = "ycoord"
+
+        print(port0 + " " + port1)
+
+        rotation = 0
+        deviceCounter = 0
+
+        ss = f"""
+
+        ;;-------------------------------------------------------------------
+        ;; Create Metal capacitor (two metal resistors) {o.name}
+        ;;-------------------------------------------------------------------
+        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
+
+        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
+
+        an = (setof sig schLib~>signals (member "{port0}" sig~>sigNames))
+        ap = (setof sig schLib~>signals (member "{port1}" sig~>sigNames))
+
+        bBoxAn = car(car(an~>pins)~>fig)~>bBox
+        bBoxAp = car(car(ap~>pins)~>fig)~>bBox
+        schInst=dbCreateInst(sch schLib "{o.name}_a_{deviceCounter}" {x1}:{y1} "{rotation}")
+        pinAn=dbTransformBBox(bBoxAn schInst~>transform)
+        pinBp=dbTransformBBox(bBoxAp schInst~>transform)
+
+    
+        """
+
+        props = list()
+        if("propertymap" in odev):
+            #print(odev["propertymap"])
+            for key in odev["propertymap"]:
+                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
+                props.append(key)
+
+
+        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
+
+
+        #- TODO: Fix this, right now this is not correct, the resistor should not connect to the pins, that's wrong.
+        raise("Hell")
+        ss += f"""
+        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))
+        bDestA = mybBoxA;
+        bDestB = mybBoxB;
+        schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+
+        """
+
+        self.fcell.write(ss)
+        #print("Resistors " + str(o))
+     #   print(o)
+        pass

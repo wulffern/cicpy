@@ -67,6 +67,7 @@ class Point:
 
     def __str__(self):
         s = "x=%d, y=%d" %(self.x,self.y)
+        return s
 
     def __eq__(self, point):
         if(point.x == self.x and point.y == self.y):

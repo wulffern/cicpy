@@ -36,6 +36,7 @@ class SkillSchPrinter(DesignPrinter):
 
         self.techfile = rules.getValue("technology","techlib")
         self.cells = dict()
+        self.current_cell = None
 
 
     def startLib(self,name):
@@ -72,6 +73,9 @@ class SkillSchPrinter(DesignPrinter):
     def startCell(self,cell):
         file_name_cell = self.libname + "/" + cell.name + "_sch.il"
 
+
+        self.current_cell = cell
+        
         #- Store cell for later, will need it
         self.cells[cell.name] = cell
 
@@ -124,6 +128,8 @@ unless( ddGetObj(schLibName schName "symbol")
 
     def endCell(self,o):
         self.fcell.write("\nschCheck(sch)\ndbSave(sch)\n")
+
+        self.current_cell = None
 
         pass
 
@@ -221,7 +227,6 @@ unless( ddGetObj(schLibName schName "symbol")
         elif("Resistor" in o.classname):
             self.printResistor(o)
 
-        #print(o)
         pass
 
     def printMosfet(self,o):
@@ -229,7 +234,7 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName)
         except Exception as e:
-            raise "Could not find '" + o.deviceName + "' in rule file\n"
+            raise(Exception("Could not find '" + o.deviceName + "' in rule file\n"))
 
 
         typename = odev["name"]
@@ -311,19 +316,23 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName + o.properties["layer"])
         except Exception as e:
-            raise "Could not find '" + o.deviceName + "' in rule file\n"
+            raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
 
+
+#        print(o)
+#        print(odev)
 
         typename = odev["name"]
 
 
         port0 = odev["ports"][0]
         port1 = odev["ports"][1]
+        
 
         x1 = "xcoord"
         y1 = "ycoord"
 
-        print(port0 + " " + port1)
+#        print(port0 + " " + port1)
 
         rotation = 0
         deviceCounter = 0
@@ -362,15 +371,29 @@ unless( ddGetObj(schLibName schName "symbol")
 
 
         #- TODO: Fix this, right now this is not correct, the resistor should not connect to the pins, that's wrong.
-        raise("Hell")
-        ss += f"""
-        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))
-        bDestA = mybBoxA;
-        bDestB = mybBoxB;
-        schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
-        schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+        #raise("Hell")
 
-        """
+
+
+        ss += f"""
+        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))"""
+        
+        #- Resistor should only have two nodes
+        if(len(o.nodes) != 2):
+            raise ("Hell")
+
+        if(o.nodes[0] in self.current_cell.ckt.nodes):
+            pinCommonName = re.sub(r"<|>|:","_",o.nodes[0])
+            ss += f"""
+            bDestA = mybBox{pinCommonName};
+            schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
+            """
+        if(o.nodes[1] in self.current_cell.ckt.nodes):
+            pinCommonName = re.sub(r"<|>|:","_",o.nodes[1])
+            ss += f"""
+            bDestB = mybBox{pinCommonName};
+            schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+            """
 
         self.fcell.write(ss)
         #print("Resistors " + str(o))

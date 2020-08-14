@@ -209,7 +209,8 @@ class Cell(Rect):
 
 
 
-
+    def __str__(self):
+        return  super().__str__() + " name=%s " %(self.name)
         
 
     #     Port * getPort(QString name);

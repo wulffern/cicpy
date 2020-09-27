@@ -121,9 +121,7 @@ class SkillLayPrinter(DesignPrinter):
         p = inst.getCellPoint()
 
 
-        if(inst.parent.name == "SARBSSW_CV"):
-            print(inst)
-            #print(p)
+
 
         x1 = self.toMicron(p.x)
         y1 = self.toMicron(p.y)

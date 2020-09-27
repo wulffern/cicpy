@@ -195,10 +195,10 @@ class Cell(Rect):
         o["name"] = self.name
         o["has_pr"] = self.has_pr
 
-        ckt = self.subcircuit
+        ckt = self.ckt
         if(ckt):
             ockt = ckt.toJson()
-            ockt["class"] = self.__class__.__name__
+            #ockt["class"] = self.__class__
             o["ckt"] = ockt
         
         oc = list()

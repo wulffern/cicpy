@@ -24,7 +24,7 @@
 ##  SOFTWARE.
 ##  
 ######################################################################
-
+import json
 class CktObject():
 
     def __init__(self):
@@ -39,6 +39,18 @@ class CktObject():
         self.name = o["name"]
         self.nodes = o["nodes"]
         self.properties = o["properties"]
+
+    def toJson(self):
+        o = dict()
+        o["class"] = self.classname
+        o["name"] = self.name
+        o["nodes"] = self.nodes
+        o["properties"] = self.properties
+        return o
+
+    def printToJson(self):
+        print(json.dumps(self.toJson(),indent=4))
+
 
     def __repr__(self):
         return f"{self.classname} {self.name}: nodes = {self.nodes}, props = {self.properties}"

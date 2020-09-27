@@ -24,7 +24,7 @@
 ##  SOFTWARE.
 ##  
 ######################################################################
-
+import json
 import sys
 from .point import Point
 
@@ -325,6 +325,10 @@ class Rect:
         o["layer"] = self.layer
         o["net"] = self.net
         return o
+
+
+    def printToJson(self):
+        print(json.dumps(self.toJson(),indent=4))
 
     #TODO: Need to figure out how to check what type of instance this is
 

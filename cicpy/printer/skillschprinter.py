@@ -29,6 +29,8 @@ import sys
 from os import path
 import re
 import os
+
+
 class SkillSchPrinter(DesignPrinter):
 
     def __init__(self,filename,rules):
@@ -142,12 +144,17 @@ unless( ddGetObj(schLibName schName "symbol")
         
         self.startCell(c)
 
-        for o in c.ckt.devices:
-            self.printDevice(o)
+        try:
+            for o in c.ckt.devices:
+                self.printDevice(o)
 
-        for o in c.ckt.instances:
-            self.printInstance(o)
+            for o in c.ckt.instances:
+                self.printInstance(o)
 
+        except Exception as e:
+            self.current_cell.ckt.printToJson()
+
+            raise(e)
         self.endCell(c)
 
 
@@ -219,6 +226,9 @@ unless( ddGetObj(schLibName schName "symbol")
     #def printReference(self,o):
     #    pass
 
+    
+
+
     def printDevice(self,o):
 
 
@@ -234,12 +244,13 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName)
         except Exception as e:
+
             raise(Exception("Could not find '" + o.deviceName + "' in rule file\n"))
 
 
         typename = odev["name"]
 
-        print(o.deviceName + " " + typename)
+        
         port0 = odev["ports"][0]
         port1 = odev["ports"][1]
         port2 = odev["ports"][2]
@@ -316,7 +327,9 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName + o.properties["layer"])
         except Exception as e:
+
             raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
+
 
 
 #        print(o)
@@ -346,14 +359,8 @@ unless( ddGetObj(schLibName schName "symbol")
 
         xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
 
-        an = (setof sig schLib~>signals (member "{port0}" sig~>sigNames))
-        ap = (setof sig schLib~>signals (member "{port1}" sig~>sigNames))
-
-        bBoxAn = car(car(an~>pins)~>fig)~>bBox
-        bBoxAp = car(car(ap~>pins)~>fig)~>bBox
         schInst=dbCreateInst(sch schLib "{o.name}_a_{deviceCounter}" {x1}:{y1} "{rotation}")
-        pinAn=dbTransformBBox(bBoxAn schInst~>transform)
-        pinBp=dbTransformBBox(bBoxAp schInst~>transform)
+
 
     
         """
@@ -382,18 +389,29 @@ unless( ddGetObj(schLibName schName "symbol")
         if(len(o.nodes) != 2):
             raise ("Hell")
 
-        if(o.nodes[0] in self.current_cell.ckt.nodes):
-            pinCommonName = re.sub(r"<|>|:","_",o.nodes[0])
+        for z in range(2):
+            deviceport = odev["ports"][z]
+            netName = o.nodes[z]
             ss += f"""
-            bDestA = mybBox{pinCommonName};
-            schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
+            deviceportn = (setof sig schLib~>signals (member "{deviceport}" sig~>sigNames))
+            bBoxDport = car(car(deviceportn~>pins)~>fig)~>bBox
+            pinDport=dbTransformBBox(bBoxDport schInst~>transform)
+            wireId = schCreateWire( sch "draw" "full" list(centerBox(pinDport) rodAddToX(centerBox(pinDport) 0.05) )  0.0625 0.0625 0.0 )
+            schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pinDport) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
             """
-        if(o.nodes[1] in self.current_cell.ckt.nodes):
-            pinCommonName = re.sub(r"<|>|:","_",o.nodes[1])
-            ss += f"""
-            bDestB = mybBox{pinCommonName};
-            schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
-            """
+
+        #if(o.nodes[0] in self.current_cell.ckt.nodes):
+        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[0])
+        #    ss += f"""
+        #    bDestA = mybBox{pinCommonName};
+        #    schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
+        #    """
+        #if(o.nodes[1] in self.current_cell.ckt.nodes):
+        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[1])
+        #    ss += f"""
+        #    bDestB = mybBox{pinCommonName};
+        #    schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+        #    """
 
         self.fcell.write(ss)
         #print("Resistors " + str(o))

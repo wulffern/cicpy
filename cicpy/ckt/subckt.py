@@ -49,3 +49,13 @@ class Subckt(CktObject):
             self.instances.append(ii)
 
             pass
+
+    def toJson(self):
+        o = super().toJson()
+        o["devices"] = []
+        for d in self.devices:
+            o["devices"].append(d.toJson())
+        o["instances"] = []
+        for i in self.instances:
+            o["instances"].append(i.toJson())
+        return o

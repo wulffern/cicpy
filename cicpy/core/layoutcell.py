@@ -38,6 +38,12 @@ class LayoutCell(Cell):
         super().__init__()
         self.ckt = None
 
+
+    def toJson(self):
+        o = super().toJson()
+
+        return o
+
     def fromJson(self,o):
         super().fromJson(o)
 

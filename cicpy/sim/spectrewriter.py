@@ -49,9 +49,19 @@ class SpectreWriter:
 
             self.fo = fo
 
+            self.addInclude(spicefile)
+
             self.simconf.writeSubckt(self)
 
             self.simconf.writePorts(self)
+
+    def addParam(self,key,val):
+        self.fo.write(f"parameters {key}={val}\n")
+
+
+    def addInclude(self,spicefile):
+        self.fo.write(f"include \"{spicefile}\"\n")
+
 
     def addComment(self,ss):
         self.fo.write(f"* {ss}\n")
@@ -61,9 +71,9 @@ class SpectreWriter:
 
     def addForce(self,ftype,name,val):
         if(ftype == "vdc"):
-            self.fo.write(f"v{name.lower()} ({name} 0) vsource dc={val} \n")
+            self.fo.write(f"v{name.lower()} ({name} 0) vsource type=dc dc={val} \n")
         if(ftype == "idc"):
-            self.fo.write(f"i{name.lower()} (0 {name}) isource dc={val} \n")
+            self.fo.write(f"i{name.lower()} (0 {name}) isource type=dc dc={val} \n")
         if(ftype == "resistance"):
             self.fo.write(f"r{name.lower()} ({name} 0) resistor r={val} \n")
         if(ftype == "capacitance"):

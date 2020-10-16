@@ -34,10 +34,17 @@ def getSimConf(subckt,ports):
         sc.addConf(p)
     return sc
 
+def is_int(s):
+    s = str(s)
+    if s[0] in ('-', '+'):
+        return s[1:].isdigit()
+    return s.isdigit()
+
 class SimConfPort:
 
-    def __init__(self,name=None):
+    def __init__(self,name=None,parent=None):
         self.name = name
+        self.parent = parent
         self.porttype = ""
         self.force = {
             "vdc": None,
@@ -52,10 +59,11 @@ class SimConfPort:
 
     def guessType(self):
         if("VSS" in self.name):
-            self.force["voltage"] = 0
+            self.force["vdc"] = 0
             self.porttype = "ground"
         elif("VDD" in self.name):
-            self.force["voltage"] = self.name.lower()
+            self.force["vdc"] = self.name.lower()
+            self.parent.addParam(self.force["vdc"])
             self.porttype = "supply"
         elif(re.search(r"(_\d+V\d+|_[CE]V)$|<\d+>",self.name)):
             self.force["resistance"] = "1M"
@@ -67,7 +75,7 @@ class SimConfPort:
     def write(self,writer):
         #- Write forces
         for f in self.force:
-            if(self.force[f]):
+            if(self.force[f] is not None):
                 val = self.force[f]
                 writer.addForce(f,self.name,val)
 
@@ -94,17 +102,24 @@ class SimConf:
         self.nodes =[]
         self.name = name
         self.version = 1
+        self.params = {}
 
     def addConf(self,p):
-        sp = SimConfPort(p)
+        sp = SimConfPort(p,self)
         self.nodes.append(p)
         self.ports[sp.name]  = sp
 
+
+    def addParam(self,param):
+        self.params[param] = None
+        
+        
     def toJson(self):
         d = {}
         d["version"] = self.version
         d["nodes"] = self.nodes
         d["name"] = self.name
+        d["params"] = self.params
         p = {}
         for pn in self.ports:
             p[pn] = self.ports[pn].toJson()
@@ -115,10 +130,13 @@ class SimConf:
         self.version = o["version"]
         self.name = o["name"]
         self.nodes = o["nodes"]
+
         for p in o["ports"]:
-            sc = SimConfPort(p)
+            sc = SimConfPort(p,self)
             sc.fromJson(o["ports"][p])
             self.ports[p] = sc
+
+        self.params = o["params"]
 
     def toFile(self,fname):
         data = self.toJson()
@@ -139,6 +157,11 @@ class SimConf:
             writer.addLine()
 
     def writeSubckt(self,writer):
-        
+        print(self.params)
+        for p in self.params:
+            if(self.params[p]):
+                print(p)
+                writer.addParam(p,self.params[p])
+
         writer.addSubckt(self.name,self.nodes)
         writer.addLine()

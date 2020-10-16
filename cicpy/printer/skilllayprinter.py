@@ -116,7 +116,13 @@ class SkillLayPrinter(DesignPrinter):
         if(not inst or inst.isEmpty()):
             return
 
+
+
         p = inst.getCellPoint()
+
+
+
+
         x1 = self.toMicron(p.x)
         y1 = self.toMicron(p.y)
 

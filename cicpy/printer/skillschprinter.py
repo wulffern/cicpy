@@ -29,12 +29,16 @@ import sys
 from os import path
 import re
 import os
+
+
 class SkillSchPrinter(DesignPrinter):
 
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
-        self.techfile = ""
+
+        self.techfile = rules.getValue("technology","techlib")
         self.cells = dict()
+        self.current_cell = None
 
 
     def startLib(self,name):
@@ -71,6 +75,9 @@ class SkillSchPrinter(DesignPrinter):
     def startCell(self,cell):
         file_name_cell = self.libname + "/" + cell.name + "_sch.il"
 
+
+        self.current_cell = cell
+        
         #- Store cell for later, will need it
         self.cells[cell.name] = cell
 
@@ -87,24 +94,24 @@ schName = "{cell.name}"
 xcoord = 1
 ycoord = 0
         """)
-
-
+        
         counter = 0
         x = 0
         y = 0
 
-        #- Need ports to come first in the skill file
-        for port in cell.ports:
-            p = cell.ports[port]
-            pinName = port
+        #- Will use the spice defition ports
+        #- TODO: Should it use Ports??
+        for node in cell.ckt.nodes:
+            p = node
+            pinName = p
             pinCommonName = re.sub(r"<|>|:","_",pinName)
-            pinDirection = p.direction
+            pinDirection = "inputOutput"
 
             self.fcell.write(f"""
 my{pinCommonName} = schCreatePin( sch {pinDirection}PinMaster "{pinName}" "{pinDirection}" nil {x}:{y} "R0" )
 myTerm{pinCommonName} = (setof pin sch->terminals (pcreMatchp "{pinName}" pin->name))
 myprebBox{pinCommonName} = car(car(my{pinCommonName}~>master~>terminals~>pins)~>fig~>bBox)
-mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName}) my{pinCommonName}~>transform)
+mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonName}~>transform)
             """)
 
             counter +=1
@@ -124,6 +131,8 @@ unless( ddGetObj(schLibName schName "symbol")
     def endCell(self,o):
         self.fcell.write("\nschCheck(sch)\ndbSave(sch)\n")
 
+        self.current_cell = None
+
         pass
 
     def printCell(self,c):
@@ -135,23 +144,25 @@ unless( ddGetObj(schLibName schName "symbol")
         
         self.startCell(c)
 
-        for o in c.ckt.devices:
-            self.printDevice(o)
+        try:
+            for o in c.ckt.devices:
+                self.printDevice(o)
 
-        for o in c.ckt.instances:
-            self.printInstance(o)
+            for o in c.ckt.instances:
+                self.printInstance(o)
 
+        except Exception as e:
+            self.current_cell.ckt.printToJson()
+
+            raise(e)
         self.endCell(c)
 
-
-    def printDevice(self,o):
-        pass
 
     def printInstance(self,o):
 
         x1 = "xcoord"
         y1 = "ycoord"
-        rotation = "R0"
+        rotation = "R180"
 
         if(o.subcktName not in self.cells.keys()):
             return
@@ -166,7 +177,7 @@ unless( ddGetObj(schLibName schName "symbol")
         schInst=dbCreateInst(sch schLib "{o.name}" {x1}:{y1} "{rotation}")
         xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
         if(xcoord > 15 then
-                    xcoord = 1
+                    xcoord = 2
                     ycoord = ycoord +  topEdge(schLib->bBox) - bottomEdge(schLib->bBox) + 1
         )
 
@@ -192,16 +203,11 @@ unless( ddGetObj(schLibName schName "symbol")
             bBox = car(car(signal~>pins)~>fig)~>bBox
             pin =dbTransformBBox(bBox schInst~>transform)
 
-            wireId = schCreateWire( sch "draw" "full" list(centerBox(pin) rodAddToX(centerBox(pin) 0.125) )  0.0625 0.0625 0.0 )
+            wireId = schCreateWire( sch "draw" "full" list(centerBox(pin) rodAddToX(centerBox(pin) 0.05) )  0.0625 0.0625 0.0 )
             schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pin) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
             """
 
             self.fcell.write(ss)
-            
-
-        
-
-        
 
         
 
@@ -219,3 +225,195 @@ unless( ddGetObj(schLibName schName "symbol")
 
     #def printReference(self,o):
     #    pass
+
+    
+
+
+    def printDevice(self,o):
+
+
+        if("Mosfet" in o.classname):
+            self.printMosfet(o)
+        elif("Resistor" in o.classname):
+            self.printResistor(o)
+
+        pass
+
+    def printMosfet(self,o):
+
+        try:
+            odev = self.rules.device(o.deviceName)
+        except Exception as e:
+
+            raise(Exception("Could not find '" + o.deviceName + "' in rule file\n"))
+
+
+        typename = odev["name"]
+
+        
+        port0 = odev["ports"][0]
+        port1 = odev["ports"][1]
+        port2 = odev["ports"][2]
+        port3 = odev["ports"][3]
+
+        x1 = "xcoord"
+        y1 = "ycoord"
+
+        
+        rotation = 0
+        deviceCounter = 0
+
+        ss = f"""
+    ;;-------------------------------------------------------------------
+    ;; Create transistor {o.name}
+    ;;-------------------------------------------------------------------
+        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
+        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
+        ndrain = (setof sig schLib~>signals (member "{port0}" sig~>sigNames))
+        ngate  = (setof sig schLib~>signals (member "{port1}" sig~>sigNames))
+        nsource = (setof sig schLib~>signals (member "{port2}" sig~>sigNames))
+        nbulk = (setof sig schLib~>signals (member "{port3}" sig~>sigNames))
+
+        bBoxDrain = car(car(ndrain~>pins)~>fig)~>bBox
+        bBoxSource = car(car(nsource~>pins)~>fig)~>bBox
+        bBoxBulk = car(car(nbulk~>pins)~>fig)~>bBox
+        bBoxGate = car(car(ngate~>pins)~>fig)~>bBox
+
+        schInst=dbCreateInst(sch schLib "{o.name}_{deviceCounter}" {x1}:{y1} "{rotation}")
+        """
+
+        props = list()
+        if("propertymap" in odev):
+            #print(odev["propertymap"])
+            for key in odev["propertymap"]:
+                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
+                props.append(key)
+
+
+
+        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
+
+        
+        ss += f"""
+        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))
+
+        ;;- Create wires
+        pinDrain=dbTransformBBox(bBoxDrain schInst~>transform)
+        pinSource=dbTransformBBox(bBoxSource schInst~>transform)
+        pinGate=dbTransformBBox(bBoxGate schInst~>transform)
+        pinBulk=dbTransformBBox(bBoxBulk schInst~>transform)
+
+        """
+
+
+        for (name,con) in zip(["D","G","S","B"],o.nodes):
+            ss += f"bDest{name} = mybBox{con}\n"
+
+        ss += """
+        schCreateWire( sch "route" "flight" list(centerBox(pinDrain) centerBox(bDestD)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinSource) centerBox(bDestS)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinGate) centerBox(bDestG)) 0.0625 0.0625 0.0 )
+        schCreateWire( sch "route" "flight" list(centerBox(pinBulk) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+        """
+
+        self.fcell.write(ss)
+
+        #print("Mosfet " + str(o))
+        pass
+
+    def printResistor(self,o):
+
+        try:
+            odev = self.rules.device(o.deviceName + o.properties["layer"])
+        except Exception as e:
+
+            raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
+
+
+
+#        print(o)
+#        print(odev)
+
+        typename = odev["name"]
+
+
+        port0 = odev["ports"][0]
+        port1 = odev["ports"][1]
+        
+
+        x1 = "xcoord"
+        y1 = "ycoord"
+
+#        print(port0 + " " + port1)
+
+        rotation = 0
+        deviceCounter = 0
+
+        ss = f"""
+
+        ;;-------------------------------------------------------------------
+        ;; Create Metal capacitor (two metal resistors) {o.name}
+        ;;-------------------------------------------------------------------
+        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
+
+        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
+
+        schInst=dbCreateInst(sch schLib "{o.name}_a_{deviceCounter}" {x1}:{y1} "{rotation}")
+
+
+    
+        """
+
+        props = list()
+        if("propertymap" in odev):
+            #print(odev["propertymap"])
+            for key in odev["propertymap"]:
+                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
+                props.append(key)
+
+
+        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
+
+
+        #- TODO: Fix this, right now this is not correct, the resistor should not connect to the pins, that's wrong.
+        #raise("Hell")
+
+
+
+        ss += f"""
+        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))"""
+        
+        #- Resistor should only have two nodes
+        if(len(o.nodes) != 2):
+            raise ("Hell")
+
+        for z in range(2):
+            deviceport = odev["ports"][z]
+            netName = o.nodes[z]
+            ss += f"""
+            deviceportn = (setof sig schLib~>signals (member "{deviceport}" sig~>sigNames))
+            bBoxDport = car(car(deviceportn~>pins)~>fig)~>bBox
+            pinDport=dbTransformBBox(bBoxDport schInst~>transform)
+            wireId = schCreateWire( sch "draw" "full" list(centerBox(pinDport) rodAddToX(centerBox(pinDport) 0.05) )  0.0625 0.0625 0.0 )
+            schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pinDport) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
+            """
+
+        #if(o.nodes[0] in self.current_cell.ckt.nodes):
+        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[0])
+        #    ss += f"""
+        #    bDestA = mybBox{pinCommonName};
+        #    schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
+        #    """
+        #if(o.nodes[1] in self.current_cell.ckt.nodes):
+        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[1])
+        #    ss += f"""
+        #    bDestB = mybBox{pinCommonName};
+        #    schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+        #    """
+
+        self.fcell.write(ss)
+        #print("Resistors " + str(o))
+     #   print(o)
+        pass

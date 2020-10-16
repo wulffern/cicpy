@@ -1,3 +1,4 @@
+
 ######################################################################
 ##        Copyright (c) 2020 Carsten Wulff Software, Norway 
 ## ###################################################################
@@ -35,4 +36,5 @@ class Device(CktObject):
         super().fromJson(o)
         self.deviceName = o["deviceName"]
 
-
+    def __repr__(self):
+        return super().__repr__() + ", deviceName = %s " %self.deviceName

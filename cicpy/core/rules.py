@@ -40,6 +40,36 @@ class Rules:
         if(not Rules.rules):
             with open(filename,"r") as f:
                 Rules.rules = json.load(f)
+                self._unspoolInherit()
+
+    def _inherit(self,obj):
+        if(type(obj) is not dict):
+            return
+        for key in obj:
+            o = obj[key]
+            if(type(o) is not dict):
+                continue
+            if("inherit" in o):
+                inheritfrom = o["inherit"]
+                if(inheritfrom in obj):
+                    b = obj[inheritfrom]
+                    for field in b:
+                        if(field not in o):
+                            o[field] = b[field]
+
+    def _unspoolInherit(self):
+        for category in Rules.rules:
+            obj = Rules.rules[category]
+            if(type(obj) is not dict):
+                continue
+            self._inherit(obj)
+            for key in obj:
+                if(type(obj) is not dict):
+                    continue
+                o = obj[key]
+                self._inherit(o)
+
+
 
 
     def getField(self,category, key, field):
@@ -55,6 +85,17 @@ class Rules:
                 raise Exception(f"RuleError: {category} does not contain {key}")
         else:
             raise Exception(f"RuleError: Rulefile does not have category {category}")
+
+    def getValue(self,category, key ):
+        if(category in Rules.rules):
+            obj = Rules.rules[category]
+            if(key in obj):
+                val = obj[key]
+                return val
+            else:
+                raise Exception(f"RuleError: {category} does not contain {key}")
+        else:
+            raise Exception(f"RuleError: Rulefile does not have category {category}")
     
 
         
@@ -63,8 +104,7 @@ class Rules:
 
     def layerToDataType(self,layer):
         return self.getField("layers",layer,"datatype")
-    
-                
-        
-        
-        
+
+    def device(self,name):
+        o = self.getField("technology","devices",name)
+        return o

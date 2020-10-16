@@ -31,15 +31,17 @@ from .cell import Cell
 class Instance(Cell):
 
     def __init__(self):
+        super().__init__()
         self.instanceName = ""
         self.cell = ""
         self.angle = ""
         self.xcell = 0
         self.ycell = 0
-        super().__init__()
+
     
     def fromJson(self,o):
         super().fromJson(o)
+
         self.instanceName = o["instanceName"]
         self.angle = o["angle"]
         self.cell = o["cell"]
@@ -50,3 +52,6 @@ class Instance(Cell):
     def getCellPoint(self):
         p = Point(self.x1 + self.xcell, self.y1 + self.ycell)
         return p
+
+    def __str__(self):
+        return  super().__str__() + " instanceName=%s xcell=%d ycell=%d angle=%s" %(self.instanceName,self.xcell,self.ycell,self.angle)

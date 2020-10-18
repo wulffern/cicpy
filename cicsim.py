@@ -34,12 +34,6 @@ def makesim(cfgfile,include,oformat,run):
     if(oformat == "spectre"):
         ss = cicpy.SpectreWriter(sc)
         ss.write(include,cfgfile)
-        if(run):
-            ss.run()
-
-        
-
-
 
 if __name__ == "__main__":
     cli()

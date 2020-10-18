@@ -52,9 +52,7 @@ class SimConfPort:
             "resistance" : None,
             "capacitance" : None
         }
-        self.measure = [
 
-        ]
         self.guessType()
 
     def guessType(self):
@@ -63,7 +61,7 @@ class SimConfPort:
             self.porttype = "ground"
         elif("VDD" in self.name):
             self.force["vdc"] = self.name.lower()
-            self.parent.addParam(self.force["vdc"])
+
             self.porttype = "supply"
         elif(re.search(r"(_\d+V\d+|_[CE]V)$|<\d+>",self.name)):
             self.force["resistance"] = "1M"
@@ -78,8 +76,7 @@ class SimConfPort:
             if(self.force[f] is not None):
                 val = self.force[f]
                 writer.addForce(f,self.name,val)
-        for m in self.measure:
-            writer.addMeasurement(m,self.name)
+
 
 
 
@@ -88,14 +85,13 @@ class SimConfPort:
         d["name"] = self.name
         d["porttype"] = self.porttype
         d["force"] = self.force
-        d["measure"] = self.measure
         return d
 
     def fromJson(self,o):
         self.name = o["name"]
         self.porttype = o["porttype"]
         self.force = o["force"]
-        self.measure = o["measure"]
+
         
 
 
@@ -105,7 +101,7 @@ class SimConf:
         self.nodes =[]
         self.name = name
         self.version = 1
-        self.params = {}
+
 
     def addConf(self,p):
         sp = SimConfPort(p,self)
@@ -113,16 +109,12 @@ class SimConf:
         self.ports[sp.name]  = sp
 
 
-    def addParam(self,param):
-        self.params[param] = None
-        
-        
+
     def toJson(self):
         d = {}
         d["version"] = self.version
         d["nodes"] = self.nodes
         d["name"] = self.name
-        d["params"] = self.params
         p = {}
         for pn in self.ports:
             p[pn] = self.ports[pn].toJson()
@@ -139,7 +131,7 @@ class SimConf:
             sc.fromJson(o["ports"][p])
             self.ports[p] = sc
 
-        self.params = o["params"]
+
 
     def toFile(self,fname):
         data = self.toJson()
@@ -161,9 +153,5 @@ class SimConf:
 
     def writeSubckt(self,writer):
         
-#        for p in self.params:
-#            if(self.params[p]):
-#                writer.addParam(p,self.params[p])
-
         writer.addSubckt(self.name,self.nodes)
         writer.addLine()

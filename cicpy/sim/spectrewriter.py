@@ -39,36 +39,11 @@ class SpectreWriter:
 
     def write(self,spicefile,cfgfile):
 
-        dr = cfgfile.replace(".cfg","")
-        self.simdir = dr
-
-        if(not os.path.exists(dr)):
-            os.makedirs(dr)
-
-        name = dr + os.path.sep + cfgfile.replace(".cfg",".scs")
+        name = cfgfile.replace(".cfg",".scs")
         self.simfile = cfgfile.replace(".cfg",".scs")
         with open(name,"w") as fo:
-            fo.write(f"Generated {self.simfile} \n")
-            fo.write(f"// Config Version : {self.simconf.version}\n\n")
 
             self.fo = fo
-
-            self.addHeader("OPTIONS")
-
-            fo.write("""
-global 0
-
-simulatorOptions options reltol=1e-6 vabstol=1e-6 save=selected \\
-iabstol=1e-12 gmin=1e-15 redefinedparams=warning digits=7 cols=80 \\
-pivrel=1e-3 sensfile="psf/sens.output" checklimitdest=both
-            
-            """)
-
-
-
-            self.addHeader("INCLUDES")
-
-            self.addInclude(spicefile)
 
             self.addHeader("DEVICE UNDER TEST")
 
@@ -105,23 +80,8 @@ pivrel=1e-3 sensfile="psf/sens.output" checklimitdest=both
         if(ftype == "resistance"):
             self.fo.write(f"r{name.lower()} ({name} 0) resistor r={val} \n")
         if(ftype == "capacitance"):
-            self.fo.write(f"c{name.lower()} ({name} 0) resistor c={val} \n")
+            self.fo.write(f"c{name.lower()} ({name} 0) capacitor c={val} \n")
 
-        #self.fo.write("\n")
-
-    def addMeasurement(self,mtype,name):
-
-        if(mtype == "current"):
-            self.fo.write(f"""save {name} xdut:{name}\n""")
-
-        if(mtype == "impedance"):
-            self.fo.write(f"""
-
-// Measure impedance of {name}
-vz{name} (0 {name}) vsource mag=1
-save xdut:{name}
-
-            """)
-
+        
     def addSubckt(self,subckt,nodes):
         self.fo.write("xdut (" +" ".join(nodes) +  f") {subckt}\n")

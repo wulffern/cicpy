@@ -78,6 +78,9 @@ class SimConfPort:
             if(self.force[f] is not None):
                 val = self.force[f]
                 writer.addForce(f,self.name,val)
+        for m in self.measure:
+            writer.addMeasurement(m,self.name)
+
 
 
     def toJson(self):
@@ -130,7 +133,7 @@ class SimConf:
         self.version = o["version"]
         self.name = o["name"]
         self.nodes = o["nodes"]
-
+        
         for p in o["ports"]:
             sc = SimConfPort(p,self)
             sc.fromJson(o["ports"][p])
@@ -157,11 +160,10 @@ class SimConf:
             writer.addLine()
 
     def writeSubckt(self,writer):
-        print(self.params)
-        for p in self.params:
-            if(self.params[p]):
-                print(p)
-                writer.addParam(p,self.params[p])
+        
+#        for p in self.params:
+#            if(self.params[p]):
+#                writer.addParam(p,self.params[p])
 
         writer.addSubckt(self.name,self.nodes)
         writer.addLine()

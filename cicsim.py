@@ -24,16 +24,21 @@ def makeconf(spicefile,subckt):
 
 @cli.command()
 @click.option("--cfgfile", default="", help="Config file")
-@click.option("--spicefile", default="", help="Spice file")
-@click.option("--subckt", default="", help="Subcircuit name")
+@click.option("--include", default="", help="Simulation include file")
 @click.option("--oformat",default="spectre",help="spectre|aimspice")
-def makesim(cfgfile,spicefile,subckt,oformat):
-    sc = cicpy.SimConf(subckt)
+@click.option("--run/--no-run", default=False, help="Run simulator")
+def makesim(cfgfile,include,oformat,run):
+    sc = cicpy.SimConf()
     sc.fromFile(cfgfile)
 
     if(oformat == "spectre"):
         ss = cicpy.SpectreWriter(sc)
-        ss.write(spicefile,subckt,cfgfile)
+        ss.write(include,cfgfile)
+        if(run):
+            ss.run()
+
+        
+
 
 
 if __name__ == "__main__":

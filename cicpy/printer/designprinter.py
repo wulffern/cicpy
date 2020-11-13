@@ -32,6 +32,7 @@ class DesignPrinter():
     def __init__(self, filename,rules):
         self.filename = filename
         self.rules = rules
+        self.cell = None
         
 
     def openFile(self,name):
@@ -68,10 +69,12 @@ class DesignPrinter():
             return
         
         self.startCell(c)
+        self.cell = c
 
         self.printChildren(c.children)
 
         self.endCell(c)
+        self.cell = None
 
     def startLib(self,name):
         self.openFile(name)

@@ -29,6 +29,7 @@ import click
 import os, sys
 sys.path.append(os.path.dirname(sys.argv[0]))
 import cicpy as cic
+import json
 
 
 class cIcCreator:
@@ -49,6 +50,8 @@ class cIcCreator:
 
     def readRules(self,techfile):
         self.rules = cic.Rules(techfile)
+
+    
 
 
     def transpile(self,library):
@@ -118,7 +121,37 @@ def transpile(ctx,cicfile,techfile,library):
     c.readDesign(cicfile)
     c.readRules(techfile)
     c.transpile(library)
-    
+
+@cli.command("jcell")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("cell")
+@click.option("--child",default="",help="Show children")
+def jcell(ctx,cicfile,techfile,cell,child):
+    """Extract a cell from .cic """
+    c = ctx.obj["cic"]
+    c.readDesign(cicfile)
+    c.readRules(techfile)
+    if(cell in c.design.jcells):
+        obj = c.design.jcells[cell]
+        if(child == "None"):
+            obj["children"] = {}
+        elif(child):
+            nl = list()
+            for c in obj["children"]:
+                if(c["class"] == child):
+                    nl.append(c)
+            obj["children"] = nl
+
+        print(json.dumps(obj,indent=4))
+    else:
+        print("\n".join(c.design.cellnames))
+
+    #c.readRules(techfile)
+    #c.transpile(library)
+
+
 
     
             

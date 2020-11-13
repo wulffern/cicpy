@@ -35,15 +35,18 @@ class Design():
     def __init__(self):
         self.cells = dict()
         self.cellnames = list()
+        self.jcells = dict()
 
     def fromJsonFile(self,fname):
         jobj = None
         with open(fname,"r") as f:
             jobj = json.load(f)
+
         for o in jobj["cells"]:
             c = LayoutCell()
             c.fromJson(o)  
             self.cells[c.name] = c
+            self.jcells[c.name] = o
             self.cellnames.append(c.name)          
     
     def cellNames(self):

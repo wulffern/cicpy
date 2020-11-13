@@ -26,6 +26,7 @@
 ######################################################################
 from .designprinter import DesignPrinter
 import sys
+import numpy as np
 from os import path
 import os
 
@@ -76,17 +77,31 @@ class SkillLayPrinter(DesignPrinter):
         
     def printPort(self,p):
         direction = "inputOutput"        
-        #- TODO: Add printing of pin
+        
+        x1 = self.toMicron(p.x1)
+        y1 = self.toMicron(p.y1)
+        x2 = self.toMicron(p.x2)
+        y2 = self.toMicron(p.y2)
+        layerNumber = self.rules.layerToNumber(p.pinLayer)
+        dataType = self.rules.layerToDataType(p.pinLayer)
+
+        routeLayerNumber = self.rules.layerToNumber(p.layer)
+        routeDataType = self.rules.layerToDataType(p.layer)
+        
+
+        self.fcell.write(f"fig = dbCreateRect(layout list({routeLayerNumber} {routeDataType}) list({x1}:{y1} {x2}:{y2}))\n")
+
         self.fcell.write((f"net = dbCreateNet(layout \"{p.name}\")\n"
                          f"dbCreateTerm( net \"{p.name}\" \"{direction}\")\n"
                          "dbCreatePin(net fig)\n") )
 
-        x1 = self.toMicron(p.x1)
-        y1 = self.toMicron(p.y1)
-        layerNumber = self.rules.layerToNumber(p.pinLayer)
-        dataType = self.rules.layerToDataType(p.pinLayer)
-        
-        self.fcell.write(f"dbCreateLabel(layout list({layerNumber} {dataType}) {x1}:{y1} \"{p.name}\" \"centerLeft\" \"R0\" \"stick\" 0.1)\n")
+        #- Scale font size of pin according to cell size
+        w = self.toMicron(self.cell.width())
+        l = self.toMicron(self.cell.width())
+        wl = int((np.log2(w) + np.log2(l))/10) + 0.1
+
+
+        self.fcell.write(f"dbCreateLabel(layout list({layerNumber} {dataType}) {x1}:{y1} \"{p.name}\" \"centerLeft\" \"R0\" \"stick\" {wl})\n")
 
         
 
@@ -119,8 +134,6 @@ class SkillLayPrinter(DesignPrinter):
 
 
         p = inst.getCellPoint()
-
-
 
 
         x1 = self.toMicron(p.x)

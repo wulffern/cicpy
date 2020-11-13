@@ -39,6 +39,7 @@ class Cell(Rect):
         self.children  = list()
         self.ports = dict()
         self.routes = list()
+        self.ckt = None
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):

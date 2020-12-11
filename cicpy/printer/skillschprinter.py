@@ -75,7 +75,6 @@ class SkillSchPrinter(DesignPrinter):
     def startCell(self,cell):
         file_name_cell = self.libname + "/" + cell.name + "_sch.il"
 
-
         self.current_cell = cell
         
         #- Store cell for later, will need it
@@ -120,8 +119,22 @@ mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonNam
 
         #- TODO: Could add symbols here
 
+        sl = self.rules.symbol_lib
+
+        short_name = re.sub("(X\D+_)?(_CV|_EV)?","",cell.name)
+        if(cell.name.startswith("PCH")):
+            short_name = "PCH"
+        if(cell.name.startswith("NCH")):
+            short_name = "NCH"
         #- Make symbol if it does not exist
-        self.fcell.write("""
+        self.fcell.write(f"""
+        syb =  ddGetObj("{sl}" "{short_name}" "symbol")
+        if( syb then
+          syb_dd = dbOpenCellViewByType("{sl}" "{short_name}" "symbol")
+          dbCopyCellView(syb_dd schLibName schName "symbol" ?g_overwrite t)
+        )
+
+
 unless( ddGetObj(schLibName schName "symbol")
         schViewToView( schLibName schName schLibName schName "schematic" "symbol" "schSchemToPinList" "schPinListToSymbol" )
 )

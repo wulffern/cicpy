@@ -108,3 +108,8 @@ class Rules:
     def device(self,name):
         o = self.getField("technology","devices",name)
         return o
+
+    @property
+    def symbol_lib(self):
+        o = self.getValue("technology","symbol_lib")
+        return o

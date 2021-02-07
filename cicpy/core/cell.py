@@ -36,6 +36,7 @@ class Cell(Rect):
         self.subckt = None
         self.ignoreBoundaryRouting = False
         self.physicalOnly = False
+        self.abstract = False
         self.children  = list()
         self.ports = dict()
         self.routes = list()
@@ -188,6 +189,11 @@ class Cell(Rect):
         super().fromJson(o)
         self.name = o["name"]
         self.has_pr = o["has_pr"]
+        if("abstract" in o):
+            self.abstract = o["abstract"]
+
+
+
 
 
     def toJson(self):
@@ -201,7 +207,9 @@ class Cell(Rect):
             ockt = ckt.toJson()
             #ockt["class"] = self.__class__
             o["ckt"] = ockt
-        
+
+
+
         oc = list()
         for child in self.children:
             oc.append(child.toJson())

@@ -121,7 +121,8 @@ mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonNam
 
         sl = self.rules.symbol_lib
 
-        short_name = re.sub("(X\D+_)?(_CV|_EV)?","",cell.name)
+        short_name = re.sub("(X\d+)*(_CV|_EV)?","",cell.name)
+
         if(cell.name.startswith("PCH")):
             short_name = "PCH"
         if(cell.name.startswith("NCH")):
@@ -298,8 +299,27 @@ unless( ddGetObj(schLibName schName "symbol")
         props = list()
         if("propertymap" in odev):
             #print(odev["propertymap"])
+            ddict = dict()
+
+            #- Go through propertymap and find all parameters
             for key in odev["propertymap"]:
-                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ddict[key] = dict()
+                ddict[key]["val"] = o.properties[odev["propertymap"][key]["name"]]
+                ddict[key]["str"] = odev["propertymap"][key]["str"]
+
+            #- If a parameter is used in a string, then replace it
+            for key in ddict:
+                m = re.search("({\w+})",ddict[key]["str"])
+                if(m):
+                    for mg in m.groups():
+                        rkey = re.sub("{|}","",mg)
+                        if(rkey in ddict):
+                            ddict[key]["str"] = re.sub(mg,str(ddict[rkey]["val"]),ddict[key]["str"])
+
+                
+            #- Write the properties
+            for key in odev["propertymap"]:
+                val = str(ddict[key]["val"]) + ddict[key]["str"]
                 ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
                 props.append(key)
 

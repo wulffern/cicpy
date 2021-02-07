@@ -91,7 +91,12 @@ class DesignPrinter():
             if(skip):
                 continue
 
+
             cell = d.getCell(c)
+
+            if(cell.abstract):
+                continue
+
 
             if(cell):
                 self.printCell(cell)

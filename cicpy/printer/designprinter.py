@@ -33,6 +33,7 @@ class DesignPrinter():
         self.filename = filename
         self.rules = rules
         self.cell = None
+
         
 
     def openFile(self,name):
@@ -84,6 +85,7 @@ class DesignPrinter():
 
     
     def print(self, d,stopcell=""):
+        self.design = d
         self.startLib(self.filename)
         skip = False
         cells = d.cellNames()

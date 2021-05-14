@@ -33,12 +33,13 @@ import os
 
 class SkillSchPrinter(DesignPrinter):
 
-    def __init__(self,filename,rules):
+    def __init__(self,filename,rules,smash=None):
         super().__init__(filename,rules)
 
         self.techfile = rules.getValue("technology","techlib")
         self.cells = dict()
         self.current_cell = None
+        self.smash = smash
 
 
     def startLib(self,name):
@@ -158,17 +159,28 @@ unless( ddGetObj(schLibName schName "symbol")
         
         self.startCell(c)
 
-        try:
-            for o in c.ckt.devices:
-                self.printDevice(o)
+        #- Hack to suport multi finger devices
+        if(self.smash and re.search(self.smash,c.name)):
 
-            for o in c.ckt.instances:
-                self.printInstance(o)
+            #- Assume only transistors can be smashed, and assume everything is the same
+            nf = len(c.ckt.instances)
+            instcell = self.cells[c.ckt.instances[0].subcktName]
+            mos = instcell.ckt.devices[0]
+            mos.properties["nf"] = nf
+            self.printDevice(mos)
 
-        except Exception as e:
-            self.current_cell.ckt.printToJson()
+        else:
+             try:
+                 for o in c.ckt.devices:
+                     self.printDevice(o)
 
-            raise(e)
+                 for o in c.ckt.instances:
+                     self.printInstance(o)
+
+             except Exception as e:
+                 self.current_cell.ckt.printToJson()
+
+                 raise(e)
         self.endCell(c)
 
 

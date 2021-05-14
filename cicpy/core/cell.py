@@ -29,7 +29,10 @@ from .rect import *
 from .port import Port
 from .text import Text
 
-class Cell(Rect): 
+class Cell(Rect):
+
+    def toMicron(self,angstrom):
+        return (angstrom/10)/1000.0
 
     def __init__ (self,name=""):
         super().__init__()
@@ -222,6 +225,20 @@ class Cell(Rect):
         return  super().__str__() + " name=%s " %(self.name)
         
 
+    def toSkill(self):
+        name  = "cw" + self.name
+
+
+        ss = f"""
+        {name} = makeTable("{name}" "")
+        {name}["x"] = {self.toMicron(self.x1)}
+        {name}["y"] = {self.toMicron(self.y1)}
+        {name}["width"] = {self.toMicron(self.width())}
+        {name}["height"] = {self.toMicron(self.height())}
+        """
+        return ss
+
+    
     #     Port * getPort(QString name);
     #     Port * getCellPort(QString name);
 

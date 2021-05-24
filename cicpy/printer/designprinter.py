@@ -33,6 +33,7 @@ class DesignPrinter():
         self.filename = filename
         self.rules = rules
         self.cell = None
+        self.f = None
         
 
     def openFile(self,name):

@@ -190,20 +190,11 @@ class Rect:
         self.x2 += dx
         self.y2 += dx
 
-    
-
-    # inline void Rect::adjust(int dx1, int dy1, int dx2, int dy2){
-    #     x1_ += dx1;
-    #     y1_ +=  dy1;
-    #     x2_ += dx2;
-    #     y2_ += dy2;
-    # }
-
     def translate(self,ax,ay):
         self.x2 += ax
         self.x1 += ax
-        self.y1 += ax
-        self.y2 += ax
+        self.y1 += ay
+        self.y2 += ay
         self.emit_updated()
 
     def isHorizontal(self):
@@ -224,7 +215,7 @@ class Rect:
         self.net = net
 
     def getCopy(self):
-        r = Rect(self.layer,self.x1,self.y1,self.width,self.height)
+        r = Rect(self.layer,self.x1,self.y1,self.width(),self.height())
         r.setNet(self.net)
         return r
 

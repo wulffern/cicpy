@@ -105,6 +105,13 @@ class Rules:
     def layerToDataType(self,layer):
         return self.getField("layers",layer,"datatype")
 
+    def layerToColor(self,layer):
+        return self.getField("layers",layer,"color")
+
+    def hasLayer(self,layer):
+        return True if("layers" in Rules.rules and layer in Rules.rules["layers"]) else False
+
+
     def device(self,name):
         o = self.getField("technology","devices",name)
         return o

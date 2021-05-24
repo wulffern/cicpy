@@ -33,12 +33,13 @@ import os
 
 class SkillSchPrinter(DesignPrinter):
 
-    def __init__(self,filename,rules):
+    def __init__(self,filename,rules,smash=None):
         super().__init__(filename,rules)
 
         self.techfile = rules.getValue("technology","techlib")
         self.cells = dict()
         self.current_cell = None
+        self.smash = smash
 
 
     def startLib(self,name):
@@ -74,7 +75,6 @@ class SkillSchPrinter(DesignPrinter):
 
     def startCell(self,cell):
         file_name_cell = self.libname + "/" + cell.name + "_sch.il"
-
 
         self.current_cell = cell
         
@@ -120,8 +120,23 @@ mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonNam
 
         #- TODO: Could add symbols here
 
+        sl = self.rules.symbol_lib
+
+        short_name = re.sub("(X\d+)*(_CV|_EV)?","",cell.name)
+
+        if(cell.name.startswith("PCH")):
+            short_name = "PCH"
+        if(cell.name.startswith("NCH")):
+            short_name = "NCH"
         #- Make symbol if it does not exist
-        self.fcell.write("""
+        self.fcell.write(f"""
+        syb =  ddGetObj("{sl}" "{short_name}" "symbol")
+        if( syb then
+          syb_dd = dbOpenCellViewByType("{sl}" "{short_name}" "symbol")
+          dbCopyCellView(syb_dd schLibName schName "symbol" ?g_overwrite t)
+        )
+
+
 unless( ddGetObj(schLibName schName "symbol")
         schViewToView( schLibName schName schLibName schName "schematic" "symbol" "schSchemToPinList" "schPinListToSymbol" )
 )
@@ -144,17 +159,28 @@ unless( ddGetObj(schLibName schName "symbol")
         
         self.startCell(c)
 
-        try:
-            for o in c.ckt.devices:
-                self.printDevice(o)
+        #- Hack to suport multi finger devices
+        if(self.smash and re.search(self.smash,c.name)):
 
-            for o in c.ckt.instances:
-                self.printInstance(o)
+            #- Assume only transistors can be smashed, and assume everything is the same
+            nf = len(c.ckt.instances)
+            instcell = self.cells[c.ckt.instances[0].subcktName]
+            mos = instcell.ckt.devices[0]
+            mos.properties["nf"] = nf
+            self.printDevice(mos)
 
-        except Exception as e:
-            self.current_cell.ckt.printToJson()
+        else:
+             try:
+                 for o in c.ckt.devices:
+                     self.printDevice(o)
 
-            raise(e)
+                 for o in c.ckt.instances:
+                     self.printInstance(o)
+
+             except Exception as e:
+                 self.current_cell.ckt.printToJson()
+
+                 raise(e)
         self.endCell(c)
 
 
@@ -285,8 +311,27 @@ unless( ddGetObj(schLibName schName "symbol")
         props = list()
         if("propertymap" in odev):
             #print(odev["propertymap"])
+            ddict = dict()
+
+            #- Go through propertymap and find all parameters
             for key in odev["propertymap"]:
-                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ddict[key] = dict()
+                ddict[key]["val"] = o.properties[odev["propertymap"][key]["name"]]
+                ddict[key]["str"] = odev["propertymap"][key]["str"]
+
+            #- If a parameter is used in a string, then replace it
+            for key in ddict:
+                m = re.search("({\w+})",ddict[key]["str"])
+                if(m):
+                    for mg in m.groups():
+                        rkey = re.sub("{|}","",mg)
+                        if(rkey in ddict):
+                            ddict[key]["str"] = re.sub(mg,str(ddict[rkey]["val"]),ddict[key]["str"])
+
+                
+            #- Write the properties
+            for key in odev["propertymap"]:
+                val = str(ddict[key]["val"]) + ddict[key]["str"]
                 ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
                 props.append(key)
 

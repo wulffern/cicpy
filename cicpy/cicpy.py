@@ -51,13 +51,13 @@ class cIcCreator:
         self.rules = cic.Rules(techfile)
 
 
-    def transpile(self,library):
+    def transpile(self,library,smash=None):
         if(self.layskill):
             la = cic.SkillLayPrinter(library,self.rules)
             la.print(self.design)
 
         if(self.schskill):
-            sc = cic.SkillSchPrinter(library,self.rules)
+            sc = cic.SkillSchPrinter(library,self.rules,smash)
             sc.print(self.design)
 
 
@@ -68,6 +68,27 @@ class cIcCreator:
         if(self.spectre):
             print("WARNING: spectre writing not implemented yet")
             pass
+
+    def place(self,layoutfile,circuit,pattern):
+        placer = cic.Placer(self.design,layoutfile,pattern)
+        if(circuit == "diffpair"):
+            placer.placeDiffPair()
+            pass
+        elif(circuit == "currentmirror"):
+            print("TODO: Implement current mirror specific placer")
+            pass
+        elif(circuit == "vertical"):
+            placer.placeVertical()
+            pass
+        elif(circuit == "horizontal"):
+            placer.placeHorizontal()
+            pass
+        else:
+            print(f"Could not find placer '{circuit}', using vertical")
+            placer.place()
+        placer.toSkill(layoutfile.replace(".csv",".il"))
+
+
 
     def run(self,jsonfile,techfile,library):
         
@@ -112,12 +133,13 @@ def cli(ctx,include,layskill,schskill,spice,spectre,builddir,cic):
 @click.argument("cicfile")
 @click.argument("techfile")
 @click.argument("library")
-def transpile(ctx,cicfile,techfile,library):
+@click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
+def transpile(ctx,cicfile,techfile,library,smash):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
     c = ctx.obj["cic"]
     c.readDesign(cicfile)
     c.readRules(techfile)
-    c.transpile(library)
+    c.transpile(library,smash)
 
 @cli.command("jcell")
 @click.pass_context
@@ -145,6 +167,23 @@ def jcell(ctx,cicfile,techfile,cell,child):
     else:
         print("\n".join(c.design.cellnames))
 
+    #c.readRules(techfile)
+    #c.transpile(library)
+
+
+@cli.command("place")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("layoutfile")
+@click.option("--circuit", default="diffpair")
+@click.option("--pattern", default="")
+def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
+    """Place a bunc of transistors according to pattern"""
+    c = ctx.obj["cic"]
+    c.readDesign(cicfile)
+    c.readRules(techfile)
+    c.place(layoutfile,circuit,pattern)
 
 @cli.command("minecraft")
 @click.pass_context

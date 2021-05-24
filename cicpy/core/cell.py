@@ -29,13 +29,17 @@ from .rect import *
 from .port import Port
 from .text import Text
 
-class Cell(Rect): 
+class Cell(Rect):
+
+    def toMicron(self,angstrom):
+        return (angstrom/10)/1000.0
 
     def __init__ (self,name=""):
         super().__init__()
         self.subckt = None
         self.ignoreBoundaryRouting = False
         self.physicalOnly = False
+        self.abstract = False
         self.children  = list()
         self.ports = dict()
         self.routes = list()
@@ -188,6 +192,11 @@ class Cell(Rect):
         super().fromJson(o)
         self.name = o["name"]
         self.has_pr = o["has_pr"]
+        if("abstract" in o):
+            self.abstract = o["abstract"]
+
+
+
 
 
     def toJson(self):
@@ -201,7 +210,9 @@ class Cell(Rect):
             ockt = ckt.toJson()
             #ockt["class"] = self.__class__
             o["ckt"] = ockt
-        
+
+
+
         oc = list()
         for child in self.children:
             oc.append(child.toJson())
@@ -214,6 +225,20 @@ class Cell(Rect):
         return  super().__str__() + " name=%s " %(self.name)
         
 
+    def toSkill(self):
+        name  = "cw" + self.name
+
+
+        ss = f"""
+        {name} = makeTable("{name}" "")
+        {name}["x"] = {self.toMicron(self.x1)}
+        {name}["y"] = {self.toMicron(self.y1)}
+        {name}["width"] = {self.toMicron(self.width())}
+        {name}["height"] = {self.toMicron(self.height())}
+        """
+        return ss
+
+    
     #     Port * getPort(QString name);
     #     Port * getCellPort(QString name);
 

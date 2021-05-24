@@ -34,7 +34,6 @@ class DesignPrinter():
         self.rules = rules
         self.cell = None
         self.f = None
-        
 
     def openFile(self,name):
         self.f = open(name,"w")
@@ -85,6 +84,7 @@ class DesignPrinter():
 
     
     def print(self, d,stopcell=""):
+        self.design = d
         self.startLib(self.filename)
         skip = False
         cells = d.cellNames()
@@ -92,7 +92,12 @@ class DesignPrinter():
             if(skip):
                 continue
 
+
             cell = d.getCell(c)
+
+            if(cell.abstract):
+                continue
+
 
             if(cell):
                 self.printCell(cell)

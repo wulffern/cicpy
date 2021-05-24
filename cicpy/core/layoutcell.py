@@ -38,6 +38,10 @@ class LayoutCell(Cell):
         super().__init__()
         self.ckt = None
 
+        self.altenateGroup = False
+        self.boundaryIgnoreRouting = False
+        self.useHalfHeight = False
+
 
     def toJson(self):
         o = super().toJson()
@@ -52,6 +56,15 @@ class LayoutCell(Cell):
             self.ckt = Subckt()
             self.ckt.fromJson(o["ckt"])
 
+
+        if("alternateGroup" in o):
+            self.alternateGroup = o["alternateGroup"]
+
+        if("useHalfHeight" in o):
+            self.useHalfHeight = o["useHalfHeight"]
+
+        if("boundarIgnoreRouting" in o):
+            self.boundaryIgnoreRouting = o["boundaryIgnoreRouting"]
 
         for child in o["children"]:
             cl = child["class"]

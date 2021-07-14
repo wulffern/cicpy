@@ -126,8 +126,12 @@ mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonNam
 
         if(cell.name.startswith("PCH")):
             short_name = "PCH"
+        if(cell.name.startswith("CPCH")):
+            short_name = "CPCH"
         if(cell.name.startswith("NCH")):
             short_name = "NCH"
+        if(cell.name.startswith("CNCH")):
+            short_name = "CNCH"
         #- Make symbol if it does not exist
         self.fcell.write(f"""
         syb =  ddGetObj("{sl}" "{short_name}" "symbol")

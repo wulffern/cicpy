@@ -15,7 +15,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     python_requires='>=3.6',
     entry_points = {'console_scripts': [
-        'cicpy = cicpy.cicpy:cli',
+        'cicpy = cicpy.cic:cli',
     ]},
     install_requires = 'matplotlib numpy click '.split(),
     classifiers = [

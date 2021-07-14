@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="cicpy-pkg", # Replace with your own username
+    name="cicpy",
     version="0.0.1",
     author="Carsten Wulff",
     author_email="carsten@wulff.no",
@@ -17,7 +17,7 @@ setuptools.setup(
     entry_points = {'console_scripts': [
         'cicpy = cicpy.cicpy:cli',
     ]},
-    install_requires = 'matplotlib numpy '.split(),
+    install_requires = 'matplotlib numpy click '.split(),
     classifiers = [
         'Development Status :: 1 - Alpha',
         'Intended Audience :: Developers',

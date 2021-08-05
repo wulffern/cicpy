@@ -35,5 +35,7 @@ from .core.port import *
 from .core.rules import *
 from .printer.skilllayprinter import *
 from .printer.skillschprinter import *
+from .printer.cellinfoprinter import *
+from .printer.verilogprinter import *
 from .printer.mcprinter import *
 from .place.placer import *

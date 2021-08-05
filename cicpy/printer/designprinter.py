@@ -26,6 +26,8 @@
 ######################################################################
 
 import sys
+import os
+import yaml
 
 class DesignPrinter():
 
@@ -34,6 +36,16 @@ class DesignPrinter():
         self.rules = rules
         self.cell = None
         self.f = None
+
+        self.info = None
+
+
+    def loadInfoFile(self,finfo):
+
+        #- Check if there is a cell info file
+        if(os.path.exists(finfo)):
+            with open(finfo,"r") as fi:
+                self.info = yaml.safe_load(fi)
 
     def openFile(self,name):
         self.f = open(name,"w")

@@ -30,102 +30,11 @@ import os, sys
 import cicpy as cic
 import json
 
-
-class cIcCreator:
-
-    def __init__(self,schskill=True,layskill=True,spice=True,spectre=True,include=None,builddir=".",cic=None):
-        self.schskill = schskill
-        self.layskill = layskill
-        self.spice = spice
-        self.spectre = spectre
-        self.include = include
-        self.builddir = builddir
-        self.cic = cic
-
-
-    def readDesign(self,cicfile):
-        self.design = cic.Design()
-        self.design.fromJsonFile(cicfile)
-
-    def readRules(self,techfile):
-        self.rules = cic.Rules(techfile)
-
-
-    def transpile(self,library,smash=None):
-        if(self.layskill):
-            la = cic.SkillLayPrinter(library,self.rules)
-            la.print(self.design)
-
-        if(self.schskill):
-            sc = cic.SkillSchPrinter(library,self.rules,smash)
-            sc.print(self.design)
-
-
-        if(self.spice):
-            print("WARNING: SPICE writing not implemented yet")
-            pass
-
-        if(self.spectre):
-            print("WARNING: spectre writing not implemented yet")
-            pass
-
-    def place(self,layoutfile,circuit,pattern):
-        placer = cic.Placer(self.design,layoutfile,pattern)
-        if(circuit == "diffpair"):
-            placer.placeDiffPair()
-            pass
-        elif(circuit == "currentmirror"):
-            print("TODO: Implement current mirror specific placer")
-            pass
-        elif(circuit == "vertical"):
-            placer.placeVertical()
-            pass
-        elif(circuit == "horizontal"):
-            placer.placeHorizontal()
-            pass
-        else:
-            print(f"Could not find placer '{circuit}', using vertical")
-            placer.place()
-        placer.toSkill(layoutfile.replace(".csv",".il"))
-
-
-
-    def run(self,jsonfile,techfile,library):
-        
-        cic_inc = ""
-        if(len(self.include) > 0):
-            cic_inc =" --I " +  " --I ".join(list(self.include))
-        cic_cmd = f"{self.cic} --nogds {cic_inc} {jsonfile} {techfile} {library}"
-        print("INFO: Running CIC")
-        print(f"INFO: {cic_cmd}")
-        os.system(f"cd {self.builddir}; {cic_cmd}")
-        cicfile = f"{self.builddir}" + os.path.sep + os.path.basename(jsonfile.replace(".json",".cic"))
-        self.cicfile =cicfile
-        
-
-
 @click.group()
 @click.pass_context
-@click.option("--include",multiple=True,help="Libraries to include")
-@click.option("--layskill",is_flag=True,help="Write Skill Layout file")
-@click.option("--schskill",is_flag=True,help="Write Skill Schematic file")
-@click.option("--spice",is_flag=True,help="Write Spice file")
-@click.option("--spectre",is_flag=True,help="Write Spectre file")
-@click.option("--builddir",default=".",help="Directory to use for build")
-@click.option("--cic",default="~/pro/cic/ciccreator/bin/linux/cic",help="Path to cIcCreator")
-def cli(ctx,include,layskill,schskill,spice,spectre,builddir,cic):
+def cli(ctx):
     """ Python toolbox for Custom Integrated Circuit Creator (ciccreator). """
-
     ctx.ensure_object(dict)
-
-    ctx.obj["cic"] = cIcCreator(include=include,
-                       layskill=layskill,
-                       schskill=schskill,
-                       spice=spice,
-                       spectre=spectre,
-                       builddir = builddir,
-                       cic=cic
-    )
     pass
 
 @cli.command("transpile")
@@ -133,13 +42,38 @@ def cli(ctx,include,layskill,schskill,spice,spectre,builddir,cic):
 @click.argument("cicfile")
 @click.argument("techfile")
 @click.argument("library")
+@click.option("--layskill",is_flag=True,help="Write Skill Layout file")
+@click.option("--schskill",is_flag=True,help="Write Skill Schematic file")
+@click.option("--winfo",is_flag=True,help="Write Info file")
+@click.option("--rinfo",default="",help="Read Info file")
+@click.option("--verilog",is_flag=True,help="Write verilog file")
+#@click.option("--spice",is_flag=True,help="Write Spice file")
+#@click.option("--spectre",is_flag=True,help="Write Spectre file")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
-def transpile(ctx,cicfile,techfile,library,smash):
+def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,smash):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
-    c = ctx.obj["cic"]
-    c.readDesign(cicfile)
-    c.readRules(techfile)
-    c.transpile(library,smash)
+
+    design = cic.Design()
+    design.fromJsonFile(cicfile)
+    rules = cic.Rules(techfile)
+
+    if(layskill):
+        la = cic.SkillLayPrinter(library,rules)
+        la.print(design)
+
+    if(schskill):
+        sc = cic.SkillSchPrinter(library,rules,smash)
+        sc.print(design)
+
+    if(winfo):
+        obj = cic.CellInfoPrinter(library,rules)
+        obj.print(design)
+
+    if(verilog):
+        obj = cic.VerilogPrinter(library,rules)
+        obj.loadInfoFile(rinfo)
+        obj.print(design)
+
 
 @cli.command("jcell")
 @click.pass_context
@@ -149,11 +83,13 @@ def transpile(ctx,cicfile,techfile,library,smash):
 @click.option("--child",default="",help="Show children")
 def jcell(ctx,cicfile,techfile,cell,child):
     """Extract a cell from .cic """
-    c = ctx.obj["cic"]
-    c.readDesign(cicfile)
-    c.readRules(techfile)
-    if(cell in c.design.jcells):
-        obj = c.design.jcells[cell]
+
+    design = cic.Design()
+    design.fromJsonFile(cicfile)
+    rules = cic.Rules(techfile)
+
+    if(cell in design.jcells):
+        obj = design.jcells[cell]
         if(child == "None"):
             obj["children"] = {}
         elif(child):
@@ -165,10 +101,7 @@ def jcell(ctx,cicfile,techfile,cell,child):
 
         print(json.dumps(obj,indent=4))
     else:
-        print("\n".join(c.design.cellnames))
-
-    #c.readRules(techfile)
-    #c.transpile(library)
+        print("\n".join(design.cellnames))
 
 
 @cli.command("place")
@@ -180,10 +113,26 @@ def jcell(ctx,cicfile,techfile,cell,child):
 @click.option("--pattern", default="")
 def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
     """Place a bunc of transistors according to pattern"""
-    c = ctx.obj["cic"]
-    c.readDesign(cicfile)
-    c.readRules(techfile)
-    c.place(layoutfile,circuit,pattern)
+
+    design = cic.Design()
+    design.fromJsonFile(cicfile)
+    rules = cic.Rules(techfile)
+
+    placer = cic.Placer(design,layoutfile,pattern)
+    if(circuit == "diffpair"):
+        placer.placeDiffPair()
+    elif(circuit == "currentmirror"):
+        print("TODO: Implement current mirror specific placer")
+    elif(circuit == "vertical"):
+        placer.placeVertical()
+    elif(circuit == "horizontal"):
+        placer.placeHorizontal()
+    else:
+        print(f"Could not find placer '{circuit}', using vertical")
+        placer.place()
+    placer.toSkill(layoutfile.replace(".csv",".il"))
+
+
 
 @cli.command("minecraft")
 @click.pass_context
@@ -193,16 +142,16 @@ def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
 @click.option("--child",default="",help="Show children")
 @click.option("--x",default=0,help="X coordinate")
 @click.option("--y",default=0,help="Y coordinate")
-
 def minecraft(ctx,cicfile,techfile,cell,child,x,y):
     """Extract a cell from .cic """
-    c = ctx.obj["cic"]
-    c.readDesign(cicfile)
-    c.readRules(techfile)
-    if(cell in c.design.cells):
-        cell = c.design.cells[cell]
 
-        mc = cic.MinecraftCellPrinter(c.rules,c.design,cell,x,y)
+    design = cic.Design()
+    design.fromJsonFile(cicfile)
+    rules = cic.Rules(techfile)
+    if(cell in design.cells):
+        cell = design.cells[cell]
+
+        mc = cic.MinecraftCellPrinter(rules,design,cell,x,y)
         buff = mc.clear()
         buff += mc.print()
         buff += mc.printCuts()
@@ -212,8 +161,6 @@ def minecraft(ctx,cicfile,techfile,cell,child,x,y):
 
     else:
         print("\n".join(c.design.cellnames))
-    #c.readRules(techfile)
-    #c.transpile(library)
 
 
 def my_main():

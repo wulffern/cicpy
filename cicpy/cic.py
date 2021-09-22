@@ -71,7 +71,6 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 
     if(verilog):
         obj = cic.VerilogPrinter(library,rules)
-        obj.loadInfoFile(rinfo)
         obj.print(design)
 
 

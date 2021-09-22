@@ -37,15 +37,6 @@ class DesignPrinter():
         self.cell = None
         self.f = None
 
-        self.info = None
-
-
-    def loadInfoFile(self,finfo):
-
-        #- Check if there is a cell info file
-        if(os.path.exists(finfo)):
-            with open(finfo,"r") as fi:
-                self.info = yaml.safe_load(fi)
 
     def openFile(self,name):
         self.f = open(name,"w")
@@ -66,13 +57,12 @@ class DesignPrinter():
                     self.printPort(child)
             elif(child.isText()):
                 self.printText(child)
-            elif(child.isLayoutCell()):
+            elif(child.isLayoutCell() or child.isCell()):
                 self.printChildren(child.children)
-
             elif(child.isRect()):
                 self.printRect(child)
             else:
-                print(str(child) + " " + child.name)
+                print("DesignPrinter: don't know what to do with " + str(child) + " " + child.name)
 
 
 
@@ -109,7 +99,6 @@ class DesignPrinter():
 
             if(cell.abstract):
                 continue
-
 
             if(cell):
                 self.printCell(cell)

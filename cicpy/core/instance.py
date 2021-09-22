@@ -41,13 +41,20 @@ class Instance(Cell):
     
     def fromJson(self,o):
         super().fromJson(o)
-
         self.instanceName = o["instanceName"]
         self.angle = o["angle"]
         self.cell = o["cell"]
         self.xcell = o["xcell"]
         self.ycell = o["ycell"]
 
+    def isLayoutCell(self):
+        c = self.getCell(self.cell)
+
+        if(c is not None):
+            return c.isLayoutCell()
+        return False
+
+        
 
     def getCellPoint(self):
         p = Point(self.x1 + self.xcell, self.y1 + self.ycell)

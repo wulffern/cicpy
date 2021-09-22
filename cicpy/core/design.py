@@ -28,6 +28,7 @@
 from .rect import Rect
 from .cell import Cell
 from .layoutcell import LayoutCell
+
 import json
 
 class Design():
@@ -37,14 +38,21 @@ class Design():
         self.cellnames = list()
         self.jcells = dict()
 
+
     def fromJsonFile(self,fname):
         jobj = None
         with open(fname,"r") as f:
             jobj = json.load(f)
 
         for o in jobj["cells"]:
-            c = LayoutCell()
-            c.fromJson(o)  
+            if("class" in o):
+                if(o["class"] == "cIcCore::Cell"):
+                    c = Cell()
+                else:
+                    c = LayoutCell()
+
+            c.design = self
+            c.fromJson(o)
             self.cells[c.name] = c
             self.jcells[c.name] = o
             self.cellnames.append(c.name)          

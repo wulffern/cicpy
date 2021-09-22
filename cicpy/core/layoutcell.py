@@ -36,11 +36,10 @@ class LayoutCell(Cell):
 
     def __init__(self):
         super().__init__()
-        self.ckt = None
-
         self.altenateGroup = False
         self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
+        self.meta = None
 
 
     def toJson(self):
@@ -51,12 +50,6 @@ class LayoutCell(Cell):
     def fromJson(self,o):
         super().fromJson(o)
 
-        #- Handle subckt
-        if("ckt" in o):
-            self.ckt = Subckt()
-            self.ckt.fromJson(o["ckt"])
-
-
         if("alternateGroup" in o):
             self.alternateGroup = o["alternateGroup"]
 
@@ -66,27 +59,27 @@ class LayoutCell(Cell):
         if("boundarIgnoreRouting" in o):
             self.boundaryIgnoreRouting = o["boundaryIgnoreRouting"]
 
+        if("meta" in o):
+            self.meta = o["meta"]
+
         for child in o["children"]:
+
+            c = None
             cl = child["class"]
             if(cl == "Rect"):
                 c = Rect()
-                c.fromJson(child)
-                self.add(c)
             elif(cl == "Port"):
                 c  = Port()
-                c.fromJson(child)
-                self.add(c)
             elif(cl == "Text"):
                 c  = Text()
-                c.fromJson(child)
-                self.add(c)
             elif(cl == "Instance"):
                 c  = Instance()
-                c.fromJson(child)
-                self.add(c)
             elif(cl == "Cell" or cl== "cIcCore::Route" or cl == "cIcCore::RouteRing" or cl == "cIcCore::Guard" or cl == "cIcCore::Cell"):
-                l = LayoutCell()
-                l.fromJson(child)
-                self.add(l)
+                c = Cell()
             else:
                 print(f"Unkown class {cl}")
+
+            if(c is not None):
+                c.design = self.design
+                c.fromJson(child)
+                self.add(c)

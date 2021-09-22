@@ -28,6 +28,7 @@
 from .rect import *
 from .port import Port
 from .text import Text
+from ..ckt.subckt import Subckt
 
 class Cell(Rect):
 
@@ -44,6 +45,7 @@ class Cell(Rect):
         self.ports = dict()
         self.routes = list()
         self.ckt = None
+        self.design = None
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
@@ -56,7 +58,6 @@ class Cell(Rect):
             raise Exception("Null rectangle added")
         
         #TODO: What did I use children_by_type for?
-
         if(child.isPort()):
             self.ports[child.name] = child
 
@@ -195,6 +196,10 @@ class Cell(Rect):
         if("abstract" in o):
             self.abstract = o["abstract"]
 
+        #- Handle subckt
+        if("ckt" in o):
+            self.ckt = Subckt()
+            self.ckt.fromJson(o["ckt"])
 
 
 
@@ -208,10 +213,7 @@ class Cell(Rect):
         ckt = self.ckt
         if(ckt):
             ockt = ckt.toJson()
-            #ockt["class"] = self.__class__
             o["ckt"] = ockt
-
-
 
         oc = list()
         for child in self.children:
@@ -227,8 +229,6 @@ class Cell(Rect):
 
     def toSkill(self):
         name  = "cw" + self.name
-
-
         ss = f"""
         {name} = makeTable("{name}" "")
         {name}["x"] = {self.toMicron(self.x1)}
@@ -238,6 +238,10 @@ class Cell(Rect):
         """
         return ss
 
+    def getCell(self,cellname):
+        if(cellname in self.design.cells):
+            return self.design.cells[cellname]
+        return None
     
     #     Port * getPort(QString name);
     #     Port * getCellPort(QString name);

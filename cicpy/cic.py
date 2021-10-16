@@ -47,8 +47,6 @@ def cli(ctx):
 @click.option("--winfo",is_flag=True,help="Write Info file")
 @click.option("--rinfo",default="",help="Read Info file")
 @click.option("--verilog",is_flag=True,help="Write verilog file")
-#@click.option("--spice",is_flag=True,help="Write Spice file")
-#@click.option("--spectre",is_flag=True,help="Write Spectre file")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
 def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,smash):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
@@ -142,7 +140,7 @@ def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
 @click.option("--x",default=0,help="X coordinate")
 @click.option("--y",default=0,help="Y coordinate")
 def minecraft(ctx,cicfile,techfile,cell,child,x,y):
-    """Extract a cell from .cic """
+    """Make a mincraft script *.mc from *.cic """
 
     design = cic.Design()
     design.fromJsonFile(cicfile)

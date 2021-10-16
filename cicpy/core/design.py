@@ -29,6 +29,7 @@ from .rect import Rect
 from .cell import Cell
 from .layoutcell import LayoutCell
 
+import gzip
 import json
 
 class Design():
@@ -41,8 +42,16 @@ class Design():
 
     def fromJsonFile(self,fname):
         jobj = None
-        with open(fname,"r") as f:
-            jobj = json.load(f)
+
+        if(fname.endswith(".gz")):
+            with gzip.open(fname,"r") as f:
+                jobj = json.load(f)
+        else:
+            with open(fname,"r") as f:
+                jobj = json.load(f)
+
+        if(jobj is None):
+            raise Exception("Could not read %s, unrecognized format" % fname)
 
         for o in jobj["cells"]:
             if("class" in o):

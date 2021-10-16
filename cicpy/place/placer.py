@@ -222,6 +222,9 @@ class Placer():
             y  = y
 
 
+    def toCsv(self,fname):
+        self.df.to_csv(fname)
+
     def toSkill(self,fname):
 
         buff= """

@@ -127,6 +127,7 @@ def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
     else:
         print(f"Could not find placer '{circuit}', using vertical")
         placer.place()
+    placer.toCsv(layoutfile.replace(".csv","_place.csv"))
     placer.toSkill(layoutfile.replace(".csv",".il"))
 
 
@@ -157,7 +158,7 @@ def minecraft(ctx,cicfile,techfile,cell,child,x,y):
             fo.write(buff)
 
     else:
-        print("\n".join(c.design.cellnames))
+        print("\n".join(design.cellnames))
 
 
 def my_main():

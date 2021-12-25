@@ -56,7 +56,7 @@ class Design():
         for o in jobj["cells"]:
             if("class" in o):
                 if(o["class"] == "cIcCore::Cell"):
-                    c = Cell()
+                    c = LayoutCell()
                 else:
                     c = LayoutCell()
 

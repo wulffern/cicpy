@@ -204,6 +204,7 @@ class Cell(Rect):
 
 
 
+
     def toJson(self):
         o = super().toJson()
         o["class"] = self.__class__.__name__

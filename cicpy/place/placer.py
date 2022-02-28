@@ -191,12 +191,14 @@ class Placer():
 
             c  = self.design.cells[d["cellName"]]
 
-            if(d["cellName"].startswith("NCH")):
+            cname = d["cellName"]
+
+            if(re.search("C?NCH",cname)):
                 if(ind == 1):
                     orient = "R0"
                 else:
                     orient = "MY"
-            elif(d["cellName"].startswith("PCH")):
+            elif(re.search("C?PCH",cname)):
                 if(ind == 1):
                     orient = "MY"
                 else:
@@ -208,7 +210,6 @@ class Placer():
             if(prev_orient == orient):
                 trans_orient = "R0"
 
-                
             if(trans_orient == "MY"):
                 self.df.at[i,"x"] *= -1
 

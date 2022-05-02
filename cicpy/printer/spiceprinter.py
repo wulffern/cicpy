@@ -43,7 +43,7 @@ class SpicePrinter(DesignPrinter):
         self.allcells[cell.name] = 1
 
         self.cell = cell
-        nodes = cell.ckt.nodes
+        nodes = self.translateNodes(cell.ckt.nodes)
         strports = " ".join(nodes)
         self.f.write(f"""
 *-------------------------------------------------------------

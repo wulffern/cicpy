@@ -105,6 +105,17 @@ class SpicePrinter(DesignPrinter):
 
     def printResistor(self,o):
         pass
+
+    def translateNodes(self,nodes):
+
+        for i in range(0,len(nodes)):
+            if(re.search("<|>",nodes[i])):
+
+                nodes[i]  = nodes[i].replace("<","_").replace(">","")
+
+
+        return nodes
+
     def printMosfet(self,o):
 
         odev = self.rules.device(o.deviceName)
@@ -112,7 +123,7 @@ class SpicePrinter(DesignPrinter):
 
         propss = self.spiceProperties(odev,o)
 
-        self.f.write(f"X{o.name} " + " ".join(o.nodes) + f" {typename} {propss} \n")
+        self.f.write(f"X{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {typename} {propss} \n")
 
         pass
 
@@ -150,5 +161,5 @@ class SpicePrinter(DesignPrinter):
         if(o.subcktName not in self.allcells):
             print(f"Warning: Could not find cell {o.subcktName}")
         else:
-            self.f.write(f"X{o.name} " + " ".join(o.nodes) + f" {o.subcktName}\n")
+            self.f.write(f"X{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {o.subcktName}\n")
         pass

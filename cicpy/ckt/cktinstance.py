@@ -39,3 +39,10 @@ class CktInstance(CktObject):
         self.subcktName = o["subcktName"]
         self.deviceName = o["deviceName"]
 
+
+    def toJson(self):
+        o = super().toJson()
+        o["subcktName"] = self.subcktName
+        o["groupName"] = self.groupName
+        o["deviceName"] = self.deviceName
+        return o

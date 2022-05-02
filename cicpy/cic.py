@@ -47,8 +47,9 @@ def cli(ctx):
 @click.option("--winfo",is_flag=True,help="Write Info file")
 @click.option("--rinfo",default="",help="Read Info file")
 @click.option("--verilog",is_flag=True,help="Write verilog file")
+@click.option("--spice",is_flag=True,help="Write spice file")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
-def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,smash):
+def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,smash):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
 
     design = cic.Design()
@@ -69,6 +70,10 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 
     if(verilog):
         obj = cic.VerilogPrinter(library,rules)
+        obj.print(design)
+
+    if(spice):
+        obj = cic.SpicePrinter(library,rules)
         obj.print(design)
 
 
@@ -159,6 +164,24 @@ def minecraft(ctx,cicfile,techfile,cell,child,x,y):
 
     else:
         print("\n".join(design.cellnames))
+
+@cli.command("svg")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("library")
+@click.option("--scale",default=10,help="Scale")
+@click.option("--x",default=100,help="X offset")
+@click.option("--y",default=100,help="Y offset")
+def svg(ctx,cicfile,techfile,library,scale,x,y):
+    """Make an SVG"""
+
+    design = cic.Design()
+    design.fromJsonFile(cicfile)
+    rules = cic.Rules(techfile)
+
+    svg = cic.SvgPrinter(library,rules,scale,x,y)
+    svg.print(design)
 
 
 def my_main():

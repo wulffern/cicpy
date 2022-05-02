@@ -36,5 +36,10 @@ class Device(CktObject):
         super().fromJson(o)
         self.deviceName = o["deviceName"]
 
+    def toJson(self):
+        o = super().toJson()
+        o["deviceName"] = self.deviceName
+        return o
+
     def __repr__(self):
         return super().__repr__() + ", deviceName = %s " %self.deviceName

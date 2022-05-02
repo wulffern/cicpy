@@ -212,7 +212,8 @@ class Cell(Rect):
         o["has_pr"] = self.has_pr
 
         ckt = self.ckt
-        if(ckt):
+        o["ckt"] = dict()
+        if(ckt is not None):
             ockt = ckt.toJson()
             o["ckt"] = ockt
 
@@ -220,7 +221,7 @@ class Cell(Rect):
         for child in self.children:
             oc.append(child.toJson())
         o["children"] = oc
-        return oc
+        return o
 
 
 

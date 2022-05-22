@@ -1,0 +1,25 @@
+v {xschem version=3.0.0 file_version=1.2 }
+G {}
+K {}
+V {}
+S {}
+E {}
+L 4 47.625 -71.4375 47.625 -55.5625 {}
+L 4 63.5 -47.625 79.375 -47.625 {}
+L 4 0 -47.625 15.875 -47.625 {}
+L 4 63.5 0 79.375 0 {}
+L 4 0 0 15.875 0 {}
+L 4 47.625 7.9375 47.625 23.8125 {}
+B 5 -3.175 -50.8 3.175 -44.45 {name=D dir=inout pinnumber=}
+B 5 -3.175 -3.175 3.175 3.175 {name=CK dir=inout pinnumber=1}
+B 5 76.2 -50.8 82.55 -44.45 {name=Q dir=inout pinnumber=2}
+B 5 76.2 -3.175 82.55 3.175 {name=QN dir=inout pinnumber=3}
+B 5 44.45 -74.6125 50.8 -68.2625 {name=AVDD dir=inout pinnumber=4}
+B 5 44.45 20.6375 50.8 26.9875 {name=AVSS dir=inout pinnumber=5}
+P 4 5 15.875 7.9375 63.5 7.9375 63.5 -55.5625 15.875 -55.5625 15.875 7.9375 {}
+T {AVSS} 45.5625 -8.012499999999999 1 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {AVDD} 45.5625 -39.6125 3 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {QN} 58.7375 0 2 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {Q} 58.7375 -47.625 2 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {CK} 20.6375 0 0 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {D} 20.6375 -47.625 0 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}

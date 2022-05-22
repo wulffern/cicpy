@@ -1,0 +1,47 @@
+v {xschem version=3.0.0 file_version=1.2 }
+G {}
+K {}
+V {}
+S {}
+E {}
+L 4 31.75 -15.875 31.75 142.875 {}
+L 4 31.75 142.875 206.375 142.875 {}
+L 4 206.375 142.875 206.375 -15.875 {}
+L 4 206.375 -15.875 31.75 -15.875 {}
+L 4 87.3125 39.6875 95.25 39.6875 {}
+L 4 95.25 39.6875 95.25 23.8125 {}
+L 4 95.25 23.8125 111.125 23.8125 {}
+L 4 71.4375 47.625 55.5625 47.625 {}
+L 4 71.4375 15.875 55.5625 15.875 {}
+L 4 174.625 47.625 127 47.625 {}
+L 4 174.625 15.875 127 15.875 {}
+L 4 79.375 0 79.375 63.5 {}
+L 4 79.375 63.5 142.875 31.75 {}
+L 4 142.875 31.75 79.375 0 {}
+L 4 0 127 31.75 127 {}
+L 4 0 0 31.75 0 {}
+L 4 0 111.125 31.75 111.125 {}
+L 4 0 79.375 31.75 79.375 {}
+L 4 0 95.25 31.75 95.25 {}
+L 4 238.125 47.625 206.375 47.625 {}
+L 4 238.125 15.875 206.375 15.875 {}
+L 4 0 47.625 31.75 47.625 {}
+L 4 0 15.875 31.75 15.875 {}
+T {AVSS} 36.5125 127 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {AVDD} 36.5125 0 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {DONE} 36.5125 111.125 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {CK_SAMPLE} 36.5125 79.375 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {CK_CMP} 36.5125 95.25 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {CNO} 201.6125 47.625 2 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {CPO} 201.6125 15.875 2 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {CNI} 36.5125 47.625 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+T {CPI} 36.5125 15.875 0 0 0.1984375 0.1984375 {font=Monospace layer=4 vcenter=true}
+B 5 -3.175 19.05 3.175 12.7 {name=CPI dir=inout pinnumber=}
+B 5 -3.175 50.8 3.175 44.45 {name=CNI dir=inout pinnumber=1}
+B 5 234.95 19.05 241.3 12.7 {name=CPO dir=inout pinnumber=2}
+B 5 234.95 50.8 241.3 44.45 {name=CNO dir=inout pinnumber=3}
+B 5 -3.175 98.425 3.175 92.075 {name=CK_CMP dir=inout pinnumber=4}
+B 5 -3.175 82.55 3.175 76.2 {name=CK_SAMPLE dir=inout pinnumber=5}
+B 5 -3.175 114.3 3.175 107.95 {name=DONE dir=inout pinnumber=6}
+B 5 -3.175 3.175 3.175 -3.175 {name=AVDD dir=inout pinnumber=7}
+B 5 -3.175 130.175 3.175 123.825 {name=AVSS dir=inout pinnumber=8}

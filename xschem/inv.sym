@@ -1,0 +1,24 @@
+v {xschem version=3.0.0 file_version=1.2 }
+G {}
+K {}
+V {}
+S {}
+E {}
+L 4 31.75 7.9375 31.75 23.8125 {}
+L 4 31.75 -31.75 31.75 -23.8125 {}
+L 4 15.875 -15.875 15.875 15.875 {}
+L 4 15.875 15.875 47.625 0 {}
+L 4 15.875 -15.875 47.625 0 {}
+L 4 55.5625 0 63.5 0 {}
+L 4 0 0 15.875 0 {}
+L 4 31.75 -23.8125 31.75 -7.9375 {}
+L 4 31.75 23.8125 31.75 31.75 {}
+B 5 28.575 28.575 34.925 34.925 {name=AVSS dir=in pinnumber=}
+B 5 28.575 -34.925 34.925 -28.575 {name=AVDD dir=in pinnumber=1}
+B 5 -3.175 -3.175 3.175 3.175 {name=A dir=in pinnumber=2}
+B 5 60.325 -3.175 66.675 3.175 {name=Y dir=out pinnumber=3}
+A 4 51.59375 0 3.96875 0 360 {}
+T {Y} 38.89375 0 0 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {A} 16.66875 0 0 0 0.1190625 0.1190625 {font=Monospace layer=4 vcenter=true}
+T {AVDD} 28.8125 -11.9875 3 0 0.079375 0.079375 {font=Monospace layer=4 vcenter=true}
+T {AVSS} 28.8125 11.9875 1 0 0.079375 0.079375 {font=Monospace layer=4 vcenter=true}

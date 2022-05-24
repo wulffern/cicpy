@@ -38,6 +38,7 @@ from .printer.skillschprinter import *
 from .printer.cellinfoprinter import *
 from .printer.verilogprinter import *
 from .printer.spiceprinter import *
+from .printer.xschemprinter import *
 from .printer.svgprinter import *
 from .printer.mcprinter import *
 from .place.placer import *

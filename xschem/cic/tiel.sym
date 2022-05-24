@@ -1,0 +1,19 @@
+v {xschem version=3.0.0 file_version=1.2 }
+T {Y} 9 -50 0 0 0.15 0.15 { vcenter=true}
+T {AVDD} -30 -84 3 0 0.1 0.1 { vcenter=true}
+T {AVSS} -30 -16 1 0 0.1 0.1 { vcenter=true}
+T {@name} -10 -30 0 0 0.15 0.15 { vcenter=true}
+T {@symname} -10 -20 0 0 0.15 0.15 { vcenter=true}
+L 4 -20 -40 -10 -40 {}
+L 4 -10 -40 -10 -50 {}
+L 4 -10 -50 0 -40 {}
+L 4 0 -40 0 -50 {}
+L 4 0 -50 10 -50 {}
+L 4 20 -50 10 -50 {}
+L 4 -20 -80 -20 -90 {}
+L 4 -20 -10 -20 -20 {}
+L 4 -20 -20 -20 -40 {}
+L 4 -20 -80 -20 -60 {}
+B 5 -24 -86 -16 -94 {name=AVDD dir=inout pinnumber=}
+B 5 -24 -6 -16 -14 {name=AVSS dir=inout pinnumber=1}
+B 5 16 -46 24 -54 {name=Y dir=inout pinnumber=2}

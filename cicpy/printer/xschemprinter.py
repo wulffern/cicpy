@@ -191,6 +191,7 @@ class XschemPrinter(DesignPrinter):
         self.current_cell = cell
         self.ix1 = self.xstep
         self.iy1 = 0
+        self.label_count = 0
         
         #- Store cell for later, will need it
         self.cells[cell.name] = cell
@@ -290,34 +291,8 @@ class XschemPrinter(DesignPrinter):
 
         self.fcell.write("C {" + f"{self.libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"{o.name}" + "}\n")
 
-        self.iy1 += instsym.height()
-
-        if(self.xstep + 100 < instsym.width()):
-            self.xstep = instsym.width() + 100
-
-        if(self.iy1 > self.ymax):
-            self.ix1 += self.xstep
-            self.iy1 = 0
 
 
-        #self.iy1 +=
-
-        return
-        ss = f"""
-    ;;-------------------------------------------------------------------
-    ;; Create instance {o.name}
-    ;;-------------------------------------------------------------------
-        schLib = dbOpenCellViewByType("{self.libname}" "{o.subcktName}" "symbol")
-        schInst=dbCreateInst(sch schLib "{o.name}" {x1}:{y1} "{rotation}")
-        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
-        if(xcoord > 15 then
-                    xcoord = 2
-                    ycoord = ycoord +  topEdge(schLib->bBox) - bottomEdge(schLib->bBox) + 1
-        )
-
-        """
-
-        self.fcell.write(ss)
 
         nodes =  o.nodes
         intNodes = instcell.ckt.nodes
@@ -332,17 +307,36 @@ class XschemPrinter(DesignPrinter):
             netName = nodes[z]
             portName = intNodes[z]
 
-            ss = f"""
-            signal = (setof sig schLib~>signals (member "{portName}" sig~>sigNames))
-            bBox = car(car(signal~>pins)~>fig)~>bBox
-            pin =dbTransformBBox(bBox schInst~>transform)
+            r = instsym.ports[portName].rect.getCopy()
 
-            wireId = schCreateWire( sch "draw" "full" list(centerBox(pin) rodAddToX(centerBox(pin) 0.05) )  0.0625 0.0625 0.0 )
-            schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pin) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
-            """
+            r.translate(self.ix1,self.iy1)
 
-            self.fcell.write(ss)
+            xb2 = r.centerX()
+            yb = r.centerY()
+            xb1 = xb2 - 40
+            xlab = xb1
 
+            self.fcell.write(f"N {xb1} {yb} {xb2} {yb}" + "{lab=" + netName + "}\n")
+
+            self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} 0 0  " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
+
+            self.label_count +=1
+
+
+
+            #print(netName, portName,r)
+
+
+
+        self.iy1 += instsym.height()
+
+
+        if(self.xstep + 100 < instsym.width()):
+            self.xstep = instsym.width() + 100
+
+        if(self.iy1 > self.ymax):
+            self.ix1 += self.xstep
+            self.iy1 = 0
         
 
         

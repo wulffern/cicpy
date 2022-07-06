@@ -156,10 +156,10 @@ class Rect:
         return self.y2 - self.y1
 
     def centerX(self):
-        return self.x1 + self.width/2
+        return self.x1 + self.width()/2
 
     def centerY(self):
-        return self.y1  + self.height/2
+        return self.y1  + self.height()/2
 
     def moveTo(self,x,y):
         w = self.width()

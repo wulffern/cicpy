@@ -32,7 +32,7 @@ class CktObject():
         self.classname = ""
         self.nodes = list()
         self.properties = dict()
-        self.className = ""
+        #self.className = ""
 
     def fromJson(self,o):
         self.classname = o["class"]

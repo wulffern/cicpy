@@ -36,6 +36,8 @@ import os
 
 class XschemSymbol(Rect):
 
+
+
     def __init__(self,libname,cell,printer):
         self.cell = cell
         self.libname = libname
@@ -53,7 +55,7 @@ class XschemSymbol(Rect):
 
 
         #sym = self.short_name.lower()
-
+        self.symbol_from_lib = False
         symbol_to_use = ""
         for s in printer.lib_symbols:
             sh = os.path.basename(s)
@@ -61,8 +63,7 @@ class XschemSymbol(Rect):
             if(sh.startswith(self.short_name.lower())):
                 symbol_to_use = s
 
-        if(symbol_to_use):
-            self.read(symbol_to_use)
+
         #print(cell.name, symbol_to_use)
         self.x1 = 0
         self.x2 = 180
@@ -70,19 +71,40 @@ class XschemSymbol(Rect):
         self.y2 = 100
         self.ports = dict()
 
+        if(symbol_to_use):
+            self.read(symbol_to_use)
+
         pass
 
     def read(self,filename):
 
-        self.symbuffer = list()
-        with open(filename) as fi:
+    #TODO: Add Bounding box after reading ports
+    #TODO: Figure out a way to inform on what is a "left,right,top,bottom" port. Could probably use the center of bounding box, and how the ports are
+    #located compared to that
 
+        self.symbuffer = list()
+        self.symbol_from_lib = True
+        with open(filename) as fi:
             for l in fi:
+                if(l.startswith("v")): # Skip v line, I want to add more info
+                    continue
                 self.symbuffer.append(l)
                 if(l.startswith("B")):
-                    print(l)
+                    #print(l)
                     m = re.search("B\s+\d+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+\{(.*)\}",l)
-                    print(m)
+
+                    if(m is not None):
+                        xb1 = int(m.group(1))
+                        yb1 = int(m.group(2))
+                        xb2 = int(m.group(3))
+                        yb2 = int(m.group(4))
+                        m1 = re.search("name=(\S+)",m.group(5))
+                        name = m1.group(1)
+                        p = Port(name, rect=Rect("PR",xb1,yb1,(xb2-xb1),(yb2-yb1)))
+                        #print(name)
+                        self.ports[name] = p
+
+
 
 
     def getPin(self,x,y,name):
@@ -108,6 +130,7 @@ class XschemSymbol(Rect):
     def printSymbol(self):
         cell_sym = self.libname + os.path.sep + self.cell.name + ".sym"
 
+
         fsym = open(cell_sym,"w")
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
         fsym.write("""K {type=subcircuit
@@ -115,31 +138,34 @@ format="@name @pinlist @symname"
 template="name=x1"
 } \n""")
 
-        x = 0
-        y = 0
-        for node in self.cell.ckt.nodes:
-            fsym.write(self.getPin(x,y,node))
-            y += 20
+        if(self.symbol_from_lib):
+            for l in self.symbuffer:
+                fsym.write(l)
+        else:
+            x = 0
+            y = 0
+            for node in self.cell.ckt.nodes:
+                fsym.write(self.getPin(x,y,node))
+                y += 20
 
-        if(y == 0):
-            y += 20
-        x1 = x
-        y1 = -10
-        x2 = x1 + 180
-        y2 = y - 10
+            if(y == 0):
+                y += 20
+            x1 = x
+            y1 = -10
+            x2 = x1 + 180
+            y2 = y - 10
 
-        y3 = y1 + (y2 - y1)/2 - 10
-        x3 = 50
+            y3 = y1 + (y2 - y1)/2 - 10
+            x3 = 50
 
-        self.x1 = x1-40
-        self.x2 = x2
-        self.y1 = y1-10
-        self.y2 = y2+10
+            self.x1 = x1-40
+            self.x2 = x2
+            self.y1 = y1-10
+            self.y2 = y2+10
 
-        fsym.write(f"P 4 5 {x1} {y1} {x2} {y1} {x2} {y2} {x1} {y2} {x1} {y1} " + "{}\n")
-
-        fsym.write("T {@symname} " + f" {x3} {y3}  0 0 0.25 0.25" + " {}\n")
-        fsym.write("T {@name} " + f"0 -25 0 0 0.2 0.2 " + "{}\n")
+            fsym.write(f"P 4 5 {x1} {y1} {x2} {y1} {x2} {y2} {x1} {y2} {x1} {y1} " + "{}\n")
+            fsym.write("T {@symname} " + f" {x3} {y3}  0 0 0.25 0.25" + " {}\n")
+            fsym.write("T {@name} " + f"0 -25 0 0 0.2 0.2 " + "{}\n")
         fsym.close()
 
 class XschemPrinter(DesignPrinter):
@@ -153,7 +179,7 @@ class XschemPrinter(DesignPrinter):
 
         self.smash = smash
         self.libpath =""
-        self.xstep = 300
+        self.xstep = 400
         self.ix1 = 300
         self.iy1 = 0
         self.ymax = 1000
@@ -224,20 +250,6 @@ class XschemPrinter(DesignPrinter):
         self.symbols[cell.name] = sym
         sym.printSymbol()
 
-
-        #- Make symbol if it does not exist
-        #self.fcell.write(f"""
-        #syb =  ddGetObj("{sl}" "{short_name}" "symbol")
-        #if( syb then
-        #  syb_dd = dbOpenCellViewByType("{sl}" "{short_name}" "symbol")
-        #  dbCopyCellView(syb_dd schLibName schName "symbol" ?g_overwrite t)
-        #)
-
-
-#unless( ddGetObj(schLibName schName "symbol")
-#        schViewToView( schLibName schName schLibName schName "schematic" "symbol" "schSchemToPinList" "schPinListToSymbol" )
-#)
-#        """)
 
 
     def endCell(self,o):
@@ -313,7 +325,12 @@ class XschemPrinter(DesignPrinter):
 
             xb2 = r.centerX()
             yb = r.centerY()
-            xb1 = xb2 - 40
+
+
+            if(portName == "B" and "Transistor" in instsym.cell.ckt.classname):
+                xb1 = xb2 + 80
+            else:
+                xb1 = xb2 - 40
             xlab = xb1
 
             self.fcell.write(f"N {xb1} {yb} {xb2} {yb}" + "{lab=" + netName + "}\n")
@@ -331,8 +348,8 @@ class XschemPrinter(DesignPrinter):
         self.iy1 += instsym.height()
 
 
-        if(self.xstep + 100 < instsym.width()):
-            self.xstep = instsym.width() + 100
+        if(self.xstep + 200 < instsym.width()):
+            self.xstep = instsym.width() + 200
 
         if(self.iy1 > self.ymax):
             self.ix1 += self.xstep
@@ -358,8 +375,6 @@ class XschemPrinter(DesignPrinter):
 
 
     def printDevice(self,o):
-        return
-
 
         if("Mosfet" in o.classname):
             self.printMosfet(o)

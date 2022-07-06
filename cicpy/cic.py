@@ -48,7 +48,7 @@ def cli(ctx):
 @click.option("--rinfo",default="",help="Read Info file")
 @click.option("--verilog",is_flag=True,help="Write verilog file")
 @click.option("--spice",is_flag=True,help="Write spice file")
-@click.option("--xschem",is_flag=True,help="Write spice file")
+@click.option("--xschem",is_flag=True,help="Write xschem schematics")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
 def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,smash):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""

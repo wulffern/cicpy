@@ -146,3 +146,7 @@ class Rules:
     def symbol_lib(self):
         o = self.getValue("technology","symbol_lib")
         return o
+    @property
+    def symbol_libs(self):
+        o = self.getValue("technology","symbol_libs")
+        return o

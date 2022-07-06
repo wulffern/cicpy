@@ -30,15 +30,40 @@ from ..core.port import Port
 import sys
 from os import path
 import re
+import glob
 import os
 
 
 class XschemSymbol(Rect):
 
-    def __init__(self,libname,cell):
+    def __init__(self,libname,cell,printer):
         self.cell = cell
         self.libname = libname
 
+        self.short_name = re.sub("(\d+)|(X\d+)*(_CV|_EV)?","",cell.name)
+
+        if(cell.name.startswith("PCH")):
+            self.short_name = "PCH"
+        if(cell.name.startswith("CPCH")):
+            self.short_name = "CPCH"
+        if(cell.name.startswith("NCH")):
+            self.short_name = "NCH"
+        if(cell.name.startswith("CNCH")):
+            self.short_name = "CNCH"
+
+
+        #sym = self.short_name.lower()
+
+        symbol_to_use = ""
+        for s in printer.lib_symbols:
+            sh = os.path.basename(s)
+
+            if(sh.startswith(self.short_name.lower())):
+                symbol_to_use = s
+
+        if(symbol_to_use):
+            self.read(symbol_to_use)
+        #print(cell.name, symbol_to_use)
         self.x1 = 0
         self.x2 = 180
         self.y1 = 0
@@ -46,6 +71,19 @@ class XschemSymbol(Rect):
         self.ports = dict()
 
         pass
+
+    def read(self,filename):
+
+        self.symbuffer = list()
+        with open(filename) as fi:
+
+            for l in fi:
+                self.symbuffer.append(l)
+                if(l.startswith("B")):
+                    print(l)
+                    m = re.search("B\s+\d+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+\{(.*)\}",l)
+                    print(m)
+
 
     def getPin(self,x,y,name):
 
@@ -69,6 +107,7 @@ class XschemSymbol(Rect):
 
     def printSymbol(self):
         cell_sym = self.libname + os.path.sep + self.cell.name + ".sym"
+
         fsym = open(cell_sym,"w")
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
         fsym.write("""K {type=subcircuit
@@ -118,6 +157,14 @@ class XschemPrinter(DesignPrinter):
         self.ix1 = 300
         self.iy1 = 0
         self.ymax = 1000
+
+        self.lib_symbols = list()
+        for slib in self.rules.symbol_libs:
+            path = slib + os.path.sep + "*.sym"
+            sym = glob.glob(path)
+            for s in sym:
+                self.lib_symbols.append(s)
+
 
 
     def startLib(self,name):
@@ -170,20 +217,9 @@ class XschemPrinter(DesignPrinter):
 
 
         #- TODO: Could add symbols here
-        sl = self.rules.symbol_lib
 
-        short_name = re.sub("(X\d+)*(_CV|_EV)?","",cell.name)
 
-        if(cell.name.startswith("PCH")):
-            short_name = "PCH"
-        if(cell.name.startswith("CPCH")):
-            short_name = "CPCH"
-        if(cell.name.startswith("NCH")):
-            short_name = "NCH"
-        if(cell.name.startswith("CNCH")):
-            short_name = "CNCH"
-
-        sym = XschemSymbol(self.libpath,cell)
+        sym = XschemSymbol(self.libpath,cell,self)
         self.symbols[cell.name] = sym
         sym.printSymbol()
 

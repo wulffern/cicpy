@@ -121,6 +121,9 @@ class Rules:
     def layerToNumber(self,layer):
         return self.getField("layers",layer,"number")
 
+    def layerToAlias(self,layer):
+        return self.getField("layers",layer,"alias")
+
     def layerToDataType(self,layer):
         return self.getField("layers",layer,"datatype")
 
@@ -146,6 +149,12 @@ class Rules:
     def symbol_lib(self):
         o = self.getValue("technology","symbol_lib")
         return o
+
+    @property
+    def techlib(self):
+        o = self.getValue("technology","techlib")
+        return o
+
     @property
     def symbol_libs(self):
         o = self.getValue("technology","symbol_libs")

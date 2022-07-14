@@ -49,8 +49,9 @@ def cli(ctx):
 @click.option("--verilog",is_flag=True,help="Write verilog file")
 @click.option("--spice",is_flag=True,help="Write spice file")
 @click.option("--xschem",is_flag=True,help="Write xschem schematics")
+@click.option("--magic",is_flag=True,help="Write magic layout")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
-def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,smash):
+def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
 
     design = cic.Design()
@@ -79,6 +80,10 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 
     if(xschem):
         obj = cic.XschemPrinter(library,rules)
+        obj.print(design)
+
+    if(magic):
+        obj = cic.MagicPrinter(library,rules)
         obj.print(design)
 
 

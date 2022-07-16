@@ -65,6 +65,12 @@ class MagicPrinter(DesignPrinter):
         for layer in self.rects:
             self.fcell.write(self.rects[layer])
 
+        for layer in self.cuts:
+            r = self.cuts[layer]
+            self.fcell.write(f"<< {layer} >>\nrect %d %d %d %d\n" % (self.toMicron(r.x1),self.toMicron(r.y1),self.toMicron(r.x2),self.toMicron(r.y2)))
+
+            #self.fcell.write(self.rects[layer])
+
         for ss in self.use:
             self.fcell.write(ss)
 
@@ -80,13 +86,18 @@ class MagicPrinter(DesignPrinter):
         self.rects = dict()
         self.use = list()
         self.labels = list()
+        self.cuts = dict()
         self.portIndex = 1
+
+        #- Cut's need to be handled differently
+        self.isCut = False
+
         self.labels.append("<< labels >>\n")
 
         file_name_cell = self.libname + os.path.sep + cell.name + ".mag"
 
         self.openCellFile(file_name_cell)
-        
+
         self.fcell.write("magic\n")
         self.fcell.write("tech " + self.rules.techlib + "\n")
         self.fcell.write("magscale 1 2\n")
@@ -94,7 +105,10 @@ class MagicPrinter(DesignPrinter):
         d = datetime.datetime.now()
         self.fcell.write("timestamp %d\n" % time.mktime(d.timetuple()))
 
+        self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(cell.x1),self.toMicron(cell.y1),self.toMicron(cell.x2),self.toMicron(cell.y2)))
 
+        if(cell.name.startswith("cut_")):
+            self.isCut = True
 
 
     def endCell(self,cell):
@@ -136,20 +150,31 @@ port %d nsew
         layerAlias = self.rules.layerToAlias(r.layer)
 
         if(layerAlias == ""):
-            print(r.layer + "\n")
             return
-
-        x1 = self.toMicron(r.x1)
-        x2 = self.toMicron(r.x2)
-        y1 = self.toMicron(r.y1)
-        y2 = self.toMicron(r.y2)
 
         layerNumber = self.rules.layerToNumber(r.layer)
 
-        if(layerAlias not in self.rects):
-            self.rects[layerAlias] = f"<< {layerAlias} >>\n"
+        #- Handle cuts
+        if(r.layer.startswith("VIA")):
+            if(layerAlias not in self.cuts):
+                self.cuts[layerAlias] = r
 
-        self.rects[layerAlias] += f"rect %d %d %d %d\n" %(x1,y1,x2,y2)
+            ref = self.cuts[layerAlias]
+            if(r.x1 < ref.x1):
+                ref.x1 = r.x1
+            if(r.x2 > ref.x2):
+                ref.x2 = r.x2
+            if(r.y1 < ref.y1):
+                ref.y1 = r.y1
+            if(r.y2 > ref.y2):
+                ref.y2 = r.y2
+            pass
+
+        else:
+            if(layerAlias not in self.rects):
+                self.rects[layerAlias] = f"<< {layerAlias} >>\n"
+
+            self.rects[layerAlias] += f"rect %d %d %d %d\n" % (self.toMicron(r.x1),self.toMicron(r.y1),self.toMicron(r.x2),self.toMicron(r.y2))
 
         
     def printReference(self,inst):

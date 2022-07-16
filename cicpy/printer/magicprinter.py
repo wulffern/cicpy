@@ -46,7 +46,7 @@ class MagicPrinter(DesignPrinter):
 
     def startLib(self,name):
 
-        self.libname = name + os.path.sep + "/mag"
+        self.libname = name + os.path.sep + "mag"
         if(not path.isdir(self.libname)):
             os.makedirs(self.libname)
         
@@ -155,7 +155,7 @@ port %d nsew
         layerNumber = self.rules.layerToNumber(r.layer)
 
         #- Handle cuts
-        if(r.layer.startswith("VIA")):
+        if(self.isCut and r.layer.startswith("VIA")):
             if(layerAlias not in self.cuts):
                 self.cuts[layerAlias] = r
 

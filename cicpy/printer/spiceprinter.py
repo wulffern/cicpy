@@ -10,7 +10,7 @@ class SpicePrinter(DesignPrinter):
         self.current_cell = None
 
     def startLib(self,name):
-        self.openFile(name + ".spi")
+        self.openFile(name + ".spice")
 
     def endLib(self):
         self.closeFile()

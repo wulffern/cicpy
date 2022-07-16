@@ -195,7 +195,8 @@ class XschemPrinter(DesignPrinter):
 
     def startLib(self,name):
 
-        self.libpath = "xschem" + os.path.sep + name
+
+        self.libpath = name + os.path.sep + "xschem" + os.path.sep + name
         self.libname =  name
 
         if(not path.isdir(self.libpath)):

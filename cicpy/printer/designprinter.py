@@ -50,6 +50,8 @@ class DesignPrinter():
         for child in children:
             if(not child): 
                 continue
+
+
             if(child.isInstance()):
                 self.printReference(child)
             elif(child.isPort()):
@@ -72,6 +74,7 @@ class DesignPrinter():
         
         self.startCell(c)
         self.cell = c
+
 
         self.printChildren(c.children)
 

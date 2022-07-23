@@ -40,7 +40,6 @@ class MagicPrinter(DesignPrinter):
     
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
-        self.noPortRect = False
 
 
 
@@ -87,7 +86,8 @@ class MagicPrinter(DesignPrinter):
         self.use = list()
         self.labels = list()
         self.cuts = dict()
-        self.portIndex = 1
+        self.portOrder = dict()
+
 
         #- Cut's need to be handled differently
         self.isCut = False
@@ -97,6 +97,13 @@ class MagicPrinter(DesignPrinter):
         file_name_cell = self.libname + os.path.sep + cell.name + ".mag"
 
         self.openCellFile(file_name_cell)
+
+        if(cell.ckt is not None):
+            for i in range(0,len(cell.ckt.nodes)):
+                n = cell.ckt.nodes[i]
+                self.portOrder[n] = i+1
+
+
 
         self.fcell.write("magic\n")
         self.fcell.write("tech " + self.rules.techlib + "\n")
@@ -131,11 +138,17 @@ class MagicPrinter(DesignPrinter):
         y2 = self.toMicron(p.y2)
         routeLayerAlias = self.rules.layerToAlias(p.layer)
 
+        if(p.name not in self.portOrder):
+            print(self.portOrder)
+            raise(f"Could not find {p.name} in circuit nodes")
+
         lbl = f"""flabel {routeLayerAlias} s %d %d %d %d 0 FreeSans 400 0 0 0 {p.name}
 port %d nsew
-""" % (x1,y1,x2,y2,self.portIndex)
-        self.portIndex += 1
+""" % (x1,y1,x2,y2,self.portOrder[p.name])
         self.labels.append(lbl)
+
+
+        self.printRect(p)
 
     def printRect(self,r):
 

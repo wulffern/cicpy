@@ -108,13 +108,15 @@ class SpicePrinter(DesignPrinter):
 
     def translateNodes(self,nodes):
 
+        new_nodes = list()
         for i in range(0,len(nodes)):
+            n = nodes[i]
             if(re.search("<|>",nodes[i])):
+                n = n.replace("<","_").replace(">","")
+            new_nodes.append(n)
 
-                nodes[i]  = nodes[i].replace("<","_").replace(">","")
 
-
-        return nodes
+        return new_nodes
 
     def printMosfet(self,o):
 

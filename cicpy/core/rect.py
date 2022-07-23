@@ -113,6 +113,7 @@ class Rect:
         self.layer = layer
         self.parent = None
         self.net = ""
+        self.classname = "Rect"
         self.listeners = list()
     
     def setPoint1(self,x1,y1):
@@ -305,6 +306,7 @@ class Rect:
         self.y2 = o["y2"]
         self.layer = o["layer"]
         self.net = o["net"]
+        self.classname = o["class"]
 
     def toJson(self):
         o = dict()

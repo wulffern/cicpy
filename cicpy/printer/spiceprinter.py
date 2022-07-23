@@ -8,9 +8,11 @@ class SpicePrinter(DesignPrinter):
         self.cell = None
         self.allcells = dict()
         self.current_cell = None
+        self.lastname = ".spice"
+        self.ngspice = True
 
     def startLib(self,name):
-        self.openFile(name + ".spice")
+        self.openFile(name + self.lastname)
 
     def endLib(self):
         self.closeFile()
@@ -61,7 +63,7 @@ class SpicePrinter(DesignPrinter):
         self.startCell(c)
 
 
-        if(c.meta is not None and "spice" in c.meta):
+        if(self.ngspice and c.meta is not None and "spice" in c.meta):
             spice = c.meta["spice"]
             if(type(spice) is list):
                 self.f.write( "\n".join(spice) + "\n")
@@ -100,13 +102,29 @@ class SpicePrinter(DesignPrinter):
             self.printMosfet(o)
         elif("Resistor" in o.classname):
             self.printResistor(o)
+        else:
+            print(self.o)
 
         pass
 
     def printResistor(self,o):
+
+        odev = self.rules.device(o.deviceName + o.properties["layer"] )
+        typename = odev["name"]
+
+
+        propss = self.spiceProperties(odev,o)
+
+        devicetype = odev["devicetype"]
+
+        self.f.write(f"{devicetype}{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {typename} {propss} \n")
+
         pass
 
     def translateNodes(self,nodes):
+
+        if(not self.ngspice):
+            return nodes
 
         new_nodes = list()
         for i in range(0,len(nodes)):
@@ -125,7 +143,9 @@ class SpicePrinter(DesignPrinter):
 
         propss = self.spiceProperties(odev,o)
 
-        self.f.write(f"X{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {typename} {propss} \n")
+        devicetype = odev["devicetype"]
+
+        self.f.write(f"{devicetype}{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {typename} {propss} \n")
 
         pass
 
@@ -160,8 +180,13 @@ class SpicePrinter(DesignPrinter):
 
     def printInstance(self,o):
 
+
+        instname = o.name
+        if(instname.startswith("M")):
+            instname = "X" + instname
+
         if(o.subcktName not in self.allcells):
             print(f"Warning: Could not find cell {o.subcktName}")
         else:
-            self.f.write(f"X{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {o.subcktName}\n")
+            self.f.write(f"{instname} " + " ".join(self.translateNodes(o.nodes)) + f" {o.subcktName}\n")
         pass

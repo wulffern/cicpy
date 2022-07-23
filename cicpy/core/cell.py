@@ -46,6 +46,8 @@ class Cell(Rect):
         self.routes = list()
         self.ckt = None
         self.design = None
+        self.prefix = ""
+        self.physicalOnly = False
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
@@ -191,14 +193,19 @@ class Cell(Rect):
 
     def fromJson(self,o):
         super().fromJson(o)
-        self.name = o["name"]
+        self.name = self.design.prefix  + o["name"]
         self.has_pr = o["has_pr"]
         if("abstract" in o):
             self.abstract = o["abstract"]
 
+        if("physicalOnly" in o):
+            self.physicalOnly = o["physicalOnly"]
+
+
         #- Handle subckt
         if("ckt" in o):
             self.ckt = Subckt()
+            self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])
 
 

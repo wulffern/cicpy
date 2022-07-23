@@ -51,10 +51,13 @@ def cli(ctx):
 @click.option("--xschem",is_flag=True,help="Write xschem schematics")
 @click.option("--magic",is_flag=True,help="Write magic layout")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
-def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash):
+@click.option("--prefix",default="",help="Add a prefix for all cells")
+
+def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash,prefix):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
 
     design = cic.Design()
+    design.prefix = prefix
     design.fromJsonFile(cicfile)
     rules = cic.Rules(techfile)
 
@@ -76,6 +79,13 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 
     if(spice):
         obj = cic.SpicePrinter(library,rules)
+
+        #- Print ngspice simulation netlist (.spice)
+        obj.print(design)
+
+        #- Print cdl netlist (.spi)
+        obj.lastname = ".spi"
+        obj.ngspice = False
         obj.print(design)
 
     if(xschem):

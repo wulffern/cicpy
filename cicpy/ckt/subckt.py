@@ -37,6 +37,10 @@ class Subckt(CktObject):
 
     def fromJson(self,o):
         super().fromJson(o)
+
+        #- Override name to support prefix
+        self.name = self.prefix + o["name"]
+
         for d in o["devices"]:
             dd = Device()
             dd.fromJson(d)
@@ -45,13 +49,15 @@ class Subckt(CktObject):
 
         for i in o["instances"]:
             ii = CktInstance()
+            ii.prefix = self.prefix
             ii.fromJson(i)
             self.instances.append(ii)
-
             pass
 
     def toJson(self):
         o = super().toJson()
+
+
         o["devices"] = []
         for d in self.devices:
             o["devices"].append(d.toJson())

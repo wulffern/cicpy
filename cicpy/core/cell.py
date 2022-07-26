@@ -28,6 +28,7 @@
 from .rect import *
 from .port import Port
 from .text import Text
+import re
 from ..ckt.subckt import Subckt
 
 class Cell(Rect):
@@ -38,6 +39,7 @@ class Cell(Rect):
     def __init__ (self,name=""):
         super().__init__()
         self.subckt = None
+        self.name = name
         self.ignoreBoundaryRouting = False
         self.physicalOnly = False
         self.abstract = False
@@ -46,6 +48,7 @@ class Cell(Rect):
         self.routes = list()
         self.ckt = None
         self.design = None
+        self.shortName = name
         self.prefix = ""
         self.physicalOnly = False
 
@@ -141,7 +144,7 @@ class Cell(Rect):
 
     def updateBoundingRect(self):
         r = self.calcBoundingRect()
-        r.setRect(r)
+        self.setRect(r)
         pass
 
     # Calculate the extent of this cell. Should be overriden by children
@@ -150,8 +153,11 @@ class Cell(Rect):
         y1 = INT_MAX
         x2 = INT_MIN
         y2 = INT_MIN
+
         if(len(self.children) == 0):
             x1 = y1 = x2 = y2 = 0
+
+
         for child in self.children:
             if(self.ignoreBoundaryRouting and 
                 (not(child.isInstance()) or not(child.isCut()) ) ):
@@ -163,15 +169,19 @@ class Cell(Rect):
 
             if(cx1 < x1):
                 x1 = cx1
-            if(cy1 > y1):
+            if(cy1 < y1):
                 y1 = cy1
             if(cx2 > x2):
                 x2 = cx2
-            if(cy2 > cy2):
+            if(cy2 > y2):
                 y2 = cy2
+
+
         r = Rect()
+
         r.setPoint1(x1,y1)
         r.setPoint2(x2,y2)
+
         return r
 
     def isEmpty(self):
@@ -193,7 +203,16 @@ class Cell(Rect):
 
     def fromJson(self,o):
         super().fromJson(o)
+        self.prefix = self.design.prefix
         self.name = self.design.prefix  + o["name"]
+
+        self.shortName = re.sub("(\d+)|(X\d+)*(_CV|_EV)?","",o["name"])
+        m =  re.search("((^N|^P)CH)",self.shortName)
+        if(m):
+
+            self.shortName = m.groups()[0]
+
+
         self.has_pr = o["has_pr"]
         if("abstract" in o):
             self.abstract = o["abstract"]
@@ -251,7 +270,12 @@ class Cell(Rect):
         if(cellname in self.design.cells):
             return self.design.cells[cellname]
         return None
-    
+
+    def startswith(self,ss):
+        if(self.name.startswith(self.prefix + ss)):
+            return True
+        return False
+
     #     Port * getPort(QString name);
     #     Port * getCellPort(QString name);
 

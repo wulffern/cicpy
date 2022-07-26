@@ -45,7 +45,7 @@ class MagicPrinter(DesignPrinter):
 
     def startLib(self,name):
 
-        self.libname = name + os.path.sep + "mag"
+        self.libname = name
         if(not path.isdir(self.libname)):
             os.makedirs(self.libname)
         

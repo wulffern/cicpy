@@ -38,6 +38,13 @@ class Port(Rect):
         self.net = ""
         self.pinLayer = routeLayer
         self.direction = "inputOutput"
+        if(rect):
+            self.x1 = rect.x1
+            self.x2 = rect.x2
+            self.y1 = rect.y1
+            self.y2 = rect.y2
+
+
     
     def fromJson(self,o):
 

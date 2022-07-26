@@ -106,10 +106,20 @@ def VerticalRectangleFromTo(layer, x, y1, y2, width):
 class Rect:
 
     def __init__(self,layer="",x=0,y=0,width=0,height=0):
-        self.x1 = x
-        self.y1 = y
-        self.x2 = x + width
-        self.y2 = y + height
+
+        if(width < 0):
+            self.x1 = x + width
+            self.x2 = x
+        else:
+            self.x1 = x
+            self.x2 = x + width
+
+        if(height < 0):
+            self.y1 = y + height
+            self.y2 = y
+        else:
+            self.y1 = y
+            self.y2 = y + height
         self.layer = layer
         self.parent = None
         self.net = ""
@@ -126,7 +136,7 @@ class Rect:
     
     def setRect(self,r):
         self.x1 = r.x1
-        self.y2 = r.y1
+        self.y1 = r.y1
         self.x2 = r.x2
         self.y2 = r.y2
 

@@ -1,34 +1,35 @@
 v {xschem version=3.0.0 file_version=1.2 }
+G {}
+K {
+}
+V {}
+S {}
+E {}
 L 4 260 90 260 110 {}
-P 4 5 185 70 450 70 450 50 185 50 185 70 {}
-L 4 130 170 130 150 {}
+L 4 130 150 130 170 {}
 L 4 330 150 330 170 {}
-L 4 -70 170 -70 150 {}
-L 4 -870 170 -870 150 {}
-L 4 -735 170 -735 150 {}
+L 4 -70 150 -70 170 {}
+L 4 -870 150 -870 170 {}
+L 4 -735 150 -735 170 {}
 L 4 -870 150 -870 170 {}
 L 4 -1135 150 -1135 170 {}
-L 4 -1230 150 -1250 150 {}
+L 4 -1250 150 -1230 150 {}
 L 4 -1230 150 -1230 170 {}
-P 4 5 185 150 470 150 470 50 185 50 185 150 {}
 L 4 450 150 470 150 {}
 L 4 450 150 450 170 {}
 L 4 260 70 260 90 {}
 L 4 260 110 260 130 {}
+P 4 5 185 70 450 70 450 50 185 50 185 70 {}
+P 4 5 185 150 470 150 470 50 185 50 185 150 {}
 P 4 5 -1250 170 470 170 470 -900 -1250 -900 -1250 170 {}
 P 4 5 185 90 450 90 450 70 185 70 185 90 {}
 P 4 5 -1250 170 470 170 470 150 -1250 150 -1250 170 {}
 P 4 5 185 150 450 150 450 130 185 130 185 150 {}
 P 4 5 185 130 450 130 450 110 185 110 185 130 {}
 P 4 5 185 110 450 110 450 90 185 90 185 110 {}
-T {ilInst~>cellView~>createTime} 265 100 0 0 0.25 0.25 { vcenter=true}
 T {Created} 190 100 0 0 0.25 0.25 { vcenter=true}
-T {ddGetObjReadPath(ilInst~>cellView~>cell)} -725 160 0 0 0.25 0.25 { vcenter=true}
 T {Path} -860 160 0 0 0.25 0.25 { vcenter=true}
-T {ilInst~>cellView~>libName} -1130 160 0 0 0.25 0.25 { vcenter=true}
 T {Library} -1225 160 0 0 0.25 0.25 { vcenter=true}
 T {Designer} 190 80 0 0 0.25 0.25 { vcenter=true}
-T {if( isCallable('dbGetDatabaseType) then\n if( dbGetDatabaseType() == \CDBA\ then\n ilInst~>cellView~>instancesLastChanged\n else\n ilInst~>cellView~>fileTimeStamp\n )\nelse\n ilInst~>cellView~>instancesLastChanged\n)} 265 120 0 0 0.25 0.25 { vcenter=true}
 T {Modified} 190 120 0 0 0.25 0.25 { vcenter=true}
-T {ilInst~>cellView~>cellName} 320 60 0 0 0.25 0.25 { vcenter=true}
-T {copyright NTNU} 315 140 0 0 0.25 0.25 { vcenter=true}
+T {Copyright} 195 140 0 0 0.25 0.25 { vcenter=true}

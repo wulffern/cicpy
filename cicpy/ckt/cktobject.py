@@ -53,5 +53,19 @@ class CktObject():
         print(json.dumps(self.toJson(),indent=4))
 
 
+    def isType(self,typename):
+        if(self.__class__.__name__ == typename):
+            return True
+        elif(super() and (super().__class__.__name__ == typename)):
+            return True
+        return False
+
+    def isCktInstance(self):
+        return self.isType("CktInstance")
+
+    def isDevice(self):
+        return self.isType("CktDevice")
+
+
     def __repr__(self):
         return f"{self.classname} {self.name}: nodes = {self.nodes}, props = {self.properties}"

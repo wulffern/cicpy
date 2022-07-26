@@ -26,6 +26,7 @@
 ######################################################################
 from .designprinter import DesignPrinter
 from ..core.rect import Rect
+from ..core.cell import Cell
 from ..core.port import Port
 import sys
 from os import path
@@ -34,45 +35,34 @@ import glob
 import os
 
 
-class XschemSymbol(Rect):
-
-
-
-    def __init__(self,libname,cell,printer):
+class XschemSymbol(Cell):
+    def __init__(self,libname,cell,printer,symbolName):
+        super().__init__()
         self.cell = cell
         self.libname = libname
-
-        self.short_name = re.sub("(\d+)|(X\d+)*(_CV|_EV)?","",cell.name)
-
-        if(cell.name.startswith("PCH")):
-            self.short_name = "PCH"
-        if(cell.name.startswith("CPCH")):
-            self.short_name = "CPCH"
-        if(cell.name.startswith("NCH")):
-            self.short_name = "NCH"
-        if(cell.name.startswith("CNCH")):
-            self.short_name = "CNCH"
+        self.symbolName = symbolName
 
 
-        #sym = self.short_name.lower()
+        #- TODO does not support directory as part of symbol location
         self.symbol_from_lib = False
         symbol_to_use = ""
         for s in printer.lib_symbols:
-            sh = os.path.basename(s)
-
-            if(sh.startswith(self.short_name.lower())):
+            sh = os.path.basename(s).replace(".sym","")
+            if(sh.startswith(os.path.basename(symbolName))):
                 symbol_to_use = s
 
 
-        #print(cell.name, symbol_to_use)
-        self.x1 = 0
-        self.x2 = 180
-        self.y1 = 0
-        self.y2 = 100
         self.ports = dict()
 
+
+
         if(symbol_to_use):
+            #TODO should probably use int max or something
             self.read(symbol_to_use)
+
+        self.updateBoundingRect()
+
+
 
         pass
 
@@ -84,24 +74,36 @@ class XschemSymbol(Rect):
 
         self.symbuffer = list()
         self.symbol_from_lib = True
+
         with open(filename) as fi:
             for l in fi:
                 if(l.startswith("v")): # Skip v line, I want to add more info
                     continue
                 self.symbuffer.append(l)
                 if(l.startswith("B")):
-                    #print(l)
+
                     m = re.search("B\s+\d+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+\{(.*)\}",l)
 
                     if(m is not None):
-                        xb1 = int(m.group(1))
-                        yb1 = int(m.group(2))
-                        xb2 = int(m.group(3))
-                        yb2 = int(m.group(4))
+                        xb1 = float(m.group(1))
+                        yb1 = float(m.group(2))
+                        xb2 = float(m.group(3))
+                        yb2 = float(m.group(4))
+
                         m1 = re.search("name=(\S+)",m.group(5))
+                        if(m1 is None):
+                            continue
                         name = m1.group(1)
-                        p = Port(name, rect=Rect("PR",xb1,yb1,(xb2-xb1),(yb2-yb1)))
-                        #print(name)
+                        r = Rect("PR",xb1,yb1,(xb2-xb1),(yb2-yb1))
+
+                        p = Port(name, rect=r)
+                        self.add(p)
+                        m2 = re.search("dir=(\S+)",m.group(5))
+                        if(m2 is None):
+                            p.direction = "inputOutput"
+                        else:
+                            p.direction = m2.group(1)
+
                         self.ports[name] = p
 
 
@@ -118,7 +120,10 @@ class XschemSymbol(Rect):
         x3 = x2 + 5
         y3 = y - 5
 
-        p = Port(name, rect=Rect("PR",xb1,yb1,(xb2-xb1),(yb2-yb1)))
+        rect=Rect("PR",xb1,yb1,(xb2-xb1),(yb2-yb1))
+        p = Port(name,rect=rect)
+        self.add(p)
+
         self.ports[name] = p
 
         s = f"B 5 {xb1} {yb1}  {xb2} {yb2}" + " {name=" + f"{name}"+ " dir=inout }\n"
@@ -148,6 +153,7 @@ template="name=x1"
                 fsym.write(self.getPin(x,y,node))
                 y += 20
 
+
             if(y == 0):
                 y += 20
             x1 = x
@@ -158,10 +164,16 @@ template="name=x1"
             y3 = y1 + (y2 - y1)/2 - 10
             x3 = 50
 
-            self.x1 = x1-40
-            self.x2 = x2
-            self.y1 = y1-10
-            self.y2 = y2+10
+
+            #self.x1 = x1-40
+            #self.x2 = x2
+            #self.y1 = y1-10
+            #self.y2 = y2+10
+
+            rbounds = Rect("PR",x1,y1,(x2-x1),(y2-y1))
+            self.add(rbounds)
+
+            self.updateBoundingRect()
 
             fsym.write(f"P 4 5 {x1} {y1} {x2} {y1} {x2} {y2} {x1} {y2} {x1} {y1} " + "{}\n")
             fsym.write("T {@symname} " + f" {x3} {y3}  0 0 0.25 0.25" + " {}\n")
@@ -180,6 +192,7 @@ class XschemPrinter(DesignPrinter):
         self.smash = smash
         self.libpath =""
         self.xstep = 400
+        self.ystep = 40
         self.ix1 = 300
         self.iy1 = 0
         self.ymax = 1000
@@ -196,7 +209,7 @@ class XschemPrinter(DesignPrinter):
     def startLib(self,name):
 
 
-        self.libpath = name + os.path.sep + "xschem" + os.path.sep + name
+        self.libpath =  name
         self.libname =  name
 
         if(not path.isdir(self.libpath)):
@@ -225,10 +238,21 @@ class XschemPrinter(DesignPrinter):
 
         self.openCellFile(file_name_cell)
 
-        self.fcell.write("v {xschem version=3.0.0 file_version=1.2 }\n")
+
+        header = """v {xschem version=3.0.0 file_version=1.2 }
+G {}
+K {}
+V {}
+S {}
+E {}
+"""
+        self.fcell.write(header)
 
         y = 0
         counter = 0
+
+        sym = XschemSymbol(self.libpath,cell,self,cell.shortName.lower())
+        self.symbols[cell.name] = sym
 
         #- Will use the spice defition ports
         #- TODO: Should it use Ports??
@@ -236,9 +260,21 @@ class XschemPrinter(DesignPrinter):
             p = node
             pinName = p
             pinCommonName = re.sub(r"<|>|:","_",pinName)
-            pinDirection = "inputOutput"
 
-            self.fcell.write("C {devices/iopin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+            pinDirection = "inputOutput"
+            if(p in sym.ports):
+                pinDirection = sym.ports[p].direction
+
+
+            if(pinDirection == "in"):
+                self.fcell.write("C {devices/ipin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+            elif(pinDirection == "out"):
+                self.fcell.write("C {devices/opin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+            else:
+                                self.fcell.write("C {devices/iopin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+
+
+
 
             counter +=1
             y +=20
@@ -246,9 +282,8 @@ class XschemPrinter(DesignPrinter):
 
         #- TODO: Could add symbols here
 
+        #print(cell.name)
 
-        sym = XschemSymbol(self.libpath,cell,self)
-        self.symbols[cell.name] = sym
         sym.printSymbol()
 
 
@@ -299,16 +334,30 @@ class XschemPrinter(DesignPrinter):
         if(o.subcktName not in self.cells.keys()):
             return
 
-        instcell = self.cells[o.subcktName]
-        instsym = self.symbols[o.subcktName]
+        dstr = "C {" + f"{self.libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"X{o.name}" + "}\n"
 
-        self.fcell.write("C {" + f"{self.libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"{o.name}" + "}\n")
+        self.symbolAndWrite(dstr,o,o.subcktName)
 
+    def symbolAndWrite(self,dstr,o,symbolName):
 
+        self.fcell.write(dstr)
+
+        if(o.isCktInstance()):
+            instcell = self.cells[o.subcktName]
+            intNodes = instcell.ckt.nodes
+        else:
+            intNodes = o.nodes
+
+        if(symbolName in self.symbols):
+            instsym = self.symbols[symbolName]
+        else:
+            instsym = XschemSymbol(self.libpath,None,self,symbolName)
+            if(not instsym.symbol_from_lib):
+                raise Exception(f"Could not find symbol {symbolName}, are you missing a xschem lib reference in the techfile?")
+            self.symbols[symbolName] = instsym
 
 
         nodes =  o.nodes
-        intNodes = instcell.ckt.nodes
 
         
         if(len(nodes) != len(intNodes)):
@@ -316,41 +365,55 @@ class XschemPrinter(DesignPrinter):
       \tinstance {o.name}:\t{nodes}
       \tcell {instcell.ckt.name}:\t{intNodes}""")
 
+
+        #print(symbolName,instsym)
         for z in range(len(nodes)):
             netName = nodes[z]
             portName = intNodes[z]
 
             r = instsym.ports[portName].rect.getCopy()
 
+
+            isRight = True
+            if(r.centerX() < instsym.centerX()):
+                isRight = False
+
+            
             r.translate(self.ix1,self.iy1)
 
             xb2 = r.centerX()
             yb = r.centerY()
 
 
-            if(portName == "B" and "Transistor" in instsym.cell.ckt.classname):
-                xb1 = xb2 + 80
-            else:
-                xb1 = xb2 - 40
+            rot = 0
+            xb1 = xb2 - 20
+            if(isRight):
+                xb1 = xb2 + 20
+                rot = 2
+
+            #xb1 = xb2+80
+            #if(portName == "B" and "Transistor" in instsym.cell.ckt.classname):
+            #
+            #else:
+            #
             xlab = xb1
 
             self.fcell.write(f"N {xb1} {yb} {xb2} {yb}" + "{lab=" + netName + "}\n")
 
-            self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} 0 0  " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
+            #TODO should fix node order
+            self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0  " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
 
             self.label_count +=1
-
-
 
             #print(netName, portName,r)
 
 
 
-        self.iy1 += instsym.height()
+        self.iy1 += instsym.height() + self.ystep
 
 
-        if(self.xstep + 200 < instsym.width()):
-            self.xstep = instsym.width() + 200
+        if(self.xstep  < instsym.width()):
+            self.xstep = instsym.width() + self.xspace
 
         if(self.iy1 > self.ymax):
             self.ix1 += self.xstep
@@ -384,8 +447,8 @@ class XschemPrinter(DesignPrinter):
 
         pass
 
+    #- Only support sky130nm for now
     def printMosfet(self,o):
-        return
 
         try:
             odev = self.rules.device(o.deviceName)
@@ -396,96 +459,43 @@ class XschemPrinter(DesignPrinter):
 
         typename = odev["name"]
 
-        
-        port0 = odev["ports"][0]
-        port1 = odev["ports"][1]
-        port2 = odev["ports"][2]
-        port3 = odev["ports"][3]
-
-        x1 = "xcoord"
-        y1 = "ycoord"
-
-        
-        rotation = 0
-        deviceCounter = 0
-
-        ss = f"""
-    ;;-------------------------------------------------------------------
-    ;; Create transistor {o.name}
-    ;;-------------------------------------------------------------------
-        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
-        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
-        ndrain = (setof sig schLib~>signals (member "{port0}" sig~>sigNames))
-        ngate  = (setof sig schLib~>signals (member "{port1}" sig~>sigNames))
-        nsource = (setof sig schLib~>signals (member "{port2}" sig~>sigNames))
-        nbulk = (setof sig schLib~>signals (member "{port3}" sig~>sigNames))
-
-        bBoxDrain = car(car(ndrain~>pins)~>fig)~>bBox
-        bBoxSource = car(car(nsource~>pins)~>fig)~>bBox
-        bBoxBulk = car(car(nbulk~>pins)~>fig)~>bBox
-        bBoxGate = car(car(ngate~>pins)~>fig)~>bBox
-
-        schInst=dbCreateInst(sch schLib "{o.name}_{deviceCounter}" {x1}:{y1} "{rotation}")
-        """
-
-        props = list()
-        if("propertymap" in odev):
-            #print(odev["propertymap"])
-            ddict = dict()
-
-            #- Go through propertymap and find all parameters
-            for key in odev["propertymap"]:
-                ddict[key] = dict()
-                ddict[key]["val"] = o.properties[odev["propertymap"][key]["name"]]
-                ddict[key]["str"] = odev["propertymap"][key]["str"]
-
-            #- If a parameter is used in a string, then replace it
-            for key in ddict:
-                m = re.search("({\w+})",ddict[key]["str"])
-                if(m):
-                    for mg in m.groups():
-                        rkey = re.sub("{|}","",mg)
-                        if(rkey in ddict):
-                            ddict[key]["str"] = re.sub(mg,str(ddict[rkey]["val"]),ddict[key]["str"])
-
-                
-            #- Write the properties
-            for key in odev["propertymap"]:
-                val = str(ddict[key]["val"]) + ddict[key]["str"]
-                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
-                props.append(key)
+        #print(typename)
 
 
+        dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+L=(length)
+W=(width)
+nf=(nf)
+mult=1
+ad="'int((nf+1)/2) * W/nf * 0.29'"
+pd="'2*int((nf+1)/2) * (W/nf + 0.29)'"
+as="'int((nf+2)/2) * W/nf * 0.29'"
+ps="'2*int((nf+2)/2) * (W/nf + 0.29)'"
+nrd="'0.29 / W'" nrs="'0.29 / W'"
+sa=0 sb=0 sd=0
+model=(model)
+spiceprefix=X
+}
+"""
 
-        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
+        tr = typename.split("__")
+        model = tr[1]
+        sym = typename.replace("__","/")
+        #print(sym)
 
-        
-        ss += f"""
-        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))
+        dstr= dstr.replace("(sym)",sym) \
+            .replace("(model)",model) \
+            .replace("(nf)",str(o.properties["nf"])) \
+            .replace("(length)",str(o.properties["length"])) \
+            .replace("(width)",str(o.properties["width"])) \
+            .replace("(instName)",o.name) \
+            .replace("(x1)",str(self.ix1)) \
+            .replace("(y1)",str(self.iy1))
+            #.replace("(instName)")
 
-        ;;- Create wires
-        pinDrain=dbTransformBBox(bBoxDrain schInst~>transform)
-        pinSource=dbTransformBBox(bBoxSource schInst~>transform)
-        pinGate=dbTransformBBox(bBoxGate schInst~>transform)
-        pinBulk=dbTransformBBox(bBoxBulk schInst~>transform)
-
-        """
+        self.symbolAndWrite(dstr,o,sym)
 
 
-        for (name,con) in zip(["D","G","S","B"],o.nodes):
-            ss += f"bDest{name} = mybBox{con}\n"
-
-        ss += """
-        schCreateWire( sch "route" "flight" list(centerBox(pinDrain) centerBox(bDestD)) 0.0625 0.0625 0.0 )
-        schCreateWire( sch "route" "flight" list(centerBox(pinSource) centerBox(bDestS)) 0.0625 0.0625 0.0 )
-        schCreateWire( sch "route" "flight" list(centerBox(pinGate) centerBox(bDestG)) 0.0625 0.0625 0.0 )
-        schCreateWire( sch "route" "flight" list(centerBox(pinBulk) centerBox(bDestB)) 0.0625 0.0625 0.0 )
-        """
-
-        self.fcell.write(ss)
-
-        #print("Mosfet " + str(o))
-        pass
 
     def printResistor(self,o):
         return
@@ -580,6 +590,5 @@ class XschemPrinter(DesignPrinter):
         #    """
 
         self.fcell.write(ss)
-        #print("Resistors " + str(o))
-     #   print(o)
+
         pass

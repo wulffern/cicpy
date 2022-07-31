@@ -51,34 +51,38 @@ def cli(ctx):
 @click.option("--xschem",is_flag=True,help="Write xschem schematics")
 @click.option("--magic",is_flag=True,help="Write magic layout")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
-@click.option("--prefix",default="",help="Add a prefix for all cells")
+@click.option("--exclude",default="",help="Regex of cells to ignore")
 
-def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash,prefix):
+def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash,exclude):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
 
     design = cic.Design()
-    design.prefix = prefix
     design.fromJsonFile(cicfile)
     rules = cic.Rules(techfile)
 
     if(layskill):
         la = cic.SkillLayPrinter(library,rules)
+        #la.exclude = exclude
         la.print(design)
 
     if(schskill):
         sc = cic.SkillSchPrinter(library,rules,smash)
+        #sc.exclude = exclude
         sc.print(design)
 
     if(winfo):
         obj = cic.CellInfoPrinter(library,rules)
+        sc.exclude = exclude
         obj.print(design)
 
     if(verilog):
         obj = cic.VerilogPrinter(library,rules)
+        obj.exclude = exclude
         obj.print(design)
 
     if(spice):
         obj = cic.SpicePrinter(library,rules)
+        #obj.exclude = exclude
 
         #- Print ngspice simulation netlist (.spice)
         obj.print(design)
@@ -90,10 +94,12 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 
     if(xschem):
         obj = cic.XschemPrinter(library,rules)
+        obj.exclude = exclude
         obj.print(design)
 
     if(magic):
         obj = cic.MagicPrinter(library,rules)
+        obj.exclude = exclude
         obj.print(design)
 
 

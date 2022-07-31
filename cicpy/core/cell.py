@@ -48,7 +48,7 @@ class Cell(Rect):
         self.routes = list()
         self.ckt = None
         self.design = None
-        self.shortName = name
+        self.symbol = ""
         self.prefix = ""
         self.physicalOnly = False
 
@@ -206,12 +206,11 @@ class Cell(Rect):
         self.prefix = self.design.prefix
         self.name = self.design.prefix  + o["name"]
 
-        self.shortName = re.sub("(\d+)|(X\d+)*(_CV|_EV)?","",o["name"])
-        m =  re.search("((^N|^P)CH)",self.shortName)
-        if(m):
 
-            self.shortName = m.groups()[0]
-
+        if("meta" in o and "symbol" in o["meta"]):
+            self.symbol = o["meta"]["symbol"]
+        else:
+            self.symbol = self.name
 
         self.has_pr = o["has_pr"]
         if("abstract" in o):

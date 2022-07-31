@@ -15,10 +15,10 @@ T {RN} 40 24 1 0 0.15 0.15 { vcenter=true}
 T {CK} 26 0 0 0 0.15 0.15 { vcenter=true}
 T {D} 26 -60 0 0 0.15 0.15 { vcenter=true}
 T {@symname} 80 29 0 0 0.25 0.25 { vcenter=true}
-B 5 -4 -56 4 -64 {name=D dir=inout pinnumber=}
-B 5 -4 4 4 -4 {name=CK dir=inout pinnumber=1}
-B 5 26 34 34 26 {name=RN dir=inout pinnumber=2}
-B 5 96 -56 104 -64 {name=Q dir=inout pinnumber=3}
-B 5 96 4 104 -4 {name=QN dir=inout pinnumber=4}
-B 5 56 -86 64 -94 {name=AVDD dir=inout pinnumber=5}
-B 5 56 34 64 26 {name=AVSS dir=inout pinnumber=6}
+B 5 -4 -56 4 -64 {name=D dir=inout pinnumber=1}
+B 5 -4 4 4 -4 {name=CK dir=inout pinnumber=2}
+B 5 26 34 34 26 {name=RN dir=inout pinnumber=3}
+B 5 96 -56 104 -64 {name=Q dir=inout pinnumber=4}
+B 5 96 4 104 -4 {name=QN dir=inout pinnumber=5}
+B 5 56 -86 64 -94 {name=AVDD dir=inout pinnumber=6}
+B 5 56 34 64 26 {name=AVSS dir=inout pinnumber=7}

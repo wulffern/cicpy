@@ -43,26 +43,23 @@ class XschemSymbol(Cell):
         self.symbolName = symbolName
 
 
+
         #- TODO does not support directory as part of symbol location
         self.symbol_from_lib = False
         symbol_to_use = ""
-        for s in printer.lib_symbols:
-            sh = os.path.basename(s).replace(".sym","")
-            if(sh.startswith(os.path.basename(symbolName))):
-                symbol_to_use = s
+        if(symbolName != ""):
+            for s in printer.lib_symbols:
+                if(s.endswith(symbolName + ".sym")):
+                    symbol_to_use = s
 
 
         self.ports = dict()
-
-
 
         if(symbol_to_use):
             #TODO should probably use int max or something
             self.read(symbol_to_use)
 
         self.updateBoundingRect()
-
-
 
         pass
 
@@ -75,6 +72,10 @@ class XschemSymbol(Cell):
         self.symbuffer = list()
         self.symbol_from_lib = True
 
+        if(not os.path.exists(filename)):
+            raise Exception(f"Could not find symbol {filename}")
+
+
         with open(filename) as fi:
             for l in fi:
                 if(l.startswith("v")): # Skip v line, I want to add more info
@@ -83,6 +84,7 @@ class XschemSymbol(Cell):
                 if(l.startswith("B")):
 
                     m = re.search("B\s+\d+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+\{(.*)\}",l)
+
 
                     if(m is not None):
                         xb1 = float(m.group(1))
@@ -109,6 +111,7 @@ class XschemSymbol(Cell):
 
 
 
+
     def getPin(self,x,y,name):
 
         x1 = x-20
@@ -122,6 +125,7 @@ class XschemSymbol(Cell):
 
         rect=Rect("PR",xb1,yb1,(xb2-xb1),(yb2-yb1))
         p = Port(name,rect=rect)
+        
         self.add(p)
 
         self.ports[name] = p
@@ -134,7 +138,6 @@ class XschemSymbol(Cell):
 
     def printSymbol(self):
         cell_sym = self.libname + os.path.sep + self.cell.name + ".sym"
-
 
         fsym = open(cell_sym,"w")
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
@@ -251,8 +254,10 @@ E {}
         y = 0
         counter = 0
 
-        sym = XschemSymbol(self.libpath,cell,self,cell.shortName.lower())
+
+        sym = XschemSymbol(self.libpath,cell,self,cell.symbol)
         self.symbols[cell.name] = sym
+
 
         #- Will use the spice defition ports
         #- TODO: Should it use Ports??
@@ -265,13 +270,14 @@ E {}
             if(p in sym.ports):
                 pinDirection = sym.ports[p].direction
 
+            #- TODO Need to fix counter so it gives right port order
 
             if(pinDirection == "in"):
                 self.fcell.write("C {devices/ipin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
             elif(pinDirection == "out"):
                 self.fcell.write("C {devices/opin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
             else:
-                                self.fcell.write("C {devices/iopin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+                self.fcell.write("C {devices/iopin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
 
 
 
@@ -282,7 +288,7 @@ E {}
 
         #- TODO: Could add symbols here
 
-        #print(cell.name)
+
 
         sym.printSymbol()
 
@@ -340,6 +346,7 @@ E {}
 
     def symbolAndWrite(self,dstr,o,symbolName):
 
+
         self.fcell.write(dstr)
 
         if(o.isCktInstance()):
@@ -350,11 +357,15 @@ E {}
 
         if(symbolName in self.symbols):
             instsym = self.symbols[symbolName]
+
         else:
             instsym = XschemSymbol(self.libpath,None,self,symbolName)
             if(not instsym.symbol_from_lib):
                 raise Exception(f"Could not find symbol {symbolName}, are you missing a xschem lib reference in the techfile?")
             self.symbols[symbolName] = instsym
+
+        #print(symbolName)
+        #print(instsym.ports)
 
 
         nodes =  o.nodes
@@ -366,10 +377,15 @@ E {}
       \tcell {instcell.ckt.name}:\t{intNodes}""")
 
 
-        #print(symbolName,instsym)
+
         for z in range(len(nodes)):
             netName = nodes[z]
             portName = intNodes[z]
+
+            if(portName not in instsym.ports):
+                continue
+            else:
+                print(f"Could not find {portName} in {symbolName}")
 
             r = instsym.ports[portName].rect.getCopy()
 
@@ -405,7 +421,7 @@ E {}
 
             self.label_count +=1
 
-            #print(netName, portName,r)
+
 
 
 
@@ -459,7 +475,6 @@ E {}
 
         typename = odev["name"]
 
-        #print(typename)
 
 
         dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
@@ -481,7 +496,7 @@ spiceprefix=X
         tr = typename.split("__")
         model = tr[1]
         sym = typename.replace("__","/")
-        #print(sym)
+
 
         dstr= dstr.replace("(sym)",sym) \
             .replace("(model)",model) \
@@ -508,8 +523,8 @@ spiceprefix=X
 
 
 
-#        print(o)
-#        print(odev)
+
+
 
         typename = odev["name"]
 
@@ -521,7 +536,8 @@ spiceprefix=X
         x1 = "xcoord"
         y1 = "ycoord"
 
-#        print(port0 + " " + port1)
+
+
 
         rotation = 0
         deviceCounter = 0
@@ -543,7 +559,6 @@ spiceprefix=X
 
         props = list()
         if("propertymap" in odev):
-            #print(odev["propertymap"])
             for key in odev["propertymap"]:
                 val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
                 ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""

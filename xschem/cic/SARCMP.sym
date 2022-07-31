@@ -27,15 +27,15 @@ L 4 260 -100 300 -100 {}
 L 4 260 -140 300 -140 {}
 L 4 0 -100 40 -100 {}
 L 4 0 -140 40 -140 {}
-B 5 -4 -144 4 -136 {name=CPI dir=inout pinnumber=}
-B 5 -4 -104 4 -96 {name=CNI dir=inout pinnumber=1}
-B 5 296 -144 304 -136 {name=CPO dir=inout pinnumber=2}
-B 5 296 -104 304 -96 {name=CNO dir=inout pinnumber=3}
-B 5 -4 -44 4 -36 {name=CK_CMP dir=inout pinnumber=4}
-B 5 -4 -64 4 -56 {name=CK_SAMPLE dir=inout pinnumber=5}
-B 5 -4 -24 4 -16 {name=DONE dir=inout pinnumber=6}
-B 5 -4 -164 4 -156 {name=AVDD dir=inout pinnumber=7}
-B 5 -4 -4 4 4 {name=AVSS dir=inout pinnumber=8}
+B 5 -4 -144 4 -136 {name=CPI dir=inout pinnumber=1}
+B 5 -4 -104 4 -96 {name=CNI dir=inout pinnumber=2}
+B 5 296 -144 304 -136 {name=CPO dir=inout pinnumber=3}
+B 5 296 -104 304 -96 {name=CNO dir=inout pinnumber=4}
+B 5 -4 -44 4 -36 {name=CK_CMP dir=inout pinnumber=5}
+B 5 -4 -64 4 -56 {name=CK_SAMPLE dir=inout pinnumber=6}
+B 5 -4 -24 4 -16 {name=DONE dir=inout pinnumber=7}
+B 5 -4 -164 4 -156 {name=AVDD dir=inout pinnumber=8}
+B 5 -4 -4 4 4 {name=AVSS dir=inout pinnumber=9}
 T {AVSS} 46 0 0 0 0.25 0.25 { vcenter=true}
 T {AVDD} 46 -160 0 0 0.25 0.25 { vcenter=true}
 T {DONE} 46 -20 0 0 0.25 0.25 { vcenter=true}

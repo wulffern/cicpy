@@ -28,6 +28,7 @@
 import sys
 import os
 import yaml
+import re
 
 class DesignPrinter():
 
@@ -36,6 +37,7 @@ class DesignPrinter():
         self.rules = rules
         self.cell = None
         self.f = None
+        self.exclude = ""
 
 
     def openFile(self,name):
@@ -69,9 +71,12 @@ class DesignPrinter():
 
 
     def printCell(self,c):
+
+
         if(c.isEmpty()):
             return
-        
+
+
         self.startCell(c)
         self.cell = c
 
@@ -102,6 +107,11 @@ class DesignPrinter():
 
             if(cell.abstract):
                 continue
+
+            #- Skip cells that are in regex self.exclude
+            if(self.exclude != "" and re.search(self.exclude,cell.name)):
+                continue
+
 
             if(cell):
                 self.printCell(cell)

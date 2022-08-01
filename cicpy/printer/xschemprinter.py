@@ -383,9 +383,9 @@ E {}
             portName = intNodes[z]
 
             if(portName not in instsym.ports):
-                continue
-            else:
                 print(f"Could not find {portName} in {symbolName}")
+                continue
+
 
             r = instsym.ports[portName].rect.getCopy()
 

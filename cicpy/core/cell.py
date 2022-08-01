@@ -51,6 +51,8 @@ class Cell(Rect):
         self.symbol = ""
         self.prefix = ""
         self.physicalOnly = False
+        self.libCell = False
+        self.isUsed = False
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
@@ -212,12 +214,19 @@ class Cell(Rect):
         else:
             self.symbol = self.name
 
-        self.has_pr = o["has_pr"]
+        if("has_or" in o ):
+            self.has_pr = o["has_pr"]
         if("abstract" in o):
             self.abstract = o["abstract"]
 
         if("physicalOnly" in o):
             self.physicalOnly = o["physicalOnly"]
+
+        if("libcell" in o):
+            self.libcell = o["libcell"]
+
+        if("cellused" in o):
+            self.isUsed = o["cellused"]
 
 
         #- Handle subckt
@@ -225,9 +234,6 @@ class Cell(Rect):
             self.ckt = Subckt()
             self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])
-
-
-
 
 
     def toJson(self):

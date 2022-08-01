@@ -112,6 +112,11 @@ class DesignPrinter():
             if(self.exclude != "" and re.search(self.exclude,cell.name)):
                 continue
 
+            #print(c,cell.libcell,cell.isUsed)
+            #if(cell.libcell and not cell.isUsed):
+            #    continue
+
+
 
             if(cell):
                 self.printCell(cell)

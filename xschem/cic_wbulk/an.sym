@@ -19,13 +19,13 @@ L 4 40 10 40 30 {}
 L 4 40 10 50 10 {}
 L 4 60 -50 60 -25 {}
 L 4 60 5 60 30 {}
-B 5 36 26 44 34 {name=AVSS dir=inout pinnumber=6}
-B 5 -4 -4 4 4 {name=B dir=inout pinnumber=1}
-B 5 -4 -24 4 -16 {name=A dir=inout pinnumber=2}
+B 5 -4 -24 4 -16 {name=A dir=inout pinnumber=1}
+B 5 -4 -4 4 4 {name=B dir=inout pinnumber=2}
 B 5 86 -14 94 -6 {name=Y dir=inout pinnumber=3}
-B 5 36 -54 44 -46 {name=AVDD dir=inout pinnumber=7}
 B 5 56 -54 64 -46 {name=BULKP dir=inout pinnumber=4}
 B 5 56 26 64 34 {name=BULKN dir=inout pinnumber=5}
+B 5 36 26 44 34 {name=AVSS dir=inout pinnumber=6}
+B 5 36 -54 44 -46 {name=AVDD dir=inout pinnumber=7}
 A 4 44 -10 21 -74 146 {}
 T {B} 22 0 0 0 0.15 0.15 { vcenter=true}
 T {A} 22 -20 0 0 0.15 0.15 { vcenter=true}

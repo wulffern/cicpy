@@ -211,7 +211,12 @@ port %d nsew
 
 
 
-        use = f"""use {inst.name} {inst.instanceName}
+        path = inst.cell
+        if(inst.libpath != ""):
+            path = inst.libpath + "/" + inst.cell
+
+
+        use = f"""use {path} {inst.instanceName}
 transform %s %d %s %d
 box %d %d %d %d
 """ %(tr1,x1,tr2,y1,x1,y1,x2,y2)

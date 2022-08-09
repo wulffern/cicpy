@@ -34,6 +34,7 @@ class Instance(Cell):
         super().__init__()
         self.instanceName = ""
         self.cell = ""
+        self.libpath = ""
         self.angle = ""
         self.xcell = 0
         self.ycell = 0
@@ -44,6 +45,8 @@ class Instance(Cell):
         self.instanceName = o["instanceName"]
         self.angle = o["angle"]
         self.cell = o["cell"]
+        if("libpath" in o):
+            self.libpath = o["libpath"]
         self.xcell = o["xcell"]
         self.ycell = o["ycell"]
 

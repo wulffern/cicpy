@@ -31,6 +31,7 @@ from ..core.port import Port
 import sys
 from os import path
 import re
+import numpy as np
 import glob
 import os
 
@@ -142,8 +143,8 @@ class XschemSymbol(Cell):
         fsym = open(cell_sym,"w")
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
         fsym.write("""K {type=subcircuit
-format="@name @pinlist @symname"
-template="name=x1"
+format="@name @pinlist @symname xoffset=@xoffset yoffset=@yoffset angle=@angle M=@M"
+template="name=x1 xoffset=0 yoffset=0 angle=0 M=1"
 } \n""")
 
         if(self.symbol_from_lib):
@@ -195,7 +196,8 @@ class XschemPrinter(DesignPrinter):
         self.smash = smash
         self.libpath =""
         self.xstep = 400
-        self.ystep = 40
+        self.ystep = 100
+        self.xspace = 100
         self.ix1 = 300
         self.iy1 = 0
         self.ymax = 1000
@@ -353,11 +355,11 @@ E {}
             instcell = self.cells[o.subcktName]
             intNodes = instcell.ckt.nodes
         else:
-            intNodes = o.nodes
+            #print(o.symnodes)
+            intNodes = o.symnodes
 
         if(symbolName in self.symbols):
             instsym = self.symbols[symbolName]
-
         else:
             instsym = XschemSymbol(self.libpath,None,self,symbolName)
             if(not instsym.symbol_from_lib):
@@ -369,6 +371,7 @@ E {}
 
 
         nodes =  o.nodes
+
 
         
         if(len(nodes) != len(intNodes)):
@@ -385,7 +388,6 @@ E {}
             if(portName not in instsym.ports):
                 print(f"Could not find {portName} in {symbolName}")
                 continue
-
 
             r = instsym.ports[portName].rect.getCopy()
 
@@ -426,13 +428,14 @@ E {}
 
 
         self.iy1 += instsym.height() + self.ystep
+        self.iy1 = np.round(self.iy1/10)*10
 
 
         if(self.xstep  < instsym.width()):
             self.xstep = instsym.width() + self.xspace
 
         if(self.iy1 > self.ymax):
-            self.ix1 += self.xstep
+            self.ix1 += self.xstep + self.xspace
             self.iy1 = 0
         
 
@@ -459,8 +462,35 @@ E {}
         if("Mosfet" in o.classname):
             self.printMosfet(o)
         elif("Resistor" in o.classname):
-            self.printResistor(o)
 
+            #- NF means in series for highres
+            if("nf" in o.properties):
+                nf = o.properties["nf"]
+
+                n = o.nodes[0]
+                p = o.nodes[1]
+                b = o.nodes[2]
+
+                myname = o.name
+
+                for i in range(0,nf):
+                    mynodes = [n,p,b]
+                    if(i >= 0 and i < nf-1):
+                        mynodes[1] = "INT_" + str(i)
+
+                    if(i > 0 and i < nf):
+                        mynodes[0] = "INT_" + str(i-1)
+
+                    o.nodes = mynodes
+                    o.name = myname + "_" + str(i)
+                    self.printResistor(o)
+                o.name = myname
+                o.nodes = [n,p,b]
+
+
+
+            else:
+                self.printResistor(o)
         pass
 
     #- Only support sky130nm for now
@@ -469,11 +499,11 @@ E {}
         try:
             odev = self.rules.device(o.deviceName)
         except Exception as e:
-
             raise(Exception("Could not find '" + o.deviceName + "' in rule file\n"))
 
 
         typename = odev["name"]
+        o.symnodes = odev["ports"]
 
 
 
@@ -513,97 +543,42 @@ spiceprefix=X
 
 
     def printResistor(self,o):
-        return
 
-        try:
+        if(o.deviceName == "mres"):
             odev = self.rules.device(o.deviceName + o.properties["layer"])
-        except Exception as e:
-
-            raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
-
-
-
+        else:
+            odev = self.rules.device(o.deviceName)
 
 
 
         typename = odev["name"]
 
+        dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+W=(width)
+L=(length)
+model=(model)
+mult=1}
+"""
 
+        tr = typename.split("__")
+        model = tr[1]
+        sym = typename.replace("__","/")
+
+        o.symnodes = odev["ports"]
         port0 = odev["ports"][0]
         port1 = odev["ports"][1]
-        
 
-        x1 = "xcoord"
-        y1 = "ycoord"
-
+        #o.nodes[0] = port0
+        #o.nodes[1] = port1
 
 
-
-        rotation = 0
-        deviceCounter = 0
-
-        ss = f"""
-
-        ;;-------------------------------------------------------------------
-        ;; Create Metal capacitor (two metal resistors) {o.name}
-        ;;-------------------------------------------------------------------
-        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
-
-        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
-
-        schInst=dbCreateInst(sch schLib "{o.name}_a_{deviceCounter}" {x1}:{y1} "{rotation}")
+        dstr= dstr.replace("(sym)",sym) \
+            .replace("(model)",model) \
+            .replace("(length)",str(o.properties["length"])) \
+            .replace("(width)",str(o.properties["width"])) \
+            .replace("(instName)",o.name) \
+            .replace("(x1)",str(self.ix1)) \
+            .replace("(y1)",str(self.iy1))
 
 
-    
-        """
-
-        props = list()
-        if("propertymap" in odev):
-            for key in odev["propertymap"]:
-                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
-                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
-                props.append(key)
-
-
-        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
-
-
-        #- TODO: Fix this, right now this is not correct, the resistor should not connect to the pins, that's wrong.
-        #raise("Hell")
-
-
-
-        ss += f"""
-        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))"""
-        
-        #- Resistor should only have two nodes
-        if(len(o.nodes) != 2):
-            raise ("Hell")
-
-        for z in range(2):
-            deviceport = odev["ports"][z]
-            netName = o.nodes[z]
-            ss += f"""
-            deviceportn = (setof sig schLib~>signals (member "{deviceport}" sig~>sigNames))
-            bBoxDport = car(car(deviceportn~>pins)~>fig)~>bBox
-            pinDport=dbTransformBBox(bBoxDport schInst~>transform)
-            wireId = schCreateWire( sch "draw" "full" list(centerBox(pinDport) rodAddToX(centerBox(pinDport) 0.05) )  0.0625 0.0625 0.0 )
-            schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pinDport) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
-            """
-
-        #if(o.nodes[0] in self.current_cell.ckt.nodes):
-        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[0])
-        #    ss += f"""
-        #    bDestA = mybBox{pinCommonName};
-        #    schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
-        #    """
-        #if(o.nodes[1] in self.current_cell.ckt.nodes):
-        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[1])
-        #    ss += f"""
-        #    bDestB = mybBox{pinCommonName};
-        #    schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
-        #    """
-
-        self.fcell.write(ss)
-
-        pass
+        self.symbolAndWrite(dstr,o,sym)

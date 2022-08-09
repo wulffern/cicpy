@@ -53,6 +53,9 @@ class Cell(Rect):
         self.physicalOnly = False
         self.libCell = False
         self.isUsed = False
+        self.libpath = ""
+        self.has_pr = False
+
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
@@ -216,6 +219,10 @@ class Cell(Rect):
 
         if("has_or" in o ):
             self.has_pr = o["has_pr"]
+
+        if("libpath" in o ):
+            self.libpath = o["libpath"]
+
         if("abstract" in o):
             self.abstract = o["abstract"]
 

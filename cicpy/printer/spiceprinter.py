@@ -101,7 +101,33 @@ class SpicePrinter(DesignPrinter):
         if("Mosfet" in o.classname):
             self.printMosfet(o)
         elif("Resistor" in o.classname):
-            self.printResistor(o)
+             #- NF means in series for highres
+            if("nf" in o.properties):
+                nf = o.properties["nf"]
+
+                n = o.nodes[0]
+                p = o.nodes[1]
+                b = o.nodes[2]
+
+                myname = o.name
+
+                for i in range(0,nf):
+                    mynodes = [n,p,b]
+                    if(i >= 0 and i < nf-1):
+                        mynodes[1] = "INT_" + str(i)
+
+                    if(i > 0 and i < nf):
+                        mynodes[0] = "INT_" + str(i-1)
+
+                    o.nodes = mynodes
+                    o.name = myname + "_" + str(i)
+                    self.printResistor(o)
+                o.name = myname
+                o.nodes = [n,p,b]
+
+            else:
+                self.printResistor(o)
+
         else:
             print(self.o)
 
@@ -109,7 +135,10 @@ class SpicePrinter(DesignPrinter):
 
     def printResistor(self,o):
 
-        odev = self.rules.device(o.deviceName + o.properties["layer"] )
+        if(o.deviceName == "mres"):
+                odev = self.rules.device(o.deviceName + o.properties["layer"] )
+        else:
+            odev = self.rules.device(o.deviceName )
         typename = odev["name"]
 
 
@@ -165,6 +194,7 @@ class SpicePrinter(DesignPrinter):
             #- If a parameter is used in a string, then replace it
             for key in ddict:
                 m = re.search("({\w+})",ddict[key]["str"])
+
                 if(m):
                     for mg in m.groups():
                         rkey = re.sub("{|}","",mg)

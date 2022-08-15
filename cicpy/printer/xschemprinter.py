@@ -309,6 +309,10 @@ E {}
 
         if(c.ckt is None):
             return
+
+        if("noSchematic" in c.meta):
+            print(f" Skipping schematic for {c.name}")
+            return
         
         self.startCell(c)
 

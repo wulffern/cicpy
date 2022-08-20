@@ -109,8 +109,13 @@ class MagicPrinter(DesignPrinter):
         self.fcell.write("tech " + self.rules.techlib + "\n")
         self.fcell.write("magscale 1 2\n")
 
-        d = datetime.datetime.now()
-        self.fcell.write("timestamp %d\n" % time.mktime(d.timetuple()))
+        #- So adding timestamp for the exact time
+        # just makes the compile file change even though it's not really changed.
+        # Set it to first day of month
+        currentDate = datetime.date.today()
+        firstDayOfMonth = datetime.date(currentDate.year, currentDate.month, 1)
+
+        self.fcell.write("timestamp %d\n" % time.mktime(firstDayOfMonth.timetuple()))
 
         self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(cell.x1),self.toMicron(cell.y1),self.toMicron(cell.x2),self.toMicron(cell.y2)))
 

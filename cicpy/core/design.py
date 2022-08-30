@@ -38,6 +38,7 @@ class Design():
         self.cells = dict()
         self.cellnames = list()
         self.jcells = dict()
+        self.prefix = ""
 
 
     def fromJsonFile(self,fname):

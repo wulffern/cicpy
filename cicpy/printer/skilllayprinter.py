@@ -42,14 +42,14 @@ class SkillLayPrinter(DesignPrinter):
 
 
     def startLib(self,name):
-        if(not path.isdir(name)):
-            os.mkdir(name)
-        
+        self.libpath = name + os.path.sep + "skill"
+        if(not path.isdir(self.libpath)):
+            os.makedirs(self.libpath)
+
         self.openFile(name + "_lay.il")
 
         self.froute = open(name + "_size.il","w")
 
-        self.libname = name
         self.libstr = "gdssLibName = \"" + name + "\"\n pdkLib = \"" + name + "\"\n"
     
     def endLib(self):
@@ -65,7 +65,7 @@ class SkillLayPrinter(DesignPrinter):
             self.fcell.close()
 
     def startCell(self,cell):
-        file_name_cell = self.libname + "/" + cell.name + "_lay.il"
+        file_name_cell = self.libpath + os.path.sep + cell.name + "_lay.il"
         self.f.write("load(\"" + file_name_cell + "\")\n")
 
         self.froute.write(cell.toSkill())

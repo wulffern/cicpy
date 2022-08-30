@@ -28,6 +28,7 @@
 import sys
 import os
 import yaml
+import re
 
 class DesignPrinter():
 
@@ -36,6 +37,7 @@ class DesignPrinter():
         self.rules = rules
         self.cell = None
         self.f = None
+        self.exclude = ""
 
 
     def openFile(self,name):
@@ -50,6 +52,8 @@ class DesignPrinter():
         for child in children:
             if(not child): 
                 continue
+
+
             if(child.isInstance()):
                 self.printReference(child)
             elif(child.isPort()):
@@ -67,11 +71,15 @@ class DesignPrinter():
 
 
     def printCell(self,c):
+
+
         if(c.isEmpty()):
             return
-        
+
+
         self.startCell(c)
         self.cell = c
+
 
         self.printChildren(c.children)
 
@@ -99,6 +107,16 @@ class DesignPrinter():
 
             if(cell.abstract):
                 continue
+
+            #- Skip cells that are in regex self.exclude
+            if(self.exclude != "" and re.search(self.exclude,cell.name)):
+                continue
+
+            #print(c,cell.libcell,cell.isUsed)
+            #if(cell.libcell and not cell.isUsed):
+            #    continue
+
+
 
             if(cell):
                 self.printCell(cell)

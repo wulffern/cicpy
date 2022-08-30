@@ -28,6 +28,7 @@
 from .rect import *
 from .port import Port
 from .text import Text
+import re
 from ..ckt.subckt import Subckt
 
 class Cell(Rect):
@@ -38,6 +39,7 @@ class Cell(Rect):
     def __init__ (self,name=""):
         super().__init__()
         self.subckt = None
+        self.name = name
         self.ignoreBoundaryRouting = False
         self.physicalOnly = False
         self.abstract = False
@@ -46,6 +48,14 @@ class Cell(Rect):
         self.routes = list()
         self.ckt = None
         self.design = None
+        self.symbol = ""
+        self.prefix = ""
+        self.physicalOnly = False
+        self.libCell = False
+        self.isUsed = False
+        self.libpath = ""
+        self.has_pr = False
+
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
@@ -139,7 +149,7 @@ class Cell(Rect):
 
     def updateBoundingRect(self):
         r = self.calcBoundingRect()
-        r.setRect(r)
+        self.setRect(r)
         pass
 
     # Calculate the extent of this cell. Should be overriden by children
@@ -148,8 +158,11 @@ class Cell(Rect):
         y1 = INT_MAX
         x2 = INT_MIN
         y2 = INT_MIN
+
         if(len(self.children) == 0):
             x1 = y1 = x2 = y2 = 0
+
+
         for child in self.children:
             if(self.ignoreBoundaryRouting and 
                 (not(child.isInstance()) or not(child.isCut()) ) ):
@@ -161,15 +174,19 @@ class Cell(Rect):
 
             if(cx1 < x1):
                 x1 = cx1
-            if(cy1 > y1):
+            if(cy1 < y1):
                 y1 = cy1
             if(cx2 > x2):
                 x2 = cx2
-            if(cy2 > cy2):
+            if(cy2 > y2):
                 y2 = cy2
+
+
         r = Rect()
+
         r.setPoint1(x1,y1)
         r.setPoint2(x2,y2)
+
         return r
 
     def isEmpty(self):
@@ -191,18 +208,39 @@ class Cell(Rect):
 
     def fromJson(self,o):
         super().fromJson(o)
-        self.name = o["name"]
-        self.has_pr = o["has_pr"]
+        self.prefix = self.design.prefix
+        self.name = self.design.prefix  + o["name"]
+
+
+        if("meta" in o and "symbol" in o["meta"]):
+            self.symbol = o["meta"]["symbol"]
+        else:
+            self.symbol = self.name
+
+        if("has_or" in o ):
+            self.has_pr = o["has_pr"]
+
+        if("libpath" in o ):
+            self.libpath = o["libpath"]
+
         if("abstract" in o):
             self.abstract = o["abstract"]
+
+        if("physicalOnly" in o):
+            self.physicalOnly = o["physicalOnly"]
+
+        if("libcell" in o):
+            self.libcell = o["libcell"]
+
+        if("cellused" in o):
+            self.isUsed = o["cellused"]
+
 
         #- Handle subckt
         if("ckt" in o):
             self.ckt = Subckt()
+            self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])
-
-
-
 
 
     def toJson(self):
@@ -212,7 +250,8 @@ class Cell(Rect):
         o["has_pr"] = self.has_pr
 
         ckt = self.ckt
-        if(ckt):
+        o["ckt"] = dict()
+        if(ckt is not None):
             ockt = ckt.toJson()
             o["ckt"] = ockt
 
@@ -220,7 +259,7 @@ class Cell(Rect):
         for child in self.children:
             oc.append(child.toJson())
         o["children"] = oc
-        return oc
+        return o
 
 
 
@@ -243,7 +282,12 @@ class Cell(Rect):
         if(cellname in self.design.cells):
             return self.design.cells[cellname]
         return None
-    
+
+    def startswith(self,ss):
+        if(self.name.startswith(self.prefix + ss)):
+            return True
+        return False
+
     #     Port * getPort(QString name);
     #     Port * getCellPort(QString name);
 

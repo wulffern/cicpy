@@ -74,7 +74,7 @@ class LayoutCell(Cell):
                 c  = Text()
             elif(cl == "Instance"):
                 c  = Instance()
-            elif(cl == "Cell" or cl== "cIcCore::Route" or cl == "cIcCore::RouteRing" or cl == "cIcCore::Guard" or cl == "cIcCore::Cell"):
+            elif(cl == "Cell" or cl== "cIcCore::Route" or cl == "cIcCore::RouteRing" or cl == "cIcCore::Guard" or cl == "cIcCore::Cell" or cl == "cIcCore::LayoutCell"):
                 c = LayoutCell()
             else:
                 print(f"Unkown class {cl}")

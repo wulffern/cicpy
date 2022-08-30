@@ -1,0 +1,48 @@
+v {xschem version=3.0.0 file_version=1.2 }
+G {}
+K {}
+V {}
+S {}
+E {}
+L 4 40 -180 40 20 {}
+L 4 40 20 260 20 {}
+L 4 260 -180 260 20 {}
+L 4 40 -180 260 -180 {}
+L 4 110 -110 120 -110 {}
+L 4 120 -130 120 -110 {}
+L 4 120 -130 140 -130 {}
+L 4 70 -100 90 -100 {}
+L 4 70 -140 90 -140 {}
+L 4 160 -100 220 -100 {}
+L 4 160 -140 220 -140 {}
+L 4 100 -160 100 -80 {}
+L 4 100 -80 180 -120 {}
+L 4 100 -160 180 -120 {}
+L 4 0 0 40 0 {}
+L 4 0 -160 40 -160 {}
+L 4 0 -20 40 -20 {}
+L 4 0 -60 40 -60 {}
+L 4 0 -40 40 -40 {}
+L 4 260 -100 300 -100 {}
+L 4 260 -140 300 -140 {}
+L 4 0 -100 40 -100 {}
+L 4 0 -140 40 -140 {}
+B 5 -4 -144 4 -136 {name=CPI dir=inout pinnumber=1}
+B 5 -4 -104 4 -96 {name=CNI dir=inout pinnumber=2}
+B 5 296 -144 304 -136 {name=CPO dir=inout pinnumber=3}
+B 5 296 -104 304 -96 {name=CNO dir=inout pinnumber=4}
+B 5 -4 -44 4 -36 {name=CK_CMP dir=inout pinnumber=5}
+B 5 -4 -64 4 -56 {name=CK_SAMPLE dir=inout pinnumber=6}
+B 5 -4 -24 4 -16 {name=DONE dir=inout pinnumber=7}
+B 5 -4 -164 4 -156 {name=AVDD dir=inout pinnumber=8}
+B 5 -4 -4 4 4 {name=AVSS dir=inout pinnumber=9}
+T {AVSS} 46 0 0 0 0.25 0.25 { vcenter=true}
+T {AVDD} 46 -160 0 0 0.25 0.25 { vcenter=true}
+T {DONE} 46 -20 0 0 0.25 0.25 { vcenter=true}
+T {CK_SAMPLE} 46 -60 0 0 0.25 0.25 { vcenter=true}
+T {CK_CMP} 46 -40 0 0 0.25 0.25 { vcenter=true}
+T {CNO} 254 -100 2 0 0.25 0.25 { vcenter=true}
+T {CPO} 254 -140 2 0 0.25 0.25 { vcenter=true}
+T {CNI} 46 -100 0 0 0.25 0.25 { vcenter=true}
+T {CPI} 46 -140 0 0 0.25 0.25 { vcenter=true}
+T {@symname} 40 30 0 0 0.25 0.25 { vcenter=true}

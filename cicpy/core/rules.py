@@ -98,15 +98,44 @@ class Rules:
             raise Exception(f"RuleError: Rulefile does not have category {category}")
     
 
+    def colorTranslate(self,color):
+        colors = {
+            "gray" : "rgb(1,1,1)",
+            "lightgray" : "rgb(104,104,104)",
+            "active" : "rgb(102,255,153)",
+            "poly" : "rgb(255,128,128)",
+            "cut" : "rgb(233,233,0)",
+            "mOne" : "rgb(92,92,255)",
+            "mTwo" : "rgb(167,167,0)",
+            "mThree" : "rgb(77,255,255)",
+            "mFour" : "rgb(0,53,0)",
+            "mFive" : "brown",
+            "mSix" : "teal"
+        }
+
+        if(color in colors):
+            return colors[color]
+        else:
+            return color
         
     def layerToNumber(self,layer):
         return self.getField("layers",layer,"number")
+
+    def layerToAlias(self,layer):
+        return self.getField("layers",layer,"alias")
 
     def layerToDataType(self,layer):
         return self.getField("layers",layer,"datatype")
 
     def layerToColor(self,layer):
         return self.getField("layers",layer,"color")
+
+    def layerToFill(self,layer):
+        return self.getField("layers",layer,"fill")
+
+    def layerToColorWithTranslate(self,layer):
+        color = self.getField("layers",layer,"color")
+        return self.colorTranslate(color)
 
     def hasLayer(self,layer):
         return True if("layers" in Rules.rules and layer in Rules.rules["layers"]) else False
@@ -119,4 +148,14 @@ class Rules:
     @property
     def symbol_lib(self):
         o = self.getValue("technology","symbol_lib")
+        return o
+
+    @property
+    def techlib(self):
+        o = self.getValue("technology","techlib")
+        return o
+
+    @property
+    def symbol_libs(self):
+        o = self.getValue("technology","symbol_libs")
         return o

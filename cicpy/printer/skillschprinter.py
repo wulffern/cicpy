@@ -43,11 +43,14 @@ class SkillSchPrinter(DesignPrinter):
 
 
     def startLib(self,name):
-        if(not path.isdir(name)):
-            os.mkdir(name)
+        self.libname = name
+        self.libpath = name + os.path.sep + "skill"
+        if(not path.isdir(self.libpath)):
+            os.makedirs(self.libpath)
+        #if(not path.isdir(name)):
+        #    os.mkdir(name)
         
         self.openFile(name + "_sch.il")
-        self.libname = name
 
         self.libstr = f"""schLibName = "{name}"
     techLib = "{self.techfile}"
@@ -74,7 +77,7 @@ class SkillSchPrinter(DesignPrinter):
             self.fcell.close()
 
     def startCell(self,cell):
-        file_name_cell = self.libname + "/" + cell.name + "_sch.il"
+        file_name_cell = self.libpath + os.path.sep + cell.name + "_sch.il"
 
         self.current_cell = cell
         

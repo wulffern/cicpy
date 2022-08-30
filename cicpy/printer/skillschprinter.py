@@ -264,6 +264,8 @@ unless( ddGetObj(schLibName schName "symbol")
 
         if("Mosfet" in o.classname):
             self.printMosfet(o)
+        elif("Resistor" in o.classname and len(o.nodes)==3):
+            self.printHighResistor(o)
         elif("Resistor" in o.classname):
             self.printResistor(o)
 
@@ -376,8 +378,11 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName + o.properties["layer"])
         except Exception as e:
-
-            raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
+            print(o.deviceName+"\n")
+            print(o.deviceName+"\n")
+            print(e)
+            raise(e)
+            #raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
 
 
 
@@ -439,6 +444,97 @@ unless( ddGetObj(schLibName schName "symbol")
             raise ("Hell")
 
         for z in range(2):
+            deviceport = odev["ports"][z]
+            netName = o.nodes[z]
+            ss += f"""
+            deviceportn = (setof sig schLib~>signals (member "{deviceport}" sig~>sigNames))
+            bBoxDport = car(car(deviceportn~>pins)~>fig)~>bBox
+            pinDport=dbTransformBBox(bBoxDport schInst~>transform)
+            wireId = schCreateWire( sch "draw" "full" list(centerBox(pinDport) rodAddToX(centerBox(pinDport) 0.05) )  0.0625 0.0625 0.0 )
+            schCreateWireLabel( sch car(wireId) rodAddToX(centerBox(pinDport) 0.125)  "{netName}" "lowerLeft" "R0" "stick" 0.0625 nil )
+            """
+
+        #if(o.nodes[0] in self.current_cell.ckt.nodes):
+        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[0])
+        #    ss += f"""
+        #    bDestA = mybBox{pinCommonName};
+        #    schCreateWire( sch "route" "flight" list(centerBox(pinAn) centerBox(bDestA)) 0.0625 0.0625 0.0 )
+        #    """
+        #if(o.nodes[1] in self.current_cell.ckt.nodes):
+        #    pinCommonName = re.sub(r"<|>|:","_",o.nodes[1])
+        #    ss += f"""
+        #    bDestB = mybBox{pinCommonName};
+        #    schCreateWire( sch "route" "flight" list(centerBox(pinBp) centerBox(bDestB)) 0.0625 0.0625 0.0 )
+        #    """
+
+        self.fcell.write(ss)
+        #print("Resistors " + str(o))
+     #   print(o)
+        pass
+
+    def printHighResistor(self,o):
+
+        try:
+            odev = self.rules.device(o.deviceName)
+        except Exception as e:
+            print(o.deviceName+"\n")
+            print(e)
+            raise(e)
+
+        print(odev)
+
+        typename = odev["name"]
+
+        port0 = odev["ports"][0]
+        port1 = odev["ports"][1]
+        port2 = odev["ports"][2]
+
+        x1 = "xcoord"
+        y1 = "ycoord"
+
+        rotation = 0
+        deviceCounter = 0
+
+        ss = f"""
+
+        ;;-------------------------------------------------------------------
+        ;; Create Metal capacitor (two metal resistors) {o.name}
+        ;;-------------------------------------------------------------------
+        schLib = dbOpenCellViewByType(techLib "{typename}" "symbol")
+
+        xcoord = xcoord  + rightEdge(schLib->bBox) - leftEdge(schLib->bBox) + 1
+
+        schInst=dbCreateInst(sch schLib "{o.name}_a_{deviceCounter}" {x1}:{y1} "{rotation}")
+
+
+
+        """
+
+        props = list()
+        if("propertymap" in odev):
+            #print(odev["propertymap"])
+            for key in odev["propertymap"]:
+                val = str(o.properties[odev["propertymap"][key]["name"]]) + odev["propertymap"][key]["str"]
+                ss += f"""dbReplaceProp(schInst "{key}" 'string "{val}")\n"""
+                props.append(key)
+
+
+        ssprop = " ".join(map(lambda x: "\"%s\"" %x, props))
+
+
+        #- TODO: Fix this, right now this is not correct, the resistor should not connect to the pins, that's wrong.
+        #raise("Hell")
+
+
+
+        ss += f"""
+        (CCSinvokeInstCdfCallbacks schInst ?order list({ssprop}))"""
+
+        #- HighResistor should have three nodes
+        if(len(o.nodes) != 3):
+            raise ("Hell")
+
+        for z in range(3):
             deviceport = odev["ports"][z]
             netName = o.nodes[z]
             ss += f"""

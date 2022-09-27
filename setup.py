@@ -17,7 +17,7 @@ setuptools.setup(
     entry_points = {'console_scripts': [
         'cicpy = cicpy.cic:cli',
     ]},
-    install_requires = 'matplotlib numpy click svgwrite pyyaml'.split(),
+    install_requires = 'matplotlib numpy click svgwrite pyyaml pandas'.split(),
     classifiers = [
         'Development Status :: 1 - Alpha',
         'Intended Audience :: Developers',

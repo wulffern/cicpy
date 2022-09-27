@@ -24,7 +24,7 @@ mkdir pro
 cd pro
 git clone https://github.com/wulffern/cicpy
 cd cicpy
-python3 -m pip install --no-deps -e . 
+python3 -m pip install  -e . 
 
 ```
 

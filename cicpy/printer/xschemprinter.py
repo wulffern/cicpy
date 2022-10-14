@@ -204,7 +204,8 @@ class XschemPrinter(DesignPrinter):
 
         self.lib_symbols = list()
         for slib in self.rules.symbol_libs:
-            path = slib + os.path.sep + "*.sym"
+
+            path = os.path.expandvars(slib + os.path.sep + "*.sym")
             sym = glob.glob(path)
             for s in sym:
                 self.lib_symbols.append(s)

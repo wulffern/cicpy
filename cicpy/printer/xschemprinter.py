@@ -142,9 +142,11 @@ class XschemSymbol(Cell):
 
         fsym = open(cell_sym,"w")
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
+
+        #- TODO: Might be trouble with M factor for ngspice, so remove for now
         fsym.write("""K {type=subcircuit
-format="@name @pinlist @symname xoffset=@xoffset yoffset=@yoffset angle=@angle M=@M"
-template="name=x1 xoffset=0 yoffset=0 angle=0 M=1"
+format="@name @pinlist @symname xoffset=@xoffset yoffset=@yoffset angle=@angle "
+template="name=x1 xoffset=0 yoffset=0 angle=0 "
 } \n""")
 
         if(self.symbol_from_lib):

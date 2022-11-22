@@ -144,9 +144,10 @@ class XschemSymbol(Cell):
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
 
         #- TODO: Might be trouble with M factor for ngspice, so remove for now
+        #- TODO: Remove the parameters, they create trouble in ngspice for lpe inclusion
         fsym.write("""K {type=subcircuit
-format="@name @pinlist @symname xoffset=@xoffset yoffset=@yoffset angle=@angle "
-template="name=x1 xoffset=0 yoffset=0 angle=0 "
+format="@name @pinlist @symname "
+template="name=x1 "
 } \n""")
 
         if(self.symbol_from_lib):

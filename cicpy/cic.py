@@ -140,7 +140,7 @@ def jcell(ctx,cicfile,techfile,cell,child):
 @click.option("--circuit", default="diffpair")
 @click.option("--pattern", default="")
 def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
-    """Place a bunc of transistors according to pattern"""
+    """Place a bunch of transistors according to pattern, outputs SKILL"""
 
     design = cic.Design()
     design.fromJsonFile(cicfile)

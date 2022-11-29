@@ -143,8 +143,6 @@ class XschemSymbol(Cell):
         fsym = open(cell_sym,"w")
         fsym.write("v {xschem version=3.0.0 file_version=1.2 }\n")
 
-        #- TODO: Might be trouble with M factor for ngspice, so remove for now
-        #- TODO: Remove the parameters, they create trouble in ngspice for lpe inclusion
         fsym.write("""K {type=subcircuit
 format="@name @pinlist @symname "
 template="name=x1 "
@@ -170,12 +168,6 @@ template="name=x1 "
 
             y3 = y1 + (y2 - y1)/2 - 10
             x3 = 50
-
-
-            #self.x1 = x1-40
-            #self.x2 = x2
-            #self.y1 = y1-10
-            #self.y2 = y2+10
 
             rbounds = Rect("PR",x1,y1,(x2-x1),(y2-y1))
             self.add(rbounds)

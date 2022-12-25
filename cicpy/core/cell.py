@@ -66,8 +66,7 @@ class Cell(Rect):
     def add(self, child):
         if(child == None):
             raise Exception("Null rectangle added")
-        
-        #TODO: What did I use children_by_type for?
+
         if(child.isPort()):
             self.ports[child.name] = child
 

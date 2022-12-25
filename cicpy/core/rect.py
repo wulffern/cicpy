@@ -333,8 +333,6 @@ class Rect:
     def printToJson(self):
         print(json.dumps(self.toJson(),indent=4))
 
-    #TODO: Need to figure out how to check what type of instance this is
-
     def isType(self,typename):
         if(self.__class__.__name__ == typename):
             return True

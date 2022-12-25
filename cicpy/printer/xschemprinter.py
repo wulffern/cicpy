@@ -45,7 +45,6 @@ class XschemSymbol(Cell):
 
 
 
-        #- TODO does not support directory as part of symbol location
         self.symbol_from_lib = False
         symbol_to_use = ""
         if(symbolName != ""):
@@ -53,7 +52,6 @@ class XschemSymbol(Cell):
                 if(symbol_to_use):
                     continue
                 base = os.path.basename(s)
-                #print(base)
                 if(base == symbolName + ".sym"):
                     symbol_to_use = s
                 elif(os.path.sep in symbolName and s.endswith(symbolName + ".sym")):
@@ -63,7 +61,6 @@ class XschemSymbol(Cell):
         self.ports = dict()
 
         if(symbol_to_use):
-            #TODO should probably use int max or something
             self.read(symbol_to_use)
 
         self.updateBoundingRect()
@@ -264,7 +261,6 @@ E {}
 
 
         #- Will use the spice defition ports
-        #- TODO: Should it use Ports??
         for node in cell.ckt.nodes:
             p = node
             pinName = p
@@ -273,8 +269,6 @@ E {}
             pinDirection = "inputOutput"
             if(p in sym.ports):
                 pinDirection = sym.ports[p].direction
-
-            #- TODO Need to fix counter so it gives right port order
 
             if(pinDirection == "in"):
                 self.fcell.write("C {devices/ipin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
@@ -288,9 +282,6 @@ E {}
 
             counter +=1
             y +=20
-
-
-        #- TODO: Could add symbols here
 
 
 
@@ -424,7 +415,6 @@ E {}
 
             self.fcell.write(f"N {xb1} {yb} {xb2} {yb}" + "{lab=" + netName + "}\n")
 
-            #TODO should fix node order
             self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0  " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
 
             self.label_count +=1

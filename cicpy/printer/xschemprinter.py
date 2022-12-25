@@ -50,7 +50,13 @@ class XschemSymbol(Cell):
         symbol_to_use = ""
         if(symbolName != ""):
             for s in printer.lib_symbols:
-                if(s.endswith(symbolName + ".sym")):
+                if(symbol_to_use):
+                    continue
+                base = os.path.basename(s)
+                #print(base)
+                if(base == symbolName + ".sym"):
+                    symbol_to_use = s
+                elif(os.path.sep in symbolName and s.endswith(symbolName + ".sym")):
                     symbol_to_use = s
 
 

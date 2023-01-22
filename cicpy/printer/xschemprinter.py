@@ -528,7 +528,7 @@ spiceprefix=X
             .replace("(model)",model) \
             .replace("(nf)",str(o.properties["nf"])) \
             .replace("(length)",str(o.properties["length"])) \
-            .replace("(width)",str(o.properties["width"])) \
+            .replace("(width)",str(o.properties["width"]*o.properties["nf"])) \
             .replace("(instName)",o.name) \
             .replace("(x1)",str(self.ix1)) \
             .replace("(y1)",str(self.iy1))

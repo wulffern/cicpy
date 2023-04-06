@@ -26,6 +26,7 @@
 ######################################################################
 
 from .rect import Rect
+import re
 
 class Port(Rect):
 
@@ -38,6 +39,14 @@ class Port(Rect):
         self.net = ""
         self.pinLayer = routeLayer
         self.direction = "inputOutput"
+
+        self.sigclass = "signal"
+
+        if(re.search("VSS",self.name)):
+            self.sigclass = "ground"
+        elif(re.search("VDD",self.name)):
+            self.sigclass = "power"
+
         if(rect):
             self.x1 = rect.x1
             self.x2 = rect.x2

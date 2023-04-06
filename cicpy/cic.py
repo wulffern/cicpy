@@ -60,6 +60,7 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
     design.fromJsonFile(cicfile)
     rules = cic.Rules(techfile)
 
+
     if(layskill):
         la = cic.SkillLayPrinter(library,rules)
         #la.exclude = exclude

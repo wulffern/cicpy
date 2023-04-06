@@ -77,6 +77,7 @@ class DesignPrinter():
             return
 
 
+
         self.startCell(c)
         self.cell = c
 
@@ -94,6 +95,8 @@ class DesignPrinter():
 
     
     def print(self, d,stopcell=""):
+
+
         self.design = d
         self.startLib(self.filename)
         skip = False

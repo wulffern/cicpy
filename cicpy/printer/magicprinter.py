@@ -29,6 +29,7 @@ import sys
 import numpy as np
 import datetime
 import time
+import re
 from os import path
 import os
 
@@ -41,25 +42,20 @@ class MagicPrinter(DesignPrinter):
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
 
-
-
     def startLib(self,name):
 
         self.libname = name
         if(not path.isdir(self.libname)):
             os.makedirs(self.libname)
-        
-
 
     def endLib(self):
-        pass
 
+        pass
 
     def openCellFile(self,name):
         self.fcell = open(name,"w")
 
     def closeCellFile(self):
-
 
         for layer in self.rects:
             self.fcell.write(self.rects[layer])
@@ -76,17 +72,24 @@ class MagicPrinter(DesignPrinter):
         for ss in self.labels:
             self.fcell.write(ss)
 
+        self.fcell.write("<< properties >>\n")
+        for ss in self.properties:
+            self.fcell.write("string %s\n"%(ss))
+
         self.fcell.write("<< end >>\n")
 
         if(self.fcell):
             self.fcell.close()
 
     def startCell(self,cell):
+
+
         self.rects = dict()
         self.use = list()
         self.labels = list()
         self.cuts = dict()
         self.portOrder = dict()
+        self.properties = list()
 
 
         #- Cut's need to be handled differently
@@ -125,7 +128,26 @@ class MagicPrinter(DesignPrinter):
 
     def endCell(self,cell):
 
+        #- Print additional properties
+        self.properties.append("FIXED_BBOX %d %d %d %d" %( self.toMicron(cell.x1),
+                                                            self.toMicron(cell.y1),
+                                                            self.toMicron(cell.x2),
+                                                            self.toMicron(cell.y2)
+                                                          ))
+
         self.closeCellFile()
+
+        #- Write netlist
+        if(cell.graph):
+            with open(self.libname +  os.path.sep + cell.name + ".net","w") as fo:
+                fo.write(" Netlist File\n")
+                fo.write(" " + cell.name + "\n")
+                for g in cell.graph:
+                    fo.write(" " + g["node"] + "\n")
+                    for i in g["instances"]:
+                        fo.write(i["inst"] + "/" + i["node"] + "\n")
+                    fo.write("\n")
+
 
         
     def printPort(self,p):
@@ -147,9 +169,18 @@ class MagicPrinter(DesignPrinter):
             print(self.portOrder)
             raise(f"Could not find {p.name} in circuit nodes")
 
+
+        direction = "bidirectional"
+        if(p.direction == "input"):
+            direction = "input"
+        elif(p.direction == "output"):
+            direction = "output"
+
+        sigclass = p.sigclass
+
         lbl = f"""flabel {routeLayerAlias} s %d %d %d %d 0 FreeSans 400 0 0 0 {p.name}
-port %d nsew
-""" % (x1,y1,x2,y2,self.portOrder[p.name])
+port %d nsew %s %s
+""" % (x1,y1,x2,y2,self.portOrder[p.name],sigclass,direction)
         self.labels.append(lbl)
 
 

@@ -40,6 +40,7 @@ class LayoutCell(Cell):
         self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
         self.meta = None
+        self.graph = None
 
 
     def toJson(self):
@@ -61,6 +62,9 @@ class LayoutCell(Cell):
 
         if("meta" in o):
             self.meta = o["meta"]
+
+        if("graph" in o):
+            self.graph = o["graph"]
 
         for child in o["children"]:
 

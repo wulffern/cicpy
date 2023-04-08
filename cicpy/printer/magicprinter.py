@@ -91,6 +91,9 @@ class MagicPrinter(DesignPrinter):
         self.portOrder = dict()
         self.properties = list()
 
+        #- running number if cells don't have instance names
+        self.xinst = 0
+
 
         #- Cut's need to be handled differently
         self.isCut = False
@@ -113,12 +116,9 @@ class MagicPrinter(DesignPrinter):
         self.fcell.write("magscale 1 2\n")
 
         #- So adding timestamp for the exact time
-        # just makes the compile file change even though it's not really changed.
-        # Set it to first day of month
         currentDate = datetime.date.today()
-        firstDayOfMonth = datetime.date(currentDate.year, currentDate.month, 1)
 
-        self.fcell.write("timestamp %d\n" % time.mktime(firstDayOfMonth.timetuple()))
+        self.fcell.write("timestamp %d\n" % time.mktime(currentDate.timetuple()))
 
         self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(cell.x1),self.toMicron(cell.y1),self.toMicron(cell.x2),self.toMicron(cell.y2)))
 
@@ -245,14 +245,18 @@ port %d nsew %s %s
         if(rotation == "MY"):
             tr1 = "-1 0"
 
-
-
         path = inst.cell
         if(inst.libpath != ""):
-            path = inst.libpath + "/" + inst.cell
+            path = "../" + os.path.basename(inst.libpath) + "/" + inst.cell
+            #path =  inst.libpath + "/" + inst.cell
 
 
-        use = f"""use {path} {inst.instanceName}
+        instname = inst.instanceName
+        if(instname is None or instname == ""):
+            instname = "xcut" + str(self.xinst)
+            self.xinst +=1
+
+        use = f"""use {path} {instname}
 transform %s %d %s %d
 box %d %d %d %d
 """ %(tr1,x1,tr2,y1,x1,y1,x2,y2)

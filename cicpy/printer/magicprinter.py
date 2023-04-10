@@ -245,10 +245,10 @@ port %d nsew %s %s
         if(rotation == "MY"):
             tr1 = "-1 0"
 
-        path = inst.cell
+        path = ""
         if(inst.libpath != ""):
-            path = "../" + os.path.basename(inst.libpath) + "/" + inst.cell
-            #path =  inst.libpath + "/" + inst.cell
+            path = "../" + os.path.basename(inst.libpath)
+            #path = inst.cell
 
 
         instname = inst.instanceName
@@ -256,7 +256,7 @@ port %d nsew %s %s
             instname = "xcut" + str(self.xinst)
             self.xinst +=1
 
-        use = f"""use {path} {instname}
+        use = f"""use {inst.cell} {instname} {path}
 transform %s %d %s %d
 box %d %d %d %d
 """ %(tr1,x1,tr2,y1,x1,y1,x2,y2)

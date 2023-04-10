@@ -545,8 +545,6 @@ spiceprefix=X
         else:
             odev = self.rules.device(o.deviceName)
 
-
-
         typename = odev["name"]
 
         dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)

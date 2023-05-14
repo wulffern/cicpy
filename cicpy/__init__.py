@@ -43,3 +43,4 @@ from .printer.svgprinter import *
 from .printer.mcprinter import *
 from .printer.magicprinter import *
 from .place.placer import *
+from .eda import *

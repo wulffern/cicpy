@@ -26,21 +26,8 @@
 ######################################################################
 #Core
 
-from .core.point import *
-from .core.rect import *
-from .core.cell import *
-from .core.layoutcell import *
-from .core.design import *
-from .core.port import *
-from .core.rules import *
-from .printer.skilllayprinter import *
-from .printer.skillschprinter import *
-from .printer.cellinfoprinter import *
-from .printer.verilogprinter import *
-from .printer.spiceprinter import *
-from .printer.xschemprinter import *
-from .printer.svgprinter import *
-from .printer.mcprinter import *
-from .printer.magicprinter import *
-from .place.placer import *
+from .core import *
+from .printer import *
+from .place import *
+from .ckt import *
 from .eda import *

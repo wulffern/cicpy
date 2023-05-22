@@ -32,6 +32,7 @@ from os import path
 import os
 import re
 
+
 svgcells = dict()
 
 class SvgCell(svgwrite.Drawing):
@@ -50,7 +51,7 @@ class SvgCell(svgwrite.Drawing):
 
         x1 = self.translate(cell.x1) + x
         y1 = self.translate(cell.y1) + y
-        x2 = self.translate(cell.x2) + x +x
+        x2 = self.translate(cell.x2) + x + x
         y2 = self.translate(cell.y2) + y + y
 
 
@@ -111,6 +112,7 @@ class SvgPrinter(DesignPrinter):
         self.x = x
         self.y = y
         self.scale = scale
+        self.files = list()
 
     def startLib(self,name):
         self.libname = name + "_svg"
@@ -123,7 +125,8 @@ class SvgPrinter(DesignPrinter):
 
     def startCell(self,cell):
         file_name_cell = self.libname + os.path.sep + cell.name + ".svg"
-
+        print("INFO: %s" % file_name_cell)
+        self.files.append(file_name_cell)
         self.svgcell = SvgCell(file_name_cell,cell,self.scale,self.x,self.y,)
 
 
@@ -131,6 +134,22 @@ class SvgPrinter(DesignPrinter):
         if(self.svgcell is not None):
             self.svgcell.closeAndSave()
             self.svgcell = None
+        with open(self.libname + ".html","w") as fo:
+
+            fo.write("""
+<html><head>
+            <style>
+img {
+    max-width: 50%;
+    max-height: 50%;
+}
+</style>
+            </head><body>""")
+            self.files.reverse()
+            for f in self.files:
+                fo.write("<div style='border:1'><h3>" + f + "</h3>")
+                fo.write("</p><img src='%s'></img></div>"%f)
+            fo.write("</body></html>")
 
     def printPort(self,p):
         pass

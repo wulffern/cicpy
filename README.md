@@ -10,6 +10,7 @@ formats.
 | Version | Status | Comment |
 |:--|:--|:--|
 |0.0.1| :white_check_mark: | First version of cicspy|
+|0.1.5| :white_check_mark: | First release to pypi|
 
 # Install this module
 If you want to follow the latest and greatest
@@ -17,6 +18,11 @@ If you want to follow the latest and greatest
 git clone https://github.com/wulffern/cicpy
 cd cicpy
 python3 -m pip install  -e . 
+```
+
+If you want something that does not change that often
+``` sh
+python3 -m pip install cicpy 
 
 ```
 

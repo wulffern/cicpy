@@ -5,21 +5,20 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="cicpy",
-    version="0.1.5",
+    version="0.1.5+",
     author="Carsten Wulff",
     author_email="carsten@wulff.no",
     description="Custom IC Creator Python Frontend",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/wulffern/cicpy",
-    packages=setuptools.find_packages(),
-    python_requires='>=3.6',
+    packages=['cicpy'],
+    python_requires='>=3.8',
     entry_points = {'console_scripts': [
         'cicpy = cicpy.cic:cli',
     ]},
     install_requires = 'matplotlib numpy click svgwrite pyyaml pandas'.split(),
     classifiers = [
-        'Development Status :: 1 - Alpha',
         'Intended Audience :: Developers',
         'Intended Audience :: Science/Research',
         'Natural Language :: English',

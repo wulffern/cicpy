@@ -18,6 +18,13 @@ class Object():
         else:
             return None
 
+    def isType(self,typename):
+        if(self.__class__.__name__ == typename):
+            return True
+        elif(super() and (super().__class__.__name__ == typename)):
+            return True
+        return False
+
 
 
 class Version(Object):
@@ -104,7 +111,7 @@ class XSchem():
 
     def __init__(self):
         self.children = list()
-        self.components = list()
+        self.components = dict()
         pass
 
     def countPattern(self,pattern,line):
@@ -144,7 +151,6 @@ class XSchem():
             o = Wire()
         elif(c == "C"):
             o = Component()
-            self.components.append(o)
         elif(c == "["):
             o = EmbedSymbol()
 
@@ -176,7 +182,18 @@ class XSchem():
                     self.parseBuffer(buff)
                     buff = ""
 
+        for c in self.children:
+            if(c.isType("Component")):
+                instanceName = c.name()
+                if(instanceName):
+                    self.components[instanceName] = c
 
+    def toYaml(self):
+        data = dict()
+
+        for (key,o) in self.components.items():
+            raise Exception("How should the yaml look???")
+                
 
 class Schematic(XSchem):
 

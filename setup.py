@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="cicpy",
-    version="0.1.5+",
+    version="0.1.6+",
     author="Carsten Wulff",
     author_email="carsten@wulff.no",
     description="Custom IC Creator Python Frontend",

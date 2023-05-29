@@ -65,8 +65,12 @@ class Design():
             c.fromJson(o)
             self.cells[c.name] = c
             self.jcells[c.name] = o
-            self.cellnames.append(c.name)          
-    
+            self.cellnames.append(c.name)
+
+    def add(self,c):
+        self.cells[c.name] = c
+        self.cellnames.append(c.name)
+
     def cellNames(self):
         return self.cellnames
     

@@ -210,6 +210,26 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)
 
+@cli.command("mag")
+@click.pass_context
+@click.argument("lib")
+@click.argument("cell")
+@click.option("--libdir",default="../design/",help="Default directory of designs")
+def mag(ctx,lib,cell,libdir):
+    """Translate a Xschem file to Magic"""
+
+    xs = cic.eda.Schematic()
+    xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
+
+    cell = cic.getLayoutCellFromXSch(libdir,xs)
+
+    design = cic.Design()
+    design.add(cell)
+
+    obj = cic.MagicPrinter(libdir + lib,cell)
+    obj.print(design)
+
+
 
 def my_main():
     cli(obj={})

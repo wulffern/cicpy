@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #
 import re
+import os
 
 class Object():
     def __init__(self):
@@ -77,9 +78,19 @@ class Component(Object):
     def parseProperties(self,ss):
         if(re.search("^\s*$",ss)):
             return
-        kval = re.split("\s",ss,re.MULTILINE)
-        for s in kval:
-            (key,val) = s.split("=")
+
+        ss = re.sub("\n"," ",ss).strip()
+
+        key_value_pairs = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+',ss)
+        for s in key_value_pairs:
+            if(re.search("^\s*$",s)):
+                continue
+            ar = re.split("=",s)
+            if(len(ar) != 2):
+
+                raise Exception("Don't know how to parse %s" %(ar))
+                continue
+            (key,val) = ar
             self.properties[key] = val
 
 
@@ -112,13 +123,12 @@ class XSchem():
     def __init__(self):
         self.children = list()
         self.components = dict()
+        self.name = ""
+        self.path = ""
         pass
 
     def countPattern(self,pattern,line):
-        m = re.search("("+pattern+")",line)
-        count = 0
-        if(m):
-            count = len(m.groups())
+        count = len(re.findall("("+pattern+")",line))
         return count
 
     def parseBuffer(self,buff):
@@ -160,6 +170,10 @@ class XSchem():
 
     
     def readFromFile(self,fname):
+
+        self.name = os.path.basename(fname).replace(".sch","")
+        self.dirname = os.path.dirname(fname)
+
         with open(fname) as fi:
             buff = ""
             pcount = 0

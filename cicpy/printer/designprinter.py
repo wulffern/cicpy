@@ -53,7 +53,6 @@ class DesignPrinter():
             if(not child): 
                 continue
 
-
             if(child.isInstance()):
                 self.printReference(child)
             elif(child.isPort()):

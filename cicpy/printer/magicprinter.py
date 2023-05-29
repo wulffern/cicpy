@@ -227,8 +227,11 @@ port %d nsew %s %s
 
         
     def printReference(self,inst):
+
         if(not inst or inst.isEmpty()):
             return
+
+
 
         p = inst.getCellPoint()
 
@@ -264,7 +267,6 @@ box %d %d %d %d
 
 
     def printText(self,t):
-
         return
         x1 = self.toMicron(t.x1)
         y1 = self.toMicron(t.y1)

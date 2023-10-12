@@ -218,6 +218,8 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
 def mag(ctx,lib,cell,libdir):
     """Translate a Xschem file to Magic"""
 
+    #rules = cic.Rules(techfile)
+
     xs = cic.eda.Schematic()
     xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
 

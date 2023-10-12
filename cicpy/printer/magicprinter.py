@@ -64,8 +64,6 @@ class MagicPrinter(DesignPrinter):
             r = self.cuts[layer]
             self.fcell.write(f"<< {layer} >>\nrect %d %d %d %d\n" % (self.toMicron(r.x1),self.toMicron(r.y1),self.toMicron(r.x2),self.toMicron(r.y2)))
 
-            #self.fcell.write(self.rects[layer])
-
         for ss in self.use:
             self.fcell.write(ss)
 

@@ -16,6 +16,7 @@ dependencies = [
   "pyyaml",
   "matplotlib"
 ]
+license = "MIT"
 description = "Custom IC Creator Python Frontend"
 readme = "README.md"
 requires-python = ">=3.8"

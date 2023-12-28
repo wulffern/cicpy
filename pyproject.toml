@@ -8,6 +8,14 @@ version = "0.1.7"
 authors = [
   { name="Carsten Wulff", email="carsten@wulff.no" },
 ]
+dependencies = [
+  "numpy",
+  "pandas",
+  "svgwrite",
+  "click",
+  "pyyaml",
+  "matplotlib"
+]
 description = "Custom IC Creator Python Frontend"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -16,6 +24,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+
+[project.scripts]
+cicpy = "cicpy.cicpy:cli"
+
 
 [project.urls]
 "Homepage" = "https://github.com/wulffern/cicpy"

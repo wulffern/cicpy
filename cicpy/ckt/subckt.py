@@ -24,6 +24,7 @@
 ##  SOFTWARE.
 ##  
 ######################################################################
+import re
 
 from .cktobject import CktObject
 from .cktinstance import CktInstance
@@ -65,3 +66,39 @@ class Subckt(CktObject):
         for i in self.instances:
             o["instances"].append(i.toJson())
         return o
+
+    def parse(self,lineNumber,sbuffer):
+
+        #- Get name and nodes
+        firstLine = sbuffer.pop(0)
+
+        reSubcktName = "^\s*.subckt\s+(\S+)"
+
+
+
+        m = re.search(reSubcktName,firstLine,flags=re.IGNORECASE)
+        if(m):
+            self.name = m.groups()[0]
+            firstLine = re.sub(reSubcktName,"",firstLine,flags=re.IGNORECASE)
+
+        firstline = firstLine.strip()
+
+        #- Remove parameters
+        reParam = "\s+(\S+)\s*=\s*(\S+)"
+        firstLine = re.sub(reParam,"",firstLine)
+
+        #- Find Nodes
+        self.nodes = re.split("\s+",firstLine)
+
+        #- Get instances
+        instanceLineNumber = lineNumber + 1
+        for line in sbuffer:
+
+            if(re.search("^\s*$",line)):
+                continue
+
+            #- Figure out whether it's an instance or not
+            #
+            #
+            #inst = SubcktInstance()
+            print(line)

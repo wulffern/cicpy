@@ -232,9 +232,14 @@ def mag(ctx,lib,cell,libdir):
     obj.print(design)
 
 
+@cli.command("filter")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("cell")
+def filter(ctx,cicfile,cell):
+    d = cic.Design()
+    d.read(cicfile)
 
-def my_main():
-    cli(obj={})
 
 if __name__ == '__main__':
-    my_main()
+    cli(obj={})

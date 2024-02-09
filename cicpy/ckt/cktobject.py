@@ -33,6 +33,7 @@ class CktObject():
         self.nodes = list()
         self.properties = dict()
         self.prefix = ""
+        self.sbuffer = list()
         #self.className = ""
 
     def fromJson(self,o):
@@ -69,3 +70,4 @@ class CktObject():
 
     def __repr__(self):
         return f"{self.classname} {self.name}: nodes = {self.nodes}, props = {self.properties}"
+

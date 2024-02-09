@@ -55,6 +55,7 @@ class Cell(Rect):
         self.isUsed = False
         self.libpath = ""
         self.has_pr = False
+        self.obj = False #- Original JSON obj
 
 
     # Find the first rectangle in this cell that uses layer

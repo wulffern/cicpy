@@ -29,8 +29,11 @@ from .rect import Rect
 from .cell import Cell
 from .layoutcell import LayoutCell
 
+import cicpy as cic
+import os
 import gzip
 import json
+import re
 
 class Design():
 
@@ -77,6 +80,29 @@ class Design():
     def getCell(self,name):
         return self.cells[name]
 
+    def read(self,filename):
 
+        #Read JSON
+        buffer = ""
+        with open(filename)as fi:
 
-        
+            for line in fi:
+                if(re.search("^\s*//",line)):
+                    continue
+                buffer += line
+
+            obj = json.loads(buffer)
+
+        #Read Spice
+
+        spifile = filename.replace(".json",".spi")
+        if(os.path.exists(spifile)):
+            sp = cic.ckt.SpiceParser()
+            sp.parseFile(spifile)
+
+        if("cells" in obj):
+            for c in obj["cells"]:
+                if("name" not in c):
+                    continue
+                c = Cell()
+                c.obj = c

@@ -53,6 +53,7 @@ class MagicPrinter(DesignPrinter):
         pass
 
     def openCellFile(self,name):
+        print(f"Writing {name}")
         self.fcell = open(name,"w")
 
     def closeCellFile(self):
@@ -165,7 +166,7 @@ class MagicPrinter(DesignPrinter):
 
         if(p.name not in self.portOrder):
             print(self.portOrder)
-            raise(f"Could not find {p.name} in circuit nodes")
+            raise(Exception(f"Could not find {p.name} in circuit nodes"))
 
 
         direction = "bidirectional"
@@ -180,7 +181,6 @@ class MagicPrinter(DesignPrinter):
 port %d nsew %s %s
 """ % (x1,y1,x2,y2,self.portOrder[p.name],sigclass,direction)
         self.labels.append(lbl)
-
 
         self.printRect(p)
 

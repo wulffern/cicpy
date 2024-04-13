@@ -43,8 +43,6 @@ class XschemSymbol(Cell):
         self.libname = libname
         self.symbolName = symbolName
 
-
-
         self.symbol_from_lib = False
         symbol_to_use = ""
         if(symbolName != ""):
@@ -59,7 +57,7 @@ class XschemSymbol(Cell):
 
 
         self.ports = dict()
-
+        print(symbol_to_use)
         if(symbol_to_use):
             self.read(symbol_to_use)
 
@@ -188,7 +186,7 @@ class XschemPrinter(DesignPrinter):
         super().__init__(filename,rules)
 
         self.symbols = dict()
-        self.cells = dict()
+
         self.current_cell = None
 
         self.smash = smash
@@ -236,9 +234,17 @@ class XschemPrinter(DesignPrinter):
         self.ix1 = self.xstep
         self.iy1 = 0
         self.label_count = 0
-        
-        #- Store cell for later, will need it
-        self.cells[cell.name] = cell
+
+        sym = XschemSymbol(self.libpath,cell,self,cell.symbol)
+        self.symbols[cell.name] = sym
+
+        if("noSchematic" in cell.meta):
+            #print(self.lib)
+            sym.read(self.libname + "/" + cell.name + ".sym")
+            sym.updateBoundingRect()
+            return
+
+
 
         self.openCellFile(file_name_cell)
 
@@ -256,8 +262,6 @@ E {}
         counter = 0
 
 
-        sym = XschemSymbol(self.libpath,cell,self,cell.symbol)
-        self.symbols[cell.name] = sym
 
 
         #- Will use the spice defition ports
@@ -271,13 +275,11 @@ E {}
                 pinDirection = sym.ports[p].direction
 
             if(pinDirection == "in"):
-                self.fcell.write("C {devices/ipin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+                self.fcell.write("C {devices/ipin.sym} " + f"0 {y} 0 0 " + "{" + f"name=p{counter} lab={p}" + "}\n")
             elif(pinDirection == "out"):
-                self.fcell.write("C {devices/opin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
+                self.fcell.write("C {devices/opin.sym} " + f"0 {y} 0 0 " + "{" + f"name=p{counter} lab={p}" + "}\n")
             else:
-                self.fcell.write("C {devices/iopin.sym} " + f"0 {y} 0 0" + "{" + f"name=p{counter} lab={p}" + "}\n")
-
-
+                self.fcell.write("C {devices/iopin.sym} " + f"0 {y} 0 0 " + "{" + f"name=p{counter} lab={p}" + "}\n")
 
 
             counter +=1
@@ -303,11 +305,13 @@ E {}
         if(c.ckt is None):
             return
 
+
+
+        self.startCell(c)
+
         if("noSchematic" in c.meta):
             print(f" Skipping schematic for {c.name}")
             return
-        
-        self.startCell(c)
 
         #- Hack to suport multi finger devices
         if(self.smash and re.search(self.smash,c.name)):
@@ -336,15 +340,27 @@ E {}
 
     def printInstance(self,o):
 
-        if(o.subcktName not in self.cells.keys()):
-            return
 
-        dstr = "C {" + f"{self.libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"X{o.name}" + "}\n"
+        #if(o.subcktName not in self.cells.keys()):
+        #    print(f"Could not find instance {o.subcktName}")
+        #    return
+
+        _libname = ""
+        if(o.isCktInstance()):
+            instcell = self.cells[o.subcktName]
+            _libname = os.path.basename(instcell.libpath)
+
+
+        if(_libname == ""):
+            _libname = self.libname
+
+
+
+        dstr = "C {" + f"{_libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"X{o.name}" + "}\n"
 
         self.symbolAndWrite(dstr,o,o.subcktName)
 
     def symbolAndWrite(self,dstr,o,symbolName):
-
 
         self.fcell.write(dstr)
 
@@ -413,9 +429,9 @@ E {}
             #
             xlab = xb1
 
-            self.fcell.write(f"N {xb1} {yb} {xb2} {yb}" + "{lab=" + netName + "}\n")
+            self.fcell.write(f"N {xb1} {yb} {xb2} {yb} " + "{lab=" + netName + "}\n")
 
-            self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0  " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
+            self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0 " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
 
             self.label_count +=1
 
@@ -437,20 +453,7 @@ E {}
 
         
         pass
-    #def printRect(self,o):
-    #    pass
 
-
-    #def printText(self,o):
-    #    pass
-
-    #def printPort(self,o):
-    #    pass
-
-    #def printReference(self,o):
-    #    pass
-
-    
 
 
     def printDevice(self,o):

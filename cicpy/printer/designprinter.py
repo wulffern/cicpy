@@ -36,6 +36,7 @@ class DesignPrinter():
         self.filename = filename
         self.rules = rules
         self.cell = None
+        self.cells = dict()
         self.f = None
         self.exclude = ""
 
@@ -111,6 +112,10 @@ class DesignPrinter():
 
             if(cell.abstract):
                 continue
+
+
+            #- Store cell for later, will need it
+            self.cells[cell.name] = cell
 
             #- Skip cells that are in regex self.exclude
             if(self.exclude != "" and re.search(self.exclude,cell.name)):

@@ -36,8 +36,9 @@ import os
 
 class MagicPrinter(DesignPrinter):
 
+    #- The magic unit is not micron, it's 0.01 micron, which is angstrom/100
     def toMicron(self,angstrom):
-        return (angstrom/100)*2
+        return int((angstrom/100))
     
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
@@ -112,7 +113,7 @@ class MagicPrinter(DesignPrinter):
 
         self.fcell.write("magic\n")
         self.fcell.write("tech " + self.rules.techlib + "\n")
-        self.fcell.write("magscale 1 2\n")
+        self.fcell.write("magscale 1 1\n")
 
         #- So adding timestamp for the exact time
         currentDate = datetime.date.today()
@@ -128,11 +129,18 @@ class MagicPrinter(DesignPrinter):
     def endCell(self,cell):
 
         #- Print additional properties
-        self.properties.append("FIXED_BBOX %d %d %d %d" %( self.toMicron(cell.x1),
-                                                            self.toMicron(cell.y1),
-                                                            self.toMicron(cell.x2),
-                                                            self.toMicron(cell.y2)
-                                                          ))
+        xu1 = self.toMicron(cell.x1)
+        xu2 = self.toMicron(cell.x2)
+        yu1 = self.toMicron(cell.y1)
+        yu2 = self.toMicron(cell.y2)
+        if(xu1 != xu2 and yu1 != yu2):
+            self.properties.append("FIXED_BBOX %d %d %d %d" %( xu1,
+                                                            yu1,
+                                                            xu2,
+                                                            yu2))
+            pass
+        else:
+            print("Warning: Skip bounding box")
 
         self.closeCellFile()
 

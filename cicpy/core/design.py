@@ -30,6 +30,7 @@ from .cell import Cell
 from .layoutcell import LayoutCell
 
 import cicpy as cic
+import cicspi as spi
 import os
 import gzip
 import json
@@ -97,7 +98,7 @@ class Design():
 
         spifile = filename.replace(".json",".spi")
         if(os.path.exists(spifile)):
-            sp = cic.ckt.SpiceParser()
+            sp = spi.SpiceParser()
             sp.parseFile(spifile)
 
         if("cells" in obj):

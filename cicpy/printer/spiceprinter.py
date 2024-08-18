@@ -129,7 +129,7 @@ class SpicePrinter(DesignPrinter):
                 self.printResistor(o)
 
         else:
-            print(self.o)
+            self.printDevice(o)
 
         pass
 
@@ -164,6 +164,18 @@ class SpicePrinter(DesignPrinter):
 
 
         return new_nodes
+
+
+    def printDevice(self,o):
+
+        odev = self.rules.device(o.deviceName)
+        typename = odev["name"]
+
+        propss = self.spiceProperties(odev,o)
+
+        self.f.write(f"{o.name} " + " ".join(self.translateNodes(o.nodes)) + f" {typename} {propss} \n")
+
+        pass
 
     def printMosfet(self,o):
 

@@ -485,13 +485,47 @@ E {}
                     self.printResistor(o)
                 o.name = myname
                 o.nodes = [n,p,b]
-
-
-
             else:
                 self.printResistor(o)
+        else:
+            self.printSpiceDevice(o)
+
+
         pass
 
+    def printSpiceDevice(self,o):
+
+        odev = self.rules.device(o.deviceName)
+
+        typename = odev["name"]
+
+        dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+(props)
+}
+"""
+
+        tr = typename.split("__")
+        model = tr[1]
+        sym = typename.replace("__","/")
+
+        o.symnodes = odev["ports"]
+
+        props = ""
+        for prop in o.properties:
+            props += prop + "=" + str(o.properties[prop]) + " "
+
+
+        dstr= dstr.replace("(sym)",sym) \
+            .replace("(model)",model) \
+            .replace("(instName)",o.name) \
+            .replace("(props)",props) \
+            .replace("(x1)",str(self.ix1)) \
+            .replace("(y1)",str(self.iy1))
+
+
+        self.symbolAndWrite(dstr,o,sym)
+
+    
     #- Only support sky130nm for now
     def printMosfet(self,o):
 
@@ -538,6 +572,7 @@ spiceprefix=X
             #.replace("(instName)")
 
         self.symbolAndWrite(dstr,o,sym)
+
 
 
 

@@ -8,7 +8,7 @@ class Magic(cic.LayoutCell):
     def __init__(self):
         super().__init__()
         self.magscale = 1
-        self.techlib = "nmos"
+        self.techlib = "sky130A"
         self.timestamp = 0
         pass
 
@@ -27,6 +27,8 @@ class Magic(cic.LayoutCell):
     
     def parseToken(self,token,category,line):
 
+        #- Need to read all rectangles to get the bounding box
+        #- for cells its use + transform + box (box is local, apply transform to move)
 
         if(category== ""):
             if(token == "magscale"):

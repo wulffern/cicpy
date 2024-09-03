@@ -1,5 +1,5 @@
 ######################################################################
-##        Copyright (c) 2020 Carsten Wulff Software, Norway 
+##          <carsten@wulff.no>
 ## ###################################################################
 ## Created       : wulff at 2020-3-14
 ## ###################################################################
@@ -30,7 +30,7 @@ from .cell import Cell
 from .layoutcell import LayoutCell
 
 import cicpy as cic
-import cicspi as spi
+
 import os
 import gzip
 import json
@@ -82,7 +82,7 @@ class Design():
         return self.cells[name]
 
     def read(self,filename):
-
+        import cicspi as spi
         #Read JSON
         buffer = ""
         with open(filename)as fi:

@@ -1,5 +1,5 @@
 ######################################################################
-##        Copyright (c) 2024 Carsten Wulff Software, Norway
+##         <carsten@wulff.no>
 ## ###################################################################
 ## Created       : wulff at 2024-4-1
 ## ###################################################################
@@ -26,7 +26,7 @@
 ######################################################################
 
 import json
-import cicspi as spi
+
 import re
 
 class OrcCell(dict):
@@ -68,6 +68,7 @@ class OrcFile(dict):
 
 
     def runCell(self,cell):
+        import cicspi as spi
         name = cell["name"]
         sp = spi.SpiceParser()
         sp.parseFile((cell["spice"]))

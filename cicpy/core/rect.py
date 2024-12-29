@@ -135,6 +135,7 @@ class Rect:
         self.y2 = y2
     
     def setRect(self,r):
+        self.layer = r.layer
         self.x1 = r.x1
         self.y1 = r.y1
         self.x2 = r.x2
@@ -272,7 +273,6 @@ class Rect:
         
         self.emit_updated()
     
-
 
     def mirrorX(self,ay):
         self.setTop(2 *  ay - self.top())

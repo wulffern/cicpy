@@ -76,14 +76,14 @@ class Component(Object):
 
 
     def parseProperties(self,ss):
-        if(re.search("^\s*$",ss)):
+        if(re.search(r"^\s*$",ss)):
             return
 
-        ss = re.sub("\n"," ",ss).strip()
+        ss = re.sub(r"\n"," ",ss).strip()
 
         key_value_pairs = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+',ss)
         for s in key_value_pairs:
-            if(re.search("^\s*$",s)):
+            if(re.search(r"^\s*$",s)):
                 continue
             ar = re.split("=",s)
             if(len(ar) != 2):
@@ -97,9 +97,15 @@ class Component(Object):
     def name(self,val = None):
         return self.property("name",val)
 
+    def group(self):
+        name = self.name()
+        m = re.search(r"^x(\D+)",name,re.I)
+        group = m.groups(0)
+        return group
+
     def parse(self,ss):
         super().parse(ss)
-        m = re.search("C {([^}]+)} (\S+) (\S+) (\S+) (\S+) {([^}]*)}",ss,re.MULTILINE)
+        m = re.search(r"C {([^}]+)} (\S+) (\S+) (\S+) (\S+) {([^}]*)}",ss,re.MULTILINE)
 
         if(m):
             ar = m.groups()
@@ -127,6 +133,32 @@ class XSchem():
         self.path = ""
         pass
 
+    def orderByGroup(self):
+
+        instList = list()
+        groups = dict()
+        for instName in sorted(self.components):
+
+            c = self.components[instName]
+            #Ignore anything that does not start with X or x
+            if(not re.search("^x",instName,re.I)):
+                continue
+
+            group = c.group()
+            if(group not in groups):
+                groups[group] = list()
+            groups[group].append(instName)
+
+        for g in groups:
+            arr = sorted(groups[g])
+            instList += arr
+
+        return instList
+
+
+        
+
+    
     def countPattern(self,pattern,line):
         count = len(re.findall("("+pattern+")",line))
         return count
@@ -182,7 +214,7 @@ class XSchem():
                 ind += 1
 
                 #- Check for symbol embedding
-                if(re.search("^\[",line)):
+                if(re.search(r"^\[",line)):
                     raise Exception("Symbol Embedding on line %d not supported" % ind)
 
                 #- Gobble up all {} with a stack

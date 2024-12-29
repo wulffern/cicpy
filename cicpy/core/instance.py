@@ -34,6 +34,7 @@ class Instance(Cell):
         super().__init__()
         self.instanceName = ""
         self.cell = ""
+        self.layoutcell = None
         self.libpath = ""
         self.angle = ""
         self.xcell = 0
@@ -62,6 +63,16 @@ class Instance(Cell):
     def getCellPoint(self):
         p = Point(self.x1 + self.xcell, self.y1 + self.ycell)
         return p
+
+    def calcBoundingRect(self):
+
+        if(self.layoutcell is None):
+            return self
+
+        r = self.layoutcell
+        #print(r)
+        r.moveTo(self.x1,self.y1)
+        return r
 
     def __str__(self):
         return  super().__str__() + " instanceName=%s xcell=%d ycell=%d angle=%s" %(self.instanceName,self.xcell,self.ycell,self.angle)

@@ -36,9 +36,10 @@ import os
 
 class MagicPrinter(DesignPrinter):
 
-    #- The magic unit is not micron, it's 0.01 micron, which is angstrom/100
+
     def toMicron(self,angstrom):
-        return int((angstrom/100))
+        #- Snap to 5 nm grid
+        return int(np.round(angstrom/50))
     
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
@@ -113,7 +114,7 @@ class MagicPrinter(DesignPrinter):
 
         self.fcell.write("magic\n")
         self.fcell.write("tech " + self.rules.techlib + "\n")
-        self.fcell.write("magscale 1 1\n")
+        self.fcell.write("magscale 1 2\n")
 
         #- So adding timestamp for the exact time
         currentDate = datetime.date.today()

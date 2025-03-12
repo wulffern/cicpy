@@ -57,7 +57,6 @@ class XschemSymbol(Cell):
 
 
         self.ports = dict()
-        print(symbol_to_use)
         if(symbol_to_use):
             self.read(symbol_to_use)
 
@@ -85,7 +84,7 @@ class XschemSymbol(Cell):
                 self.symbuffer.append(l)
                 if(l.startswith("B")):
 
-                    m = re.search("B\s+\d+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+\{(.*)\}",l)
+                    m = re.search(r"B\s+\d+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+\{(.*)\}",l)
 
 
                     if(m is not None):
@@ -94,7 +93,7 @@ class XschemSymbol(Cell):
                         xb2 = float(m.group(3))
                         yb2 = float(m.group(4))
 
-                        m1 = re.search("name=(\S+)",m.group(5))
+                        m1 = re.search(r"name=(\S+)",m.group(5))
                         if(m1 is None):
                             continue
                         name = m1.group(1)
@@ -102,7 +101,7 @@ class XschemSymbol(Cell):
 
                         p = Port(name, rect=r)
                         self.add(p)
-                        m2 = re.search("dir=(\S+)",m.group(5))
+                        m2 = re.search(r"dir=(\S+)",m.group(5))
                         if(m2 is None):
                             p.direction = "inputOutput"
                         else:
@@ -468,12 +467,18 @@ E {}
 
                 n = o.nodes[0]
                 p = o.nodes[1]
-                b = o.nodes[2]
+                if(len(o.nodes) > 2):
+                    b = o.nodes[2]
+                else:
+                    b = None
 
                 myname = o.name
 
                 for i in range(0,nf):
-                    mynodes = [n,p,b]
+                    if(b is None):
+                        mynodes = [n,p]
+                    else:
+                        mynodes = [n,p,b]
                     if(i >= 0 and i < nf-1):
                         mynodes[1] = "INT_" + str(i)
 
@@ -484,7 +489,11 @@ E {}
                     o.name = myname + "_" + str(i)
                     self.printResistor(o)
                 o.name = myname
-                o.nodes = [n,p,b]
+                if(b is None):
+                    o.nodes = [n,p]
+                else:
+                    o.nodes = [n,p,b]
+                #o.nodes = [n,p,b]
             else:
                 self.printResistor(o)
         else:
@@ -501,24 +510,37 @@ E {}
 
         dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
 (props)
+model=(model)
+m=1
+spiceprefix=X
 }
 """
 
-        tr = typename.split("__")
-        model = tr[1]
-        sym = typename.replace("__","/")
+        (model,sym) = self.getModelAndSymbolName(typename)
+
 
         o.symnodes = odev["ports"]
 
+
         props = ""
+        ss = ""
         for prop in o.properties:
-            props += prop + "=" + str(o.properties[prop]) + " "
+
+            nprop = prop
+            if("propertymap" in odev):
+                print(odev["propertymap"])
+                if(prop in odev["propertymap"]):
+                    nprop = odev["propertymap"][prop]["name"]
+                    ss = odev["propertymap"][prop]["str"]
+
+            props += nprop + "=" + str(o.properties[prop]) + ss + " "
 
 
         dstr= dstr.replace("(sym)",sym) \
             .replace("(model)",model) \
             .replace("(instName)",o.name) \
             .replace("(props)",props) \
+            .replace("(model)",model) \
             .replace("(x1)",str(self.ix1)) \
             .replace("(y1)",str(self.iy1))
 
@@ -540,7 +562,8 @@ E {}
 
 
 
-        dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+        if(self.rules.techlib == "sky130"):
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
 L=(length)
 W=(width)
 nf=(nf)
@@ -556,10 +579,18 @@ spiceprefix=X
 }
 """
 
-        tr = typename.split("__")
-        model = tr[1]
-        sym = typename.replace("__","/")
+        elif(self.rules.techlib == "ihp-sg13g2"):
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+l=(length)u
+w=(width)u
+ng=(nf)
+m=1
+spiceprefix=X
+model=(model)
+}
+"""
 
+        (model,sym) = self.getModelAndSymbolName(typename)
 
         dstr= dstr.replace("(sym)",sym) \
             .replace("(model)",model) \
@@ -574,6 +605,17 @@ spiceprefix=X
         self.symbolAndWrite(dstr,o,sym)
 
 
+    def getModelAndSymbolName(self,typename):
+        if(re.search(r"__",typename)):
+            tr = typename.split("__")
+            model = tr[1]
+            sym = typename.replace("__","/")
+        else:
+            model = typename
+            sym = typename
+        return (model,sym)
+
+
 
 
     def printResistor(self,o):
@@ -585,23 +627,30 @@ spiceprefix=X
 
         typename = odev["name"]
 
-        dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+
+
+        if(self.rules.techlib == "sky130"):
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
 W=(width)
 L=(length)
 model=(model)
 mult=1}
 """
+        elif(self.rules.techlib == "ihp-sg13g2"):
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+w=(width)e-6
+l=(length)e-6
+model=(model)
+spiceprefix=X
+b=0
+m=1}
+"""
 
-        tr = typename.split("__")
-        model = tr[1]
-        sym = typename.replace("__","/")
+        (model,sym) = self.getModelAndSymbolName(typename)
 
         o.symnodes = odev["ports"]
         port0 = odev["ports"][0]
         port1 = odev["ports"][1]
-
-        #o.nodes[0] = port0
-        #o.nodes[1] = port1
 
 
         dstr= dstr.replace("(sym)",sym) \

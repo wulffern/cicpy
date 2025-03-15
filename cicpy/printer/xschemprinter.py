@@ -580,7 +580,7 @@ spiceprefix=X
 """
 
         elif(self.rules.techlib == "ihp-sg13g2"):
-            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=X(instName)
 l=(length)u
 w=(width)u
 ng=(nf)

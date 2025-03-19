@@ -34,6 +34,7 @@ import re
 import numpy as np
 import glob
 import os
+import subprocess
 
 
 class XschemSymbol(Cell):
@@ -205,6 +206,12 @@ class XschemPrinter(DesignPrinter):
             for s in sym:
                 self.lib_symbols.append(s)
 
+        #Find xschem device library
+        result = subprocess.run(['which', 'xschem'], stdout=subprocess.PIPE)
+        xschempath = result.stdout.decode('utf-8').replace("/bin/","/share/").replace("\n","") + "/xschem_library/devices/*.sym"
+        sym = glob.glob(xschempath)
+        for s in sym:
+            self.lib_symbols.append(s)
 
 
     def startLib(self,name):
@@ -636,8 +643,18 @@ L=(length)
 model=(model)
 mult=1}
 """
+        elif(self.rules.techlib == "ihp-sg13g2" and o.deviceName != "mres"):
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+w=(width)e-6
+l=(length)e-6
+model=(model)
+spiceprefix=X
+b=0
+m=1}
+"""
         elif(self.rules.techlib == "ihp-sg13g2"):
             dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+value="(value)"
 w=(width)e-6
 l=(length)e-6
 model=(model)
@@ -660,6 +677,9 @@ m=1}
             .replace("(instName)",o.name) \
             .replace("(x1)",str(self.ix1)) \
             .replace("(y1)",str(self.iy1))
+
+        if(self.rules.techlib == "ihp-sg13g2" and o.deviceName == "mres"):
+            dstr = dstr.replace("(value)",str(o.properties["length"]/o.properties["width"]*odev["resistance_square"]))
 
 
         self.symbolAndWrite(dstr,o,sym)

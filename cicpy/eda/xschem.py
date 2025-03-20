@@ -152,7 +152,7 @@ class XSchem():
                 groups[group] = list()
             groups[group].append(instName)
 
-        for g in groups:
+        for g in sorted(groups):
             arr = sorted(groups[g])
             instList += arr
 

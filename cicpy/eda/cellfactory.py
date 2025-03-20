@@ -77,7 +77,7 @@ def placeACell(root,lcell,scell,name,x,y):
 
     return (next_x,next_y)
 
-def getLayoutCellFromXSch(libdir,xs):
+def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
 
     root = cic.eda.Layout()
     root.name = xs.name
@@ -86,10 +86,38 @@ def getLayoutCellFromXSch(libdir,xs):
     y = 0
     x = 0
 
+    gbreaks = gbreak.split(",")
+    if(type(gbreaks) == list):
+        next_gbreak = int(gbreaks.pop())
+    else:
+        next_gbreak = int(gbreak)
+
+
+    xps = xspace.split(",")
+    if(type(xps) == list):
+        next_xspace = int(xps.pop())
+    else:
+        next_xspace = int(xspace)
+
+    yps = yspace.split(",")
+    if(type(yps) == list):
+        next_yspace = int(yps.pop())
+    else:
+        next_yspace = int(yspace)
+
+    print(next_xspace)
+    print(next_yspace)
+
     next_x = 0
     next_y = 0
 
     prevgroup = ""
+
+    ymax = 0
+    yorg = 0
+    xorg = 0
+    groupcount = 0
+    first = True
 
     for instanceName in xs.orderByGroup():
 
@@ -105,21 +133,38 @@ def getLayoutCellFromXSch(libdir,xs):
 
         lcell = getLayoutCellFromSchCell(libdir,scell)
 
-        print(lcell)
 
         name = scell.name()
         group = scell.group()
 
         if(group != prevgroup or prevgroup == ""):
-            y = 0
-            x = next_x
+            if(next_gbreak == groupcount):
+                y = ymax + next_yspace
+                yorg = y
+                if(type(gbreak) == list):
+                    next_gbreak = int(gbreak.pop())
+                x = 0
+            else:
+                y = yorg
+                if(first):
+                    x = 0
+                else:
+                    x = next_x + next_xspace
+                    if(type(xps) == list and len(xps) > 0):
+                        next_xspace = int(xps.pop())
+
+            groupcount += 1
 
         (next_x,next_y) = placeACell(root,lcell,scell,name,x,y)
+
+        if(next_y > ymax):
+            ymax = next_y
 
         x = lcell.x1
         y = next_y
 
         prevgroup = group
+        first = False
 
 
     root.updateBoundingRect()

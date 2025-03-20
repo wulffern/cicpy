@@ -100,7 +100,10 @@ class Component(Object):
     def group(self):
         name = self.name()
         m = re.search(r"^x(\D+)",name,re.I)
-        group = m.groups(0)
+        if(m is not None):
+            group = m.groups(0)
+        else:
+            group = ""
         return group
 
     def parse(self,ss):

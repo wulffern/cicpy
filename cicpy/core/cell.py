@@ -246,6 +246,12 @@ class Cell(Rect):
     def toJson(self):
         o = super().toJson()
         o["class"] = self.__class__.__name__
+
+        if(o["class"] == "Cell"):
+            o["class"] = "cIcCore::Cell"
+        elif(o["class"] == "Layout"):
+            o["class"] = "cIcCore::LayoutCell"
+
         o["name"] = self.name
         o["has_pr"] = self.has_pr
 

@@ -51,6 +51,16 @@ class Instance(Cell):
         self.xcell = o["xcell"]
         self.ycell = o["ycell"]
 
+    def toJson(self):
+        o = super().toJson()
+        o["instanceName"] = self.instanceName
+        o["angle"] = self.angle
+        o["cell"] = self.cell
+        o["libpath"] = self.libpath
+        o["xcell"] = self.xcell
+        o["ycell"] = self.ycell
+        return o
+
     def isLayoutCell(self):
         c = self.getCell(self.cell)
 

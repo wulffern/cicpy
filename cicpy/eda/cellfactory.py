@@ -1,11 +1,13 @@
-#!/usr/bin/env python3
 
 import cicpy as cic
 import os
 import re
 
 cells = dict()
+lcells = dict()
 subcells = dict()
+tops = dict()
+bots = dict()
 
 def getCellFromSymbol(libdir,symbol):
     path = libdir + symbol.replace(".sym",".mag")
@@ -23,18 +25,25 @@ def getLayoutCellFromSchCell(libdir,schCell):
 
     layName = libdir + schCell.symbol.replace(".sym",".mag")
 
-    lcell = cic.Layout()
-#    print(layName)
-    lcell.readFromFile(layName)
-    #lcell.updateBoundingRect()
-
-    #print(names)
- #   print(lcell)
-
+    if(layName not in lcells):
+        lcell = cic.Layout()
+        lcell.readFromFile(layName)
+        lcells[layName] = lcell
+        if(re.search(r"CH_\d+C\d+F\d+",layName)):
+            topName = re.sub(r"C\d+F\d+","CTAPTOP",layName)
+            if(os.path.exists(topName)):
+                top = cic.Layout()
+                top.readFromFile(topName)
+                tops[lcell.name] = top
+                botName = re.sub(r"C\d+F\d+","CTAPBOT",layName)
+            if(os.path.exists(botName)):
+                bot = cic.Layout()
+                bot.readFromFile(botName)
+                bots[lcell.name] = bot
 
     #raise Exception("Figure out to organize subcells")
     #- Should not return
-    return lcell
+    return lcells[layName]
 
 def getInstanceFromComponent(layoutCell,component,x,y):
     i = cic.Instance()
@@ -45,6 +54,21 @@ def getInstanceFromComponent(layoutCell,component,x,y):
     i.libpath = layoutCell.libpath
     i.moveTo(x,y)
     i.updateBoundingRect()
+    
+    return i
+
+count = 0
+def placeDummy(root,lcell,x,y):
+
+    i = cic.Instance()
+    i.instanceName = "X" + lcell.name + str(count)
+    i.name = lcell.name
+    i.cell = lcell.name
+    i.layoutcell = lcell
+    i.libpath = lcell.libpath
+    i.moveTo(x,y)
+    i.updateBoundingRect()
+    root.add(i)
     return i
 
 def placeACell(root,lcell,scell,name,x,y):
@@ -105,9 +129,6 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
     else:
         next_yspace = int(yspace)
 
-    print(next_xspace)
-    print(next_yspace)
-
     next_x = 0
     next_y = 0
 
@@ -118,6 +139,9 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
     xorg = 0
     groupcount = 0
     first = True
+    startGroup = False
+    endGroup = False
+    prevcell = None
 
     for instanceName in xs.orderByGroup():
 
@@ -133,11 +157,22 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
 
         lcell = getLayoutCellFromSchCell(libdir,scell)
 
-
+        #design.add(lcell)
         name = scell.name()
         group = scell.group()
 
         if(group != prevgroup or prevgroup == ""):
+            startGroup = True
+
+            if(prevcell is not None and prevcell.name in tops):
+                i = placeDummy(root,tops[prevcell.name],x,y)
+                x = i.x1
+                y = i.y2
+                next_y = y
+                if(next_y > ymax):
+                    ymax = next_y
+
+
             if(next_gbreak == groupcount):
                 y = ymax + next_yspace
                 yorg = y
@@ -146,6 +181,7 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
                 x = 0
             else:
                 y = yorg
+
                 if(first):
                     x = 0
                 else:
@@ -155,6 +191,13 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
 
             groupcount += 1
 
+        if(startGroup):
+            if(lcell.name in bots):
+                i= placeDummy(root,bots[lcell.name],x,y)
+                x = i.x1
+                y = i.y2
+
+
         (next_x,next_y) = placeACell(root,lcell,scell,name,x,y)
 
         if(next_y > ymax):
@@ -163,8 +206,11 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
         x = lcell.x1
         y = next_y
 
+        prevcell = lcell
+
         prevgroup = group
         first = False
+        startGroup = False
 
 
     root.updateBoundingRect()

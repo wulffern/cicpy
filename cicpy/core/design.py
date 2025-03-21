@@ -71,9 +71,23 @@ class Design():
             self.jcells[c.name] = o
             self.cellnames.append(c.name)
 
+    def toJson(self):
+        obj = dict()
+        obj["cells"] = list()
+        for cname in self.cellnames:
+            c = self.cells[cname]
+            obj["cells"].append(c.toJson())
+
+        return obj
+
     def add(self,c):
-        self.cells[c.name] = c
-        self.cellnames.append(c.name)
+
+        if(c is None):
+            return
+
+        if(c.name not in self.cells):
+            self.cells[c.name] = c
+            self.cellnames.append(c.name)
 
     def cellNames(self):
         return self.cellnames

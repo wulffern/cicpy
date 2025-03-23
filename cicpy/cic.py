@@ -29,6 +29,7 @@ import click
 import os, sys
 import cicpy as cic
 import json
+import cicspi
 
 @click.group()
 @click.pass_context
@@ -210,7 +211,7 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)
 
-@cli.command("mag")
+@cli.command("sch2mag")
 @click.pass_context
 @click.argument("lib")
 @click.argument("cell")
@@ -218,7 +219,7 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
 @click.option("--xspace",default="0",help="Group X space")
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-def mag(ctx,lib,cell,libdir,xspace,yspace,gbreak):
+def xsch2mag(ctx,lib,cell,libdir,xspace,yspace,gbreak):
     """Translate a Xschem file to Magic"""
 
     #rules = cic.Rules(techfile)
@@ -232,6 +233,45 @@ def mag(ctx,lib,cell,libdir,xspace,yspace,gbreak):
 
     obj = cic.MagicPrinter(libdir + lib,cell)
     obj.print(design)
+
+@cli.command("spi2mag")
+@click.pass_context
+@click.argument("spi")
+@click.argument("cell")
+@click.option("--libdir",default="../design/",help="Default directory of designs")
+@click.option("--xspace",default="0",help="Group X space")
+@click.option("--yspace",default="0",help="Group Y space")
+@click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
+def spi2mag(ctx,spi,cell,libdir,xspace,yspace,gbreak):
+    """Translate a SPICE file to Magic"""
+
+    sp = cicspi.SpiceParser()
+    sp.parseFile(spi)
+    if(cell not in sp):
+        print(f"Could not find {cell} in {str(sp.keys())}")
+        return
+
+    ckt = sp[cell]
+    for i in ckt.instances:
+        print(i.name,i.groupName,i.nodes,i.instanceType)
+
+    print(ckt)
+
+    #rules = cic.Rules(techfile)
+    #xs = cic.eda.Schematic()
+    #xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
+
+    #cell = cic.getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak)
+
+    #design = cic.Design()
+    #design.add(cell)
+
+    #obj = cic.MagicPrinter(libdir + lib,cell)
+    #obj.print(design)
+
+
+
+
 
 
 @cli.command("orc")

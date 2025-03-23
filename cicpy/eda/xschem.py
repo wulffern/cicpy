@@ -158,9 +158,6 @@ class XSchem():
 
         return instList
 
-
-        
-
     
     def countPattern(self,pattern,line):
         count = len(re.findall("("+pattern+")",line))

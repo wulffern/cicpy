@@ -245,7 +245,7 @@ class XschemPrinter(DesignPrinter):
         self.symbols[cell.name] = sym
 
         if("noSchematic" in cell.meta):
-            #print(self.lib)
+
             sym.read(self.libname + "/" + cell.name + ".sym")
             sym.updateBoundingRect()
             return
@@ -345,21 +345,13 @@ E {}
 
 
     def printInstance(self,o):
-
-
-        #if(o.subcktName not in self.cells.keys()):
-        #    print(f"Could not find instance {o.subcktName}")
-        #    return
-
         _libname = ""
-        if(o.isCktInstance()):
+        if(o.isCktInstance() and o.subcktName in self.cells):
             instcell = self.cells[o.subcktName]
             _libname = os.path.basename(instcell.libpath)
 
-
         if(_libname == ""):
             _libname = self.libname
-
 
 
         dstr = "C {" + f"{_libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"X{o.name}" + "}\n"
@@ -371,10 +363,11 @@ E {}
         self.fcell.write(dstr)
 
         if(o.isCktInstance()):
+            if(o.subcktName not in self.cells):
+                return
             instcell = self.cells[o.subcktName]
             intNodes = instcell.ckt.nodes
         else:
-            #print(o.symnodes)
             intNodes = o.symnodes
 
         if(symbolName in self.symbols):
@@ -385,19 +378,12 @@ E {}
                 raise Exception(f"Could not find symbol {symbolName}, are you missing a xschem lib reference in the techfile?")
             self.symbols[symbolName] = instsym
 
-        #print(symbolName)
-        #print(instsym.ports)
-
-
         nodes =  o.nodes
 
-
-        
         if(len(nodes) != len(intNodes)):
             raise Exception(f"""Not the same number of nodes for instance and cell reference
       \tinstance {o.name}:\t{nodes}
       \tcell {instcell.ckt.name}:\t{intNodes}""")
-
 
 
         for z in range(len(nodes)):
@@ -535,7 +521,7 @@ spiceprefix=X
 
             nprop = prop
             if("propertymap" in odev):
-                print(odev["propertymap"])
+
                 if(prop in odev["propertymap"]):
                     nprop = odev["propertymap"][prop]["name"]
                     ss = odev["propertymap"][prop]["str"]
@@ -596,7 +582,14 @@ spiceprefix=X
 model=(model)
 }
 """
-
+        else:
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=X(instName)
+l=(length)u
+w=(width)u
+spiceprefix=X
+model=(model)
+}
+"""
         (model,sym) = self.getModelAndSymbolName(typename)
 
         dstr= dstr.replace("(sym)",sym) \
@@ -660,6 +653,15 @@ l=(length)e-6
 model=(model)
 spiceprefix=X
 b=0
+m=1}
+"""
+        else:
+            dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
+value="(value)"
+w=(width)e-6
+l=(length)e-6
+model=(model)
+spiceprefix=X
 m=1}
 """
 

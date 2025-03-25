@@ -29,7 +29,7 @@ from .rect import *
 from .port import Port
 from .text import Text
 import re
-from ..ckt.subckt import Subckt
+import cicspi as spi
 
 class Cell(Rect):
 
@@ -55,6 +55,7 @@ class Cell(Rect):
         self.isUsed = False
         self.libpath = ""
         self.has_pr = False
+        self.meta = list()
         self.obj = False #- Original JSON obj
 
 
@@ -238,7 +239,7 @@ class Cell(Rect):
 
         #- Handle subckt
         if("ckt" in o):
-            self.ckt = Subckt()
+            self.ckt = spi.Subckt()
             self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])
 

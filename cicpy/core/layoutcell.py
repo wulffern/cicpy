@@ -30,7 +30,7 @@ from .cell import Cell
 from .port import Port
 from .instance import Instance
 from .text import Text
-from ..ckt.subckt import Subckt
+import cicspi as spi
 
 class LayoutCell(Cell):
 
@@ -39,14 +39,21 @@ class LayoutCell(Cell):
         self.altenateGroup = False
         self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
-        self.meta = None
         self.graph = None
 
 
     def toJson(self):
         o = super().toJson()
-
         return o
+
+
+    def place():
+
+        pass
+
+    def route():
+
+        pass
 
     def fromJson(self,o):
         super().fromJson(o)

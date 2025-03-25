@@ -1,63 +1,80 @@
 {
     "version" : 2,
     "layers" : {
-        "CO"  : { "number" : 33, "datatype" : -1,  "material" : "cut",       "previous" : "PO",  "next" : "M1", "color" : "yellow"},
-        "OD"  : { "number" : 22,  "datatype" : -1,  "material" : "diffusion", "previous" : "",  "next" : "CO", "pin" : "OD_pin", "color" : "green" },
-        "ODB"  : { "number" : 22,  "datatype" : -1,  "material" : "diffusion", "previous" : "",  "next" : "CO", "pin" : "OD_pin", "color" : "green" },
-        "PO"  : { "number" : 30,  "datatype" : -1,  "material" : "poly",      "previous" : "",  "next" : "CO", "pin" : "PO_pin" , "color" : "red"},
-        "POB"  : { "number" : 30,  "datatype" : -1,  "material" : "implant",      "previous" : "",  "next" : "CO", "pin" : "PO_pin" , "color" : "red"},
+        "CO"  : { "alias" : "po", "number" : 33, "datatype" : -1,  "material" : "cut",       "previous" : "PO",  "next" : "M1", "color" : "yellow"},
+        "OD"  : { "alias" : "po", "number" : 22,  "datatype" : -1,  "material" : "diffusion", "previous" : "",  "next" : "CO", "pin" : "OD_pin", "color" : "green" },
+        "ODB"  : { "alias" : "po", "number" : 22,  "datatype" : -1,  "material" : "diffusion", "previous" : "",  "next" : "CO", "pin" : "OD_pin", "color" : "green" },
+        "PO"  : { "alias" : "po", "number" : 30,  "datatype" : -1,  "material" : "poly",      "previous" : "",  "next" : "CO", "pin" : "PO_pin" , "color" : "red"},
+        "POB"  : { "alias" : "po", "number" : 30,  "datatype" : -1,  "material" : "implant",      "previous" : "",  "next" : "CO", "pin" : "PO_pin" , "color" : "red"},
 
-        "M1" : { "number" : 34, "datatype": -1, "material" : "metal","previous" : "CO", "next" : "VIA1", "pin" : "M1_pin" ,"res" : "M1_res","color" : "blue"},
-        "M1_pin" : { "number" : 34, "datatype" : 237, "material" : "implant","fill":"fill","color" : "blue"},
-        "M1_res" : { "number" : 110, "datatype" : 11, "material" : "metalres"},
+        "M1" : { "alias" : "po", "number" : 34, "datatype": -1, "material" : "metal","previous" : "CO", "next" : "VIA1", "pin" : "M1_pin" ,"res" : "M1_res","color" : "blue"},
+        "M1_pin" : { "alias" : "po", "number" : 34, "datatype" : 237, "material" : "implant","fill":"fill","color" : "blue"},
+        "M1_res" : { "alias" : "po", "number" : 110, "datatype" : 11, "material" : "metalres"},
 
-        "M2" : { "number" : 36, "datatype" : -1, "material" : "metal", "previous" : "VIA1",  "next" : "VIA2", "pin" : "M2_pin" , "res" : "M2_res", "color" : "goldenrod" },
-        "M2_pin" : { "number" : 36, "datatype" : 237, "material" : "implant","fill":"fill","color" : "goldenrod"},
-        "M2_res" : { "number" : 110, "datatype" : 12, "material" : "metalres"},
+        "M2" : { "alias" : "po", "number" : 36, "datatype" : -1, "material" : "metal", "previous" : "VIA1",  "next" : "VIA2", "pin" : "M2_pin" , "res" : "M2_res", "color" : "goldenrod" },
+        "M2_pin" : { "alias" : "po", "number" : 36, "datatype" : 237, "material" : "implant","fill":"fill","color" : "goldenrod"},
+        "M2_res" : { "alias" : "po", "number" : 110, "datatype" : 12, "material" : "metalres"},
 
-        "M3" : { "number" : 42, "datatype" : -1, "material" : "metal", "previous" : "VIA2",  "next" : "VIA3", "pin" : "M3_pin" , "res" : "M3_res", "color" : "aqua"},
-        "M3_pin" : { "number" : 42, "datatype" : 237, "material" : "implant","fill":"fill","color" : "aqua"},
-        "M3_res" : { "number" : 110, "datatype" : 13, "material" : "metalres"},
+        "M3" : { "alias" : "po", "number" : 42, "datatype" : -1, "material" : "metal", "previous" : "VIA2",  "next" : "VIA3", "pin" : "M3_pin" , "res" : "M3_res", "color" : "aqua"},
+        "M3_pin" : { "alias" : "po", "number" : 42, "datatype" : 237, "material" : "implant","fill":"fill","color" : "aqua"},
+        "M3_res" : { "alias" : "po", "number" : 110, "datatype" : 13, "material" : "metalres"},
 
-        "M4" : { "number" : 46, "datatype" : -1, "material" : "metal", "previous" : "VIA3",  "next" : "VIA4", "pin" : "M4_pin" , "res" : "M4_res", "color" : "darkgreen"},
-        "M4_pin" : { "number" : 46, "datatype" : 237, "material" : "implant","fill":"fill","color" : "darkgreen"},
-        "M4_res" : { "number" : 110, "datatype" : 14, "material" : "metalres"},
+        "M4" : { "alias" : "po", "number" : 46, "datatype" : -1, "material" : "metal", "previous" : "VIA3",  "next" : "VIA4", "pin" : "M4_pin" , "res" : "M4_res", "color" : "darkgreen"},
+        "M4_pin" : { "alias" : "po", "number" : 46, "datatype" : 237, "material" : "implant","fill":"fill","color" : "darkgreen"},
+        "M4_res" : { "alias" : "po", "number" : 110, "datatype" : 14, "material" : "metalres"},
 
-        "M5" : { "number" : 81, "datatype" : -1, "material" : "metal", "previous" : "VIA4",  "next" : "VIA5", "pin" : "M5_pin", "res" : "M5_res", "color" : "brown" },
-        "M5_pin" : { "number" : 81, "datatype" : 237, "material" : "implant","fill":"fill","color" : "brown"},
-        "M5_res" : { "number" : 110, "datatype" : 15, "material" : "metalres"},
+        "M5" : { "alias" : "po", "number" : 81, "datatype" : -1, "material" : "metal", "previous" : "VIA4",  "next" : "VIA5", "pin" : "M5_pin", "res" : "M5_res", "color" : "brown" },
+        "M5_pin" : { "alias" : "po", "number" : 81, "datatype" : 237, "material" : "implant","fill":"fill","color" : "brown"},
+        "M5_res" : { "alias" : "po", "number" : 110, "datatype" : 15, "material" : "metalres"},
 
-        "M6" : { "number" : 126, "datatype" :-1, "material" : "metal", "previous" : "VIA5",  "next" : "VIA6", "pin" : "M6_pin", "res" : "M6_res", "color" : "darkviolet" },
-        "M6_pin" : { "number" : 126, "datatype" : 237, "material" : "implant","fill":"fill","color" : "darkviolet"},
-        "M6_res" : { "number" : 110, "datatype" : 16, "material" : "metalres","fill":"fill"},
+        "M6" : { "alias" : "po", "number" : 126, "datatype" :-1, "material" : "metal", "previous" : "VIA5",  "next" : "VIA6", "pin" : "M6_pin", "res" : "M6_res", "color" : "darkviolet" },
+        "M6_pin" : { "alias" : "po", "number" : 126, "datatype" : 237, "material" : "implant","fill":"fill","color" : "darkviolet"},
+        "M6_res" : { "alias" : "po", "number" : 110, "datatype" : 16, "material" : "metalres","fill":"fill"},
 
-        "VIA1" : { "number" : 35, "datatype" : -1, "material" : "cut", "previous" : "M1", "next" : "M2" },
-        "VIA2" : { "number" : 38, "datatype" : -1, "material" : "cut", "previous" : "M2", "next" : "M3" },
-        "VIA3" : { "number" : 40, "datatype" : -1, "material" : "cut", "previous" : "M3", "next" : "M4" },
-        "VIA4" : { "number" : 41, "datatype" : -1, "material" : "cut", "previous" : "M4", "next" : "M5" },
-        "VIA5" : { "number" : 82, "datatype" : -1, "material" : "cut", "previous" : "M5", "next" : "M6" },
+        "VIA1" : { "alias" : "po", "number" : 35, "datatype" : -1, "material" : "cut", "previous" : "M1", "next" : "M2" },
+        "VIA2" : { "alias" : "po", "number" : 38, "datatype" : -1, "material" : "cut", "previous" : "M2", "next" : "M3" },
+        "VIA3" : { "alias" : "po", "number" : 40, "datatype" : -1, "material" : "cut", "previous" : "M3", "next" : "M4" },
+        "VIA4" : { "alias" : "po", "number" : 41, "datatype" : -1, "material" : "cut", "previous" : "M4", "next" : "M5" },
+        "VIA5" : { "alias" : "po", "number" : 82, "datatype" : -1, "material" : "cut", "previous" : "M5", "next" : "M6" },
 
-        "NWT" : { "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
-        "PPT" : { "number" : 31, "datatype" : -1 , "material" : "implant", "color" : "pink","fill" : "nofill"},
-        "NPT" : { "number" : 32, "datatype" : -1 , "material" : "implant", "color" : "cyan","fill" : "nofill"},
+        "LVT" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "HS" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "NSS" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "NSSN" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "NWD" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "PPD" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "NPD" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "NW" : { "alias" : "po", "number" : 21, "datatype" : -1 , "material" : "implant", "color" : "red","fill" : "nofill"},
+        "PP" : { "alias" : "po", "number" : 31, "datatype" : -1 , "material" : "implant", "color" : "pink","fill" : "nofill"},
+        "NP" : { "alias" : "po", "number" : 32, "datatype" : -1 , "material" : "implant", "color" : "cyan","fill" : "nofill"},
 
-        "PFIELDT" : { "number" : 23, "datatype" :-1 , "material" : "marker" , "color" : "black","fill" : "fill"},
-        "TXT" : { "number" : 58, "datatype" :-1 , "material" : "marker" , "color" : "black","fill" : "fill"}
+        "PFIELDT" : { "alias" : "po", "number" : 23, "datatype" :-1 , "material" : "marker" , "color" : "black","fill" : "fill"},
+        "TXT" : { "alias" : "po", "number" : 58, "datatype" :-1 , "material" : "marker" , "color" : "black","fill" : "fill"}
     },
     "technology" :{
         "techlib" : "tech",
+         "symbol_libs" : ["cpdk"
+                        ],
         "devices" : {
-            "mresM1" : { "name" : "rm1",
-                         "ports" : ["PLUS","MINUS"],
+
+            "mresM1" : { "name" : "devices__res",
+                         "ports" : ["P","M"],
                          "propertymap" : {
                              "l" : { "name" : "length", "str" : "u"},
                              "w" : { "name" : "width", "str" : "u"}
                          }
                        },
-            "mresM2" : { "inherit" : "mresM1", "name" : "rm2"},
-            "mresM3" : { "inherit" : "mresM1", "name" : "rm3"},
-            "mresM4" : { "inherit" : "mresM1", "name" : "rm4"},
-            "nch_lvt" : { "name" : "nmos_1p5",    "ports" : ["D","G","S","B"],
+            "mresM2" : { "inherit" : "mresM1", "name" : "devices__res"},
+            "mresM3" : { "inherit" : "mresM1", "name" : "devices__res"},
+            "mresM4" : { "inherit" : "mresM1", "name" : "devices__res"},
+            "mres" : { "name" : "devices__res",
+                         "ports" : ["P","M"],
+                         "propertymap" : {
+                             "l" : { "name" : "length", "str" : "u"},
+                             "w" : { "name" : "width", "str" : "u"}
+                         }
+                       },
+            "nch_lvt" : { "name" : "devices__nmos4",    "ports" : ["d","g","s","b"],
                           "propertymap" : {
                               "l" : { "name" : "length", "str" : "*1u"},
                               "nf" : { "name" : "multiplier", "str" : ""},
@@ -66,11 +83,11 @@
                               "fingerW" : { "name" : "width", "str" : "*1u"}
                           }
                         },
-            "nch"         : { "inherit" : "nch_lvt", "name" : "nmos_1p5" },
-            "pch"         : { "inherit" : "nch_lvt", "name" : "pmos_1p5" },
-            "pch_lvt"     : { "inherit" : "nch_lvt", "name" : "pmos_1p5" },
-            "nch_lvt_io"     : { "inherit" : "nch_lvt", "name" : "nmos_1p5" },
-            "pch_lvt_io"     : { "inherit" : "nch_lvt", "name" : "pmos_1p5" }
+            "nch"         : { "inherit" : "nch_lvt", "name" : "devices__nmos4" },
+            "pch"         : { "inherit" : "nch_lvt", "name" : "devices__pmos4" },
+            "pch_lvt"     : { "inherit" : "nch_lvt", "name" : "devices__pmos4" },
+            "nch_lvt_io"     : { "inherit" : "nch_lvt", "name" : "devices__nmos4" },
+            "pch_lvt_io"     : { "inherit" : "nch_lvt", "name" : "devices__pmos4" }
 
         },
         "symbol_lib" : "cpdk"

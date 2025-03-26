@@ -20,24 +20,24 @@ def getCellFromSymbol(libdir,symbol):
         cells[path] = lay
     return cells[path]
 
-def getLayoutCellFromSchCell(libdir,schCell):
+def getLayoutCellFromSchCell(libdir,schCell,techlib):
     names = schCell.name().split("_")
 
     layName = libdir + schCell.symbol.replace(".sym",".mag")
 
     if(layName not in lcells):
-        lcell = cic.Layout()
+        lcell = cic.Layout(techlib)
         lcell.readFromFile(layName)
         lcells[layName] = lcell
         if(re.search(r"CH_\d+C\d+F\d+",layName)):
             topName = re.sub(r"C\d+F\d+","CTAPTOP",layName)
             if(os.path.exists(topName)):
-                top = cic.Layout()
+                top = cic.Layout(techlib)
                 top.readFromFile(topName)
                 tops[lcell.name] = top
                 botName = re.sub(r"C\d+F\d+","CTAPBOT",layName)
             if(os.path.exists(botName)):
-                bot = cic.Layout()
+                bot = cic.Layout(techlib)
                 bot.readFromFile(botName)
                 bots[lcell.name] = bot
 
@@ -59,7 +59,7 @@ def getInstanceFromComponent(layoutCell,component,x,y):
 
 count = 0
 def placeDummy(root,lcell,x,y):
-
+    global count
     i = cic.Instance()
     i.instanceName = "X" + lcell.name + str(count)
     i.name = lcell.name
@@ -69,6 +69,7 @@ def placeDummy(root,lcell,x,y):
     i.moveTo(x,y)
     i.updateBoundingRect()
     root.add(i)
+    count +=1
     return i
 
 def placeACell(root,lcell,scell,name,x,y):
@@ -101,9 +102,9 @@ def placeACell(root,lcell,scell,name,x,y):
 
     return (next_x,next_y)
 
-def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
+def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
 
-    root = cic.eda.Layout()
+    root = cic.eda.Layout(techlib)
     root.name = xs.name
     root.dirname = xs.dirname
 
@@ -155,7 +156,7 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
 
         #raise Exception("Figure out how to organize subcells")
 
-        lcell = getLayoutCellFromSchCell(libdir,scell)
+        lcell = getLayoutCellFromSchCell(libdir,scell,techlib)
 
         #design.add(lcell)
         name = scell.name()
@@ -211,6 +212,12 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak):
         prevgroup = group
         first = False
         startGroup = False
+
+    if(prevcell is not None and prevcell.name in tops):
+        i = placeDummy(root,tops[prevcell.name],x,y)
+        x = i.x1
+        y = i.y2
+        next_y = y
 
 
     root.updateBoundingRect()

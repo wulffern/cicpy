@@ -216,17 +216,18 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
 @click.argument("lib")
 @click.argument("cell")
 @click.option("--libdir",default="../design/",help="Default directory of designs")
+@click.option("--techlib",default="sky130A",help="Technology library")
 @click.option("--xspace",default="0",help="Group X space")
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-def xsch2mag(ctx,lib,cell,libdir,xspace,yspace,gbreak):
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     """Translate a Xschem file to Magic"""
 
     #rules = cic.Rules(techfile)
     xs = cic.eda.Schematic()
     xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
 
-    cell = cic.getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak)
+    cell = cic.getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib)
 
     design = cic.Design()
     design.add(cell)

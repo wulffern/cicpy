@@ -5,10 +5,10 @@ import cicpy as cic
 
 class Magic(cic.LayoutCell):
 
-    def __init__(self):
+    def __init__(self,techlib):
         super().__init__()
         self.magscale = 1
-        self.techlib = "sky130A"
+        self.techlib = techlib
         self.timestamp = 0
         self.bb_x1 = cic.INT_MAX
         self.bb_y1 = cic.INT_MAX

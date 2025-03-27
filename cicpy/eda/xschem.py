@@ -99,9 +99,9 @@ class Component(Object):
 
     def group(self):
         name = self.name()
-        m = re.search(r"^x(\D+)",name,re.I)
+        m = re.search(r"^(x\D+)",name,re.I)
         if(m is not None):
-            group = m.groups(0)
+            group = m.groups(0)[0]
         else:
             group = ""
         return group
@@ -148,9 +148,11 @@ class XSchem():
                 continue
 
             group = c.group()
+            print(group)
             if(group not in groups):
                 groups[group] = list()
             groups[group].append(instName)
+
 
         for g in sorted(groups):
             arr = sorted(groups[g])

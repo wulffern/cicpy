@@ -24,7 +24,7 @@ def getLayoutCellFromSchCell(libdir,schCell,techlib):
     names = schCell.name().split("_")
 
     layName = libdir + schCell.symbol.replace(".sym",".mag")
-
+    botName = ""
     if(layName not in lcells):
         lcell = cic.Layout(techlib)
         lcell.readFromFile(layName)
@@ -35,7 +35,7 @@ def getLayoutCellFromSchCell(libdir,schCell,techlib):
                 top = cic.Layout(techlib)
                 top.readFromFile(topName)
                 tops[lcell.name] = top
-                botName = re.sub(r"C\d+F\d+","CTAPBOT",layName)
+            botName = re.sub(r"C\d+F\d+","CTAPBOT",layName)
             if(os.path.exists(botName)):
                 bot = cic.Layout(techlib)
                 bot.readFromFile(botName)

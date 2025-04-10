@@ -50,6 +50,7 @@ def getLayoutCellFromSchCell(libdir,schCell,techlib):
     names = schCell.name().split("_")
 
     layName = libdir + schCell.symbol.replace(".sym",".mag")
+
     if(layName not in lcells):
         lcell = cic.Layout(techlib)
         lcell.readFromFile(layName)
@@ -102,22 +103,33 @@ def placeACell(root,lcell,scell,name,x,y):
     next_y = 0
     match = re.findall(r"\[(\d+:\d+)\]",name)
     if(match): #- Multiple instances
+
         ly = y
         lx = 0
         local_cell = cic.core.LayoutCell()
+        lname = re.sub(r"\[.*\]","",name)
+        #print(lname)
 
         if(len(match) > 1):
             raise Exception("Name contains duplicate [d:d] %s"%str(match))
         #- Assume 1 match, anything else is an error
         (end,start) = re.split(":",match[0])
-        for i in range(int(start),int(end)+1):
+        if(start > end):
+            tmp = start
+            start = end
+            end = tmp
+        #print(end,start)
+        for k in range(int(start),int(end)+1):
             i = getInstanceFromComponent(lcell,scell,x,ly)
+            i.name = lname + "_%d"% k
+            i.instanceName = i.name
+            #print(i.name)
             local_cell.add(i)
             ly += lcell.height()
             next_x = i.x2
             next_y = i.y2
-
         root.add(local_cell)
+
 
     else: #- Single instance
         i = getInstanceFromComponent(lcell,scell,x,y)
@@ -185,6 +197,7 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
 
         #design.add(lcell)
         name = scell.name()
+
         group = scell.group()
 
         if(group != prevgroup or prevgroup == ""):

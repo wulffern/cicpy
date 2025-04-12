@@ -1,0 +1,34 @@
+
+name: Main
+
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: [ main ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  # Build job
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: wulffern/aicex:24.04_0.1.4
+      options: --user root
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: install cicpy
+        run: |
+          export PDK_ROOT=/opt/pdk/share/pdk
+          export PATH=/opt/eda/bin:$HOME/.local/bin:$PATH
+          python3 -m pip install --upgrade pip
+          python3 -m pip uninstall cicpy -y
+          python3 -m pip install  .
+          cicpy --help
+          make tests

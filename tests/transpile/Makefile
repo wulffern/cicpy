@@ -1,5 +1,5 @@
 
-all:
+test:
 	cicpy transpile SAR9B_CV.cic.gz demo.tech SAR9B --layskill --schskill --verilog --xschem --spice --winfo --rinfo demo.txt --magic
 
 clean:

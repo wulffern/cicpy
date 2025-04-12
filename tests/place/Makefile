@@ -1,5 +1,5 @@
 
-all: diffpair horz vert
+test: diffpair horz vert
 
 diffpair:
 	cicpy place ../transpile/SAR9B_CV.cic.gz ../transpile/demo.tech  diffpair.csv

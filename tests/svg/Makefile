@@ -1,5 +1,5 @@
 
-all:
+test:
 	cicpy svg ../transpile/SAR9B_CV.cic.gz ../transpile/demo.tech SAR9B
 
 clean:

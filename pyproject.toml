@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cicpy"
-version = "0.1.7"
+version = "0.1.8"
 authors = [
   { name="Carsten Wulff", email="carsten@wulff.no" },
 ]
@@ -14,15 +14,15 @@ dependencies = [
   "svgwrite",
   "click",
   "pyyaml",
-  "matplotlib"
+  "matplotlib",
+  "cicspi"
 ]
-license = { text = "MIT" }
+license = "MIT"
 description = "Custom IC Creator Python Frontend"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 

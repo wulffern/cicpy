@@ -29,18 +29,27 @@ import os
 import json
 
 
-
-
 class Rules:
 
-    rules = False
+    rules = None
     
-    def __init__(self,filename):
+    def __init__(self,filename=None):
 
-        if(not Rules.rules):
+        if(filename is not None):
             with open(filename,"r") as f:
                 Rules.rules = json.load(f)
                 self._unspoolInherit()
+
+        if(Rules.rules is not None):
+            self.gamma = self.getValue("technology","gamma")
+            self.grid = self.getValue("technology","grid")
+            self.spiceunit = self.getValue("technology","spiceunit")
+
+        #if(Rules.rules is None):
+        #    raise Exception("Rules: No rules loaded!")
+
+    def hasRules(self):
+        return (Rules.rules is not None)
 
     def _inherit(self,obj):
         if(type(obj) is not dict):
@@ -87,6 +96,7 @@ class Rules:
             raise Exception(f"RuleError: Rulefile does not have category {category}")
 
     def getValue(self,category, key ):
+
         if(category in Rules.rules):
             obj = Rules.rules[category]
             if(key in obj):
@@ -96,7 +106,18 @@ class Rules:
                 raise Exception(f"RuleError: {category} does not contain {key}")
         else:
             raise Exception(f"RuleError: Rulefile does not have category {category}")
-    
+
+    def get(self,layer,key):
+        obj = self.getValue("rules",layer)
+        #print(obj)
+        if(key in obj):
+            #print(obj)
+            #print(obj[key])
+            return obj[key]*self.gamma
+        else:
+            raise Exception(f"RuleError: Coult not find rule {key} on layer {layer}")
+
+
 
     def colorTranslate(self,color):
         colors = {

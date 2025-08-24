@@ -33,6 +33,7 @@ class Port(Rect):
     def __init__(self,name="",routeLayer=None,rect=None):
         super().__init__()
         self.name = name
+
         self.routeLayer = routeLayer
         self.rect = rect
         self.spicePort = True
@@ -48,6 +49,7 @@ class Port(Rect):
             self.sigclass = "power"
 
         if(rect):
+            self.layer = rect.layer
             self.x1 = rect.x1
             self.x2 = rect.x2
             self.y1 = rect.y1

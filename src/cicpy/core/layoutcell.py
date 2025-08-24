@@ -28,27 +28,133 @@
 from .rect import Rect
 from .cell import Cell
 from .port import Port
+from .rules import Rules
 from .instance import Instance
 from .text import Text
 import cicspi as spi
+
 
 class LayoutCell(Cell):
 
     def __init__(self):
         super().__init__()
+        #self.rules = rules
         self.altenateGroup = False
         self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
         self.graph = None
-
+        rules = Rules()
+        if(rules.hasRules()):
+            space =rules.get("CELL","space")
+            #print(space)
+            self.place_groupbreak = [100]
+            self.place_xspace = [space]
+            self.place_yspace = [space]
 
     def toJson(self):
         o = super().toJson()
         return o
 
 
-    def place():
+    def place(self):
 
+        um = 10000
+
+        next_gbreak = self.place_groupbreak.pop(0)
+        next_xspace = self.place_xspace.pop(0)
+        next_yspace = self.place_yspace.pop(0)
+
+        next_x = 0
+        next_y = 0
+
+        prevgroup = ""
+
+        ymax = 0
+        yorg = 0
+        xorg = 0
+
+        groupcount = 0
+        first = True
+        startGroup = False
+        endGroup = False
+        prevcell = None
+        previnst = None
+
+        for inst in self.ckt.orderInstancesByGroup():
+
+            lcell = self.parent.getInstance(inst)
+            name = inst.name
+            group = inst.groupName
+            if(group != prevgroup or prevgroup == ""):
+                startGroup = True
+                if(previnst is not None):
+                    dummy = self.parent.getInstanceDummyTop(previnst)
+                    if(dummy is not None):
+                        print("Placing dummy",inst.subcktName)
+                        dummy.moveTo(x,y)
+                        self.add(dummy)
+                        x = dummy.x1
+                        y = dummy.y2
+                        next_y = y
+                if(next_y > ymax):
+                    ymax = next_y
+                if(next_gbreak == groupcount):
+                    y = ymax + next_yspace
+                    yorg = y
+                    if(len(self.place_groupbreak) > 0):
+                        next_gbreak = int(self.place_groupbreak.pop(0))
+                    x = 0
+                else:
+                    y = yorg
+
+                if(first):
+                    x = 0
+                else:
+                    x = next_x + next_xspace
+                    if(len(self.place_xspace) > 0):
+                        next_xspace = int(self.place_xspace.pop(0))
+
+                groupcount += 1
+
+            if(startGroup):
+                dummy = self.parent.getInstanceDummyBottom(inst)
+                if(dummy is not None):
+                    dummy.moveTo(x,y)
+                    self.add(dummy)
+                    x = dummy.x1
+                    y = dummy.y2
+
+            lcell.moveTo(x,y)
+
+            self.add(lcell)
+
+            if(lcell.x2 > next_x):
+                next_x = lcell.x2
+            next_y = lcell.y2
+
+            if(next_y > ymax):
+                ymax = next_y
+
+            x = lcell.x1
+            y = next_y
+
+            prevcell = lcell
+            previnst = inst
+
+            prevgroup = group
+            first = False
+            startGroup = False
+
+
+        if(previnst is not None):
+            dummy = self.parent.getInstanceDummyTop(previnst)
+            if(dummy is not None):
+                print("Placing dummy",inst.subcktName)
+                dummy.moveTo(x,y)
+                self.add(dummy)
+                x = dummy.x1
+                y = dummy.y2
+                next_y = y
         pass
 
     def route():

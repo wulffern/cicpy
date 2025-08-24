@@ -159,7 +159,6 @@ class MagicPrinter(DesignPrinter):
 
         
     def printPort(self,p):
-
         layerAlias = self.rules.layerToAlias(p.layer)
 
         if(layerAlias == ""):

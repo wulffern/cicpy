@@ -26,8 +26,10 @@
 ######################################################################
 
 import cicpy as cic
+import cicspi as spi
 import os
 import re
+import numpy as np
 
 cells = dict()
 lcells = dict()
@@ -46,10 +48,38 @@ def getCellFromSymbol(libdir,symbol):
         cells[path] = lay
     return cells[path]
 
+def getLayoutCellFromString(libdir,lib,name,techlib):
+    layName = libdir + lib + os.path.sep + name + ".mag"
+
+    if(layName not in lcells):
+        lcell = cic.Layout(techlib)
+        lcell.readFromFile(layName)
+        lcells[layName] = lcell
+        if(re.search(r"CH_\d+C\d+F\d+",layName)):
+            topName = re.sub(r"C\d+F\d+","CTAPTOP",layName)
+            if(os.path.exists(topName)):
+                top = cic.Layout(techlib)
+                top.readFromFile(topName)
+                tops[lcell.name] = top
+            botName = re.sub(r"C\d+F\d+","CTAPBOT",layName)
+            if(os.path.exists(botName)):
+                bot = cic.Layout(techlib)
+                bot.readFromFile(botName)
+                bots[lcell.name] = bot
+    return lcells[layName]
+
 def getLayoutCellFromSchCell(libdir,schCell,techlib):
     names = schCell.name().split("_")
 
+    #print(schCell.symbol)
+    #if(re.search("^sky130_fd",schCell.symbol)):
+    #    (lib,fname) = re.split("\/",schCell.symbol)
+    #    fname = schCell.symbol.replace("/","__").replace(".sym",".mag")
+    #    layName = os.getenv("PDK_ROOT") + os.path.sep + os.getenv("PDK") + os.path.sep + "libs.ref" \
+    #        + os.path.sep + lib + os.path.sep + "mag" + os.path.sep + fname
+    #else:
     layName = libdir + schCell.symbol.replace(".sym",".mag")
+
 
     if(layName not in lcells):
         lcell = cic.Layout(techlib)
@@ -108,7 +138,7 @@ def placeACell(root,lcell,scell,name,x,y):
         lx = 0
         local_cell = cic.core.LayoutCell()
         lname = re.sub(r"\[.*\]","",name)
-        #print(lname)
+
 
         if(len(match) > 1):
             raise Exception("Name contains duplicate [d:d] %s"%str(match))
@@ -141,39 +171,40 @@ def placeACell(root,lcell,scell,name,x,y):
 
 def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
 
+    um = 10000
     root = cic.eda.Layout(techlib)
     root.name = xs.name
     root.dirname = xs.dirname
 
-    y = 0
+    y = 3*um
     x = 0
 
     gbreaks = gbreak.split(",")
     if(type(gbreaks) == list):
-        next_gbreak = int(gbreaks.pop())
+        next_gbreak = int(gbreaks.pop(0))
     else:
         next_gbreak = int(gbreak)
 
 
     xps = xspace.split(",")
     if(type(xps) == list):
-        next_xspace = int(xps.pop())
+        next_xspace = int(xps.pop(0))
     else:
         next_xspace = int(xspace)
 
     yps = yspace.split(",")
     if(type(yps) == list):
-        next_yspace = int(yps.pop())
+        next_yspace = int(yps.pop(0))
     else:
         next_yspace = int(yspace)
 
     next_x = 0
-    next_y = 0
+    next_y = 3*um
 
     prevgroup = ""
 
     ymax = 0
-    yorg = 0
+    yorg = 3*um
     xorg = 0
     groupcount = 0
     first = True
@@ -181,12 +212,17 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
     endGroup = False
     prevcell = None
 
+    ports = list()
+
     for instanceName in xs.orderByGroup():
 
         scell = xs.components[instanceName]
 
         #- TODO: Figure out how to handle ports
         if("devices/" in scell.symbol):
+            print(scell.symbol)
+            if("pin.sym" in scell.symbol):
+                ports.append(scell)
             continue
 
         #- Categorise based on name <ident>_<ident>_<nr>
@@ -216,7 +252,7 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
                 y = ymax + next_yspace
                 yorg = y
                 if(type(gbreak) == list):
-                    next_gbreak = int(gbreak.pop())
+                    next_gbreak = int(gbreak.pop(0))
                 x = 0
             else:
                 y = yorg
@@ -226,7 +262,7 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
                 else:
                     x = next_x + next_xspace
                     if(type(xps) == list and len(xps) > 0):
-                        next_xspace = int(xps.pop())
+                        next_xspace = int(xps.pop(0))
 
             groupcount += 1
 
@@ -259,5 +295,39 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
 
 
     root.updateBoundingRect()
+
+
+    #ckt = spi.Subckt()
+    #root.ckt = ckt
+    #ports = xs.getPorts()
+
+    #for p in ports:
+
+    #print(list(map(lambda x: x.properties,xs.getPorts())))
+    #print(list(map(lambda x: x.name(),xs.getPorts())))
+
+    #portnames = list(map(lambda x: x.properties["lab"],xs.getPorts()))
+    #sVDD = None
+    #sVSS = None
+    #for p in portnames:
+    #    if(re.search("VDD",p)):
+    #        sVDD = p
+    #    if(re.search("VSS",p)):
+    #        sVSS = p
+
+    #- Add rails
+    #NY = int(root.height()/(60*um))
+    #if(NY == 1):
+    #    rVDD = cic.Rect("M3",0,0,root.width(),2*um)
+    #    root.add(rVDD)
+    #    if(sVDD):
+    #        prVDD = cic.Port(name=sVDD,routeLayer="M3_pin",rect=rVDD)
+    #        root.add(prVDD)
+    #    rVDD.moveTo(0,58*um)
+    #    rVSS = cic.Rect("M1",0,0,root.width(),2*um)
+    #    if(sVSS):
+    #        prVSS = cic.Port(name=sVSS,routeLayer="M1_pin",rect=rVSS)
+    #        root.add(prVSS)
+    #    root.add(rVSS)
 
     return root

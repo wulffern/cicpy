@@ -30,6 +30,7 @@ import os, sys
 import cicpy as cic
 import json
 import cicspi
+import yaml
 
 @click.group()
 @click.pass_context
@@ -223,53 +224,75 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
 def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     """Translate a Xschem file to Magic"""
 
-    #rules = cic.Rules(techfile)
+
     xs = cic.eda.Schematic()
     xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
 
     cell = cic.getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib)
 
+    techfile = f"../tech/cic/{techlib}.tech"
+
+    if(os.path.exists(techfile)):
+        print(f"INFO: Loading rules {techfile}")
+        rules = cic.Rules(techfile)
+    else:
+        rules = cell
+
     design = cic.Design()
     design.add(cell)
 
-    obj = cic.MagicPrinter(libdir + lib,cell)
+    obj = cic.MagicPrinter(libdir + lib,rules)
     obj.print(design)
 
 @cli.command("spi2mag")
 @click.pass_context
 @click.argument("spi")
+@click.argument("lib")
 @click.argument("cell")
 @click.option("--libdir",default="../design/",help="Default directory of designs")
+@click.option("--techlib",default="sky130A",help="Technology library")
 @click.option("--xspace",default="0",help="Group X space")
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-def spi2mag(ctx,spi,cell,libdir,xspace,yspace,gbreak):
+def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     """Translate a SPICE file to Magic"""
 
-    sp = cicspi.SpiceParser()
-    sp.parseFile(spi)
-    if(cell not in sp):
-        print(f"Could not find {cell} in {str(sp.keys())}")
-        return
+    techfile = f"../tech/cic/{techlib}.tech"
 
-    ckt = sp[cell]
-    for i in ckt.instances:
-        print(i.name,i.groupName,i.nodes,i.instanceType)
 
-    print(ckt)
+    print(f"INFO: Loading rules {techfile}")
+    rules = cic.Rules(techfile)
 
-    #rules = cic.Rules(techfile)
-    #xs = cic.eda.Schematic()
-    #xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
+    design = cic.MagicDesign(techlib,rules)
+    design.scanLibraryPath(libdir)
+    lcell = design.readFromSpice(spi,cell)
 
-    #cell = cic.getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak)
+    if("," in gbreak):
+        lcell.place_gbreak = gbreak.split(",")
+    else:
+        lcell.place_gbreak = [int(gbreak)]
 
-    #design = cic.Design()
-    #design.add(cell)
+    if("," in xspace):
+        lcell.place_xspace = list(map(lambda x: int(x),xspace.split(",")))
+    else:
+        lcell.place_xspace = [int(xspace)]
+
+    if("," in yspace):
+        lcell.place_yspace = list(map(lambda x: int(x),yspace.split(",")))
+    else:
+        lcell.place_yspace = [int(yspace)]
+
+
+    lcell.dirname = libdir + lib + os.path.sep
+    lcell.place()
+
+
+
+    obj = cic.MagicPrinter(libdir + lib,rules)
+    obj.print(design)
 
     #obj = cic.MagicPrinter(libdir + lib,cell)
     #obj.print(design)
-
 
 
 
@@ -295,3 +318,4 @@ def filter(ctx,cicfile,cell):
 
 if __name__ == '__main__':
     cli(obj={})
+

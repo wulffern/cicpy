@@ -162,6 +162,14 @@ class XSchem():
         self.path = ""
         pass
 
+    def getPorts(self):
+        ports = list()
+        for instName in self.components:
+
+            if(re.search("^p",instName,re.I)):
+                ports.append(self.components[instName])
+        return ports
+
     def orderByGroup(self):
 
         instList = list()
@@ -169,8 +177,11 @@ class XSchem():
         for instName in sorted(self.components):
 
             c = self.components[instName]
+            if( re.search("^(p|l)",instName,re.I)):
+                continue
             #Ignore anything that does not start with X or x
             if(not re.search("^x",instName,re.I)):
+                print(f"xschem: Don't know how to layout {instName}.")
                 continue
 
             group = c.group()
@@ -222,9 +233,13 @@ class XSchem():
             o = Component()
         elif(c == "["):
             o = EmbedSymbol()
+        else:
+            print(f"Unknown property {c}" + " on " + buff)
 
-        o.parse(buff)
-        self.children.append(o)
+
+        if(o is not None):
+            o.parse(buff)
+            self.children.append(o)
 
 
     
@@ -257,6 +272,7 @@ class XSchem():
 
         for c in self.children:
             if(c.isType("Component")):
+
                 instanceName = c.name()
                 if(instanceName):
                     self.components[instanceName] = c

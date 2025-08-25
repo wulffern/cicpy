@@ -14,60 +14,26 @@ class MagicFile():
         self.libname = os.path.basename(self.dirname)
         self.parent = parent
         self._lay = None
-        self.top = None
-        self.bot = None
         pass
 
     def loadLayoutCell(self):
         if(self._lay is None):
             self._lay = cic.Layout(self.parent.techlib)
             self._lay.readFromFile(self.filename)
-            if(re.search(r"CH_\d+C\d+F\d+",self.name)):
-                topName = re.sub(r"C\d+F\d+","CTAPTOP",self.filename)
-                if(os.path.exists(topName)):
-                    self.top = cic.Layout(self.parent.techlib)
-                    self.top.readFromFile(topName)
-                    botName = re.sub(r"C\d+F\d+","CTAPBOT",self.filename)
-                if(os.path.exists(botName)):
-                    self.bot = cic.Layout(self.parent.techlib)
-                    self.bot.readFromFile(botName)
+#            if(re.search(r"CH_\d+C\d+F\d+",self.name)):
+#                topName = re.sub(r"C\d+F\d+","CTAPTOP",self.filename)
+#                if(os.path.exists(topName)):
+#                    self.top = cic.Layout(self.parent.techlib)
+#                    self.top.readFromFile(topName)
+#                    botName = re.sub(r"C\d+F\d+","CTAPBOT",self.filename)
+#                if(os.path.exists(botName)):
+#                    self.bot = cic.Layout(self.parent.techlib)
+#                    self.bot.readFromFile(botName)
         return self._lay
 
-    def getInstance(self,cktInst):
-        layoutCell = self.loadLayoutCell()
-        i = cic.Instance()
-        i.instanceName = cktInst.name
-        i.name = cktInst.name
-        i.cell = layoutCell.name
-        i.layoutcell = layoutCell
-        i.libpath = layoutCell.libpath
-        i.updateBoundingRect()
-        return i
 
-    def getInstanceDummyBottom(self,cktInst):
-        if(self.bot is None):
-            return None
-        i = cic.Instance()
-        i.instanceName = cktInst.name + "_BOT"
-        i.name = cktInst.name + "_BOT"
-        i.cell = self.bot.name
-        i.layoutcell = self.bot
-        i.libpath = self.bot.libpath
-        i.updateBoundingRect()
-        return i
-
-    def getInstanceDummyTop(self,cktInst):
-        if(self.top is None):
-            return None
-        i = cic.Instance()
-        i.instanceName = cktInst.name + "_TOP"
-        i.name = cktInst.name + "_TOP"
-        i.cell = self.top.name
-        i.layoutcell = self.top
-        i.libpath = self.top.libpath
-        i.updateBoundingRect()
-        return i
-
+    def getLayoutCell(self):
+        return self.loadLayoutCell()
 
 class MagicDesign(cic.Design):
     def __init__(self,techlib,rules):
@@ -98,21 +64,8 @@ class MagicDesign(cic.Design):
         self.add(cell)
         return cell
 
-    def getInstance(self,cktinst):
+    def getLayoutCell(self,subcktName):
         cell = None
-        if(cktinst.subcktName in self.maglib):
-            cell = self.maglib[cktinst.subcktName].getInstance(cktinst)
-
-        return cell
-
-    def getInstanceDummyBottom(self,cktinst):
-        cell = None
-        if(cktinst.subcktName in self.maglib):
-            cell = self.maglib[cktinst.subcktName].getInstanceDummyBottom(cktinst)
-        return cell
-
-    def getInstanceDummyTop(self,cktinst):
-        cell = None
-        if(cktinst.subcktName in self.maglib):
-            cell = self.maglib[cktinst.subcktName].getInstanceDummyTop(cktinst)
+        if(subcktName in self.maglib):
+            cell = self.maglib[subcktName].getLayoutCell()
         return cell

@@ -27,18 +27,34 @@
 import sys
 import os
 import json
-
+from .layer import Layer
 
 class Rules:
 
     rules = None
+    instance = None
+
+
+    def getInstance():
+        return Rules.instance
     
     def __init__(self,filename=None):
 
+        self.alias = dict()
+        self.layers = dict()
         if(filename is not None):
             with open(filename,"r") as f:
                 Rules.rules = json.load(f)
                 self._unspoolInherit()
+                Rules.instance = self
+                if("layers" in Rules.rules):
+                    for layer in Rules.rules["layers"]:
+                        l = Layer()
+                        l.name = layer
+                        l.fromJson(Rules.rules["layers"][layer])
+                        self.alias[l.alias] = l
+                        self.layers[layer] = l
+
 
         if(Rules.rules is not None):
             self.gamma = self.getValue("technology","gamma")
@@ -144,6 +160,13 @@ class Rules:
 
     def layerToAlias(self,layer):
         return self.getField("layers",layer,"alias")
+
+    #def
+
+    def aliasToLayer(self,alias):
+        if(alias in self.alias):
+            return self.alias[alias]
+
 
     def layerToDataType(self,layer):
         return self.getField("layers",layer,"datatype")

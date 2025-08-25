@@ -42,6 +42,7 @@ class Magic(cic.LayoutCell):
         self.bb_x2 = cic.INT_MIN
         self.bb_y2 = cic.INT_MIN
         self.found_bbox = False
+        self.bboxRect = None
         pass
 
     def toAngstrom(self,val):
@@ -53,7 +54,6 @@ class Magic(cic.LayoutCell):
         r.y1 = self.toAngstrom(box[1])
         r.x2 = self.toAngstrom(box[2])
         r.y2 = self.toAngstrom(box[3])
-
         return r
 
     def updateXYs(self,rect):
@@ -87,17 +87,30 @@ class Magic(cic.LayoutCell):
             if(line.startswith("FIXED_BBOX")):
                 #print(line)
                 bbox = re.findall(r"FIXED_BBOX\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)",line)
-                r = self.boxToRect(bbox[0])
                 self.found_bbox = True
-                self.setRect(r)
+                self.bboxRect = self.boxToRect(bbox[0])
         elif(token == "tech"):
             self.techlib = line
 
         else:
             if(token == "rect"):
                 #print(self.name,line)
+
                 rects = re.findall(r"(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)",line)
                 if(rects):
+                    rules = cic.Rules.getInstance()
+                    l = rules.aliasToLayer(category)
+                    if(l is not None):
+                        if(l.material == cic.Material.METAL):
+                            rect = rects[0]
+                            x1 = self.toAngstrom(rect[0])
+                            y1 = self.toAngstrom(rect[1])
+                            x2 = self.toAngstrom(rect[2])
+                            y2 = self.toAngstrom(rect[3])
+                            r = cic.Rect(l.name,x1,y1,x2,y2)
+                            self.add(r)
+                    #if(r)
+                    #print(category)
                     self.updateXYs(rects[0])
 
             pass
@@ -127,11 +140,18 @@ class Magic(cic.LayoutCell):
                     rest = " ".join(arr[1:]).strip()
                     self.parseToken(token,category,rest)
 
-        if(not self.found_bbox):
-            self.x1 = self.bb_x1
-            self.x2 = self.bb_x2
-            self.y1 = self.bb_y1
-            self.y2 = self.bb_y2
+
+        self.updateBoundingRect()
+
+
+    def calcBoundingRect(self):
+        if(self.found_bbox):
+            return self.bboxRect
+        else:
+            r = cic.Rect()
+            r.setPoint1(self.bb_x1,self.bb_y1)
+            r.setPoint2(self.bb_x2,self.bb_y2)
+            return r
 
 
 

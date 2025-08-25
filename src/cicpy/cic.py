@@ -25,6 +25,7 @@
 ##  
 ######################################################################
 
+import importlib
 import click
 import os, sys
 import cicpy as cic
@@ -222,27 +223,15 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
-    """Translate a Xschem file to Magic"""
+    """Netlist a xschem to spice, and load file to Magic"""
+
+    os.system(f"make xsch LIB={lib} CELL={cell}")
+
+    spi = "xsch/" + cell + ".spice"
+
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak)
 
 
-    xs = cic.eda.Schematic()
-    xs.readFromFile(libdir  + lib + os.path.sep + cell + ".sch")
-
-    cell = cic.getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib)
-
-    techfile = f"../tech/cic/{techlib}.tech"
-
-    if(os.path.exists(techfile)):
-        print(f"INFO: Loading rules {techfile}")
-        rules = cic.Rules(techfile)
-    else:
-        rules = cell
-
-    design = cic.Design()
-    design.add(cell)
-
-    obj = cic.MagicPrinter(libdir + lib,rules)
-    obj.print(design)
 
 @cli.command("spi2mag")
 @click.pass_context
@@ -256,10 +245,18 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     """Translate a SPICE file to Magic"""
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak)
+
+def _runMethod(lcell,module,method):
+    if(module is not None):
+        if(hasattr(module,method)):
+            fn = getattr(module,method)
+            fn(lcell)
+
+
+def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
 
     techfile = f"../tech/cic/{techlib}.tech"
-
-
     print(f"INFO: Loading rules {techfile}")
     rules = cic.Rules(techfile)
 
@@ -284,12 +281,29 @@ def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
 
 
     lcell.dirname = libdir + lib + os.path.sep
+
+    pycell = None
+    if(os.path.exists(lcell.dirname + lcell.name + ".py")):
+        sys.path.append(lcell.dirname)
+        pycell = importlib.import_module(lcell.name)
+        dir(pycell)
+
+
+
+    _runMethod(lcell,pycell,"beforePlace")
+    #- Place cell
     lcell.place()
+
+    _runMethod(lcell,pycell,"afterPlace")
+
 
 
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.print(design)
+    obj = design.toJson()
+    with open(libdir + lib + os.path.sep + lcell.name + ".cic","w") as fo:
+        fo.write(json.dumps(obj,indent=4))
 
     #obj = cic.MagicPrinter(libdir + lib,cell)
     #obj.print(design)

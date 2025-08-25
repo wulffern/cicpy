@@ -59,6 +59,12 @@ class Cell(Rect):
         self.obj = False #- Original JSON obj
 
 
+    def getPort(self,name:str):
+        p = None
+        if(name in self.ports):
+            p = self.ports[name]
+        return
+
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
         raise Exception("Not implemented")

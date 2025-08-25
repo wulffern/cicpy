@@ -32,6 +32,7 @@ from .rules import Rules
 from .instance import Instance
 from .text import Text
 import cicspi as spi
+import re
 
 
 class LayoutCell(Cell):
@@ -43,6 +44,8 @@ class LayoutCell(Cell):
         self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
         self.graph = None
+        self.um = 10000
+        self.dummyCounter = 0
         rules = Rules()
         if(rules.hasRules()):
             space =rules.get("CELL","space")
@@ -51,10 +54,69 @@ class LayoutCell(Cell):
             self.place_xspace = [space]
             self.place_yspace = [space]
 
+
+
+    def addInstance(self,cktInst,x:int,y:int):
+
+        if(cktInst is None):
+            return
+
+        i = Instance()
+        layoutCell = self.parent.getLayoutCell(cktInst.subcktName)
+        i.cell = layoutCell.name
+        i.layoutcell = layoutCell
+        i.libpath = layoutCell.libpath
+        i.setSubcktInstance(cktInst)
+
+        self.add(i)
+        i.moveTo(x,y)
+        self.addToNodeGraph(i)
+        i.updateBoundingRect()
+        return i
+
+    def addToNodeGraph(self,inst):
+
+        pass
+
     def toJson(self):
         o = super().toJson()
         return o
 
+    def getInstancesByName(self,regex):
+        data = list()
+        for c in self.children:
+            if(c.isInstance()):
+                if(re.search(regex,c.name)):
+                    data.append(c)
+        return data
+
+    def getInstancesByCellname(self,regex):
+        data = list()
+        for c in self.children:
+            if(c.isInstance()):
+                if(re.search(regex,c.cell)):
+                    data.append(c)
+        return data
+
+    def getDummyInst(self,subcktName,repl):
+        name = None
+        if(re.search(r"CH_\d+C\d+F\d+",self.name)):
+            name =  re.sub(r"C\d+F\d+",repl,subcktName)
+
+        if(name is not None):
+            si = SubcktInstance()
+            si.subcktName = name
+            si.name = "xdmy__"  + str(self.dummyCounter)
+            self.dummyCounter += 1
+            return si
+
+        return None
+
+    def getDummyBottomInst(self,subcktName):
+        return self.getDummyInst(subcktName,"CTAPBOT")
+
+    def getDummyTopInst(self,subcktName):
+        return self.getDummyInst(subcktName,"CTAPTOP")
 
     def place(self):
 
@@ -82,17 +144,14 @@ class LayoutCell(Cell):
 
         for inst in self.ckt.orderInstancesByGroup():
 
-            lcell = self.parent.getInstance(inst)
             name = inst.name
             group = inst.groupName
             if(group != prevgroup or prevgroup == ""):
                 startGroup = True
                 if(previnst is not None):
-                    dummy = self.parent.getInstanceDummyTop(previnst)
-                    if(dummy is not None):
-                        print("Placing dummy",inst.subcktName)
-                        dummy.moveTo(x,y)
-                        self.add(dummy)
+                    dname = self.getDummyTopInst(inst.subcktName)
+                    if(dname is not None):
+                        dummy = self.addInstance(dname,x,y)
                         x = dummy.x1
                         y = dummy.y2
                         next_y = y
@@ -117,28 +176,24 @@ class LayoutCell(Cell):
                 groupcount += 1
 
             if(startGroup):
-                dummy = self.parent.getInstanceDummyBottom(inst)
-                if(dummy is not None):
-                    dummy.moveTo(x,y)
-                    self.add(dummy)
+                dname = self.getDummyBottomInst(inst.subcktName)
+                if(dname is not None):
+                    dummy = self.addInstance(dname,x,y)
                     x = dummy.x1
                     y = dummy.y2
 
-            lcell.moveTo(x,y)
-
-            self.add(lcell)
-
-            if(lcell.x2 > next_x):
-                next_x = lcell.x2
-            next_y = lcell.y2
+            linst = self.addInstance(inst,x,y)
+            if(linst.x2 > next_x):
+                next_x = linst.x2
+            next_y = linst.y2
 
             if(next_y > ymax):
                 ymax = next_y
 
-            x = lcell.x1
+            x = linst.x1
             y = next_y
 
-            prevcell = lcell
+            prevcell = linst
             previnst = inst
 
             prevgroup = group
@@ -147,14 +202,12 @@ class LayoutCell(Cell):
 
 
         if(previnst is not None):
-            dummy = self.parent.getInstanceDummyTop(previnst)
-            if(dummy is not None):
-                print("Placing dummy",inst.subcktName)
-                dummy.moveTo(x,y)
-                self.add(dummy)
-                x = dummy.x1
-                y = dummy.y2
-                next_y = y
+             dname = self.getDummyTopInst(inst.subcktName)
+             if(dname is not None):
+                 dummy = self.addInstance(dname,x,y)
+                 x = dummy.x1
+                 y = dummy.y2
+                 next_y = y
         pass
 
     def route():

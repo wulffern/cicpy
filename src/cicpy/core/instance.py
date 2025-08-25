@@ -27,6 +27,8 @@
 
 from .point import Point
 from .cell import Cell
+import cicspi as spi
+import logging
 
 class Instance(Cell):
 
@@ -40,6 +42,44 @@ class Instance(Cell):
         self.xcell = 0
         self.ycell = 0
 
+    def setSubcktInstance(self,inst:spi.SubcktInstance):
+
+        log = logging.getLogger("Instance("+inst.subcktName + ")")
+        self.instanceName = inst.name
+        self.ports.clear()
+        self.name = inst.subcktName
+
+        if(self.layoutcell is None):
+            log.warning("Could not find layoutcell " +inst.subcktName)
+            return
+
+        if(self.physicalOnly):
+            return
+
+
+
+        ckt = spi.Subckt.getSubckt(self.name)
+        if(ckt is None):
+            log.warning("Could not find subckt" + inst.subcktName)
+            return
+
+
+        if(len(inst.nodes) != len(ckt.nodes)):
+            log.error("different number of nodes for " + inst.name + "(" + len(inst.nodes) + ") and" + inst.subcktName + "(" + len(ckt.nodes) + ")" )
+            return
+
+
+        for i in range(0,len(ckt.nodes)):
+            instNode = inst.nodes[i]
+            cktNode = ckt.nodes[i]
+            cellPort = self.layoutcell.getPort(cktNode)
+            if(cellPort):
+                instPort = InstancePort(instNode,cellPort,self)
+                self.add(instPort)
+            else:
+                log.warning(f"Could not find {cktNode} on {ckt.name}")
+
+        pass
     
     def fromJson(self,o):
         super().fromJson(o)

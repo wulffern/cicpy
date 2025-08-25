@@ -141,7 +141,7 @@ class Magic(cic.LayoutCell):
                     self.parseToken(token,category,rest)
 
 
-        self.updateBoundingRect()
+        self.setRect(self.calcBoundingRect())
 
 
     def calcBoundingRect(self):

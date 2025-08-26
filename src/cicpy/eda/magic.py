@@ -43,6 +43,8 @@ class Magic(cic.LayoutCell):
         self.bb_y2 = cic.INT_MIN
         self.found_bbox = False
         self.bboxRect = None
+        self.ignoreBoundaryRouting = False
+        self.rules = cic.Rules.getInstance()
         pass
 
     def toAngstrom(self,val):
@@ -89,17 +91,30 @@ class Magic(cic.LayoutCell):
                 bbox = re.findall(r"FIXED_BBOX\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)",line)
                 self.found_bbox = True
                 self.bboxRect = self.boxToRect(bbox[0])
+
+        elif(token == "flabel"):
+            items = re.findall(r"(\S+)\s+s?\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+).*\s+(\S+)$",line)
+            if(len(items) > 0):
+                item = items[0]
+                l = self.rules.aliasToLayer(item[0])
+                x1 = self.toAngstrom(item[1])
+                y1 = self.toAngstrom(item[2])
+                x2 = self.toAngstrom(item[3])
+                y2 = self.toAngstrom(item[4])
+                r = cic.Rect(l.name)
+                r.setPoint1(x1,y1)
+                r.setPoint2(x2,y2)
+                pname = items[0][-1].replace("[","<").replace("]",">")
+                p = cic.Port(pname,routeLayer=l.name,rect=r)
+                self.add(p)
         elif(token == "tech"):
             self.techlib = line
-
         else:
             if(token == "rect"):
-                #print(self.name,line)
-
                 rects = re.findall(r"(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)",line)
                 if(rects):
-                    rules = cic.Rules.getInstance()
-                    l = rules.aliasToLayer(category)
+
+                    l = self.rules.aliasToLayer(category)
                     if(l is not None):
                         if(l.material == cic.Material.METAL):
                             rect = rects[0]
@@ -107,10 +122,11 @@ class Magic(cic.LayoutCell):
                             y1 = self.toAngstrom(rect[1])
                             x2 = self.toAngstrom(rect[2])
                             y2 = self.toAngstrom(rect[3])
-                            r = cic.Rect(l.name,x1,y1,x2,y2)
+                            r = cic.Rect(l.name)
+                            r.setPoint1(x1,y1)
+                            r.setPoint2(x2,y2)
                             self.add(r)
-                    #if(r)
-                    #print(category)
+
                     self.updateXYs(rects[0])
 
             pass
@@ -141,12 +157,15 @@ class Magic(cic.LayoutCell):
                     self.parseToken(token,category,rest)
 
 
-        self.setRect(self.calcBoundingRect())
+        self.updateBoundingRect()
+        #self.setRect(self.calcBoundingRect())
 
 
     def calcBoundingRect(self):
         if(self.found_bbox):
             return self.bboxRect
+        #return super().calcBoundingRect()
+
         else:
             r = cic.Rect()
             r.setPoint1(self.bb_x1,self.bb_y1)

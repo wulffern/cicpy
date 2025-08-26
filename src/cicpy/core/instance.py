@@ -27,8 +27,10 @@
 
 from .point import Point
 from .cell import Cell
+from .instanceport import InstancePort
 import cicspi as spi
 import logging
+import re
 
 class Instance(Cell):
 
@@ -37,6 +39,8 @@ class Instance(Cell):
         self.instanceName = ""
         self.cell = ""
         self.layoutcell = None
+        self.instancePorts = dict()
+        self.instancePortsList = list()
         self.libpath = ""
         self.angle = ""
         self.xcell = 0
@@ -108,7 +112,20 @@ class Instance(Cell):
             return c.isLayoutCell()
         return False
 
-        
+    def findRectanglesByNode(self,node:str,filterChild:str):
+        rects = list()
+        for pi in self.children:
+            if(pi is None): continue
+            if(not pi.isInstancePort()): continue
+
+            if(re.search(pi.name,node) and ((filterChild is None) or not re.search(pi.childName,filterChild))):
+               r = pi.get()
+               if(r is not None):
+                   r.parent = self
+                   rects.append(r)
+        return rects
+
+
 
     def getCellPoint(self):
         p = Point(self.x1 + self.xcell, self.y1 + self.ycell)
@@ -119,8 +136,7 @@ class Instance(Cell):
         if(self.layoutcell is None):
             return self
 
-        r = self.layoutcell
-        #print(r)
+        r = self.layoutcell.getCopy()
         r.moveTo(self.x1,self.y1)
         return r
 

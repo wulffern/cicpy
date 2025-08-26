@@ -27,6 +27,7 @@
 ######################################################################
 
 import re
+import logging
 import os
 
 class Object():
@@ -160,6 +161,7 @@ class XSchem():
         self.components = dict()
         self.name = ""
         self.path = ""
+        self.log = logging.getLogger("XSchem")
         pass
 
     def getPorts(self):
@@ -181,7 +183,7 @@ class XSchem():
                 continue
             #Ignore anything that does not start with X or x
             if(not re.search("^x",instName,re.I)):
-                print(f"xschem: Don't know how to layout {instName}.")
+                self.log.info(f"Don't know how to layout {instName}.")
                 continue
 
             group = c.group()
@@ -234,7 +236,7 @@ class XSchem():
         elif(c == "["):
             o = EmbedSymbol()
         else:
-            print(f"Unknown property {c}" + " on " + buff)
+            self.log.warning(f"Unknown property {c}" + " on " + buff)
 
 
         if(o is not None):

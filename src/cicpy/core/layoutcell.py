@@ -33,6 +33,7 @@ from .instance import Instance
 from .text import Text
 import cicspi as spi
 import re
+import logging
 
 
 class LayoutCell(Cell):
@@ -45,11 +46,11 @@ class LayoutCell(Cell):
         self.useHalfHeight = False
         self.graph = None
         self.um = 10000
+        self.log = logging.getLogger("LayoutCell")
         self.dummyCounter = 0
-        rules = Rules()
+        rules = Rules.getInstance()
         if(rules.hasRules()):
             space =rules.get("CELL","space")
-            #print(space)
             self.place_groupbreak = [100]
             self.place_xspace = [space]
             self.place_yspace = [space]
@@ -76,6 +77,25 @@ class LayoutCell(Cell):
 
     def addToNodeGraph(self,inst):
 
+        if (inst is None): return
+
+        allp = inst.allports
+        keys = inst.allPortNames
+
+        for s in keys:
+            for p in allp:
+                if(p is None): continue
+                if(self.nodeGraph.contains(p.name)):
+                    self.nodeGraph[p.name].append(p)
+                else:
+                    g = Graph()
+                    g.name = p.name
+                    g.append(p)
+                    self.nodeGraphList.append(p.name)
+                    self.nodeGraph[p.name] = g
+
+
+        
         pass
 
     def toJson(self):
@@ -210,9 +230,42 @@ class LayoutCell(Cell):
                  next_y = y
         pass
 
-    def route():
+    def route(self):
 
         pass
+
+
+    def paint(self):
+
+        pass
+
+    def findRectanglesByNode(self,node:str,filterChild:str=None,matchInstance:str=None):
+        rects = list()
+        for i in self.children:
+            if(i is None): continue
+            if(not i.isInstance()): continue
+
+            if(matchInstance is not None):
+                if(not re.search(matchInstance,i.name)): continue
+
+            childRects = i.findRectanglesByNode(node,filterChild)
+            for r in childRects:
+                rects.append(r)
+        return rects
+
+
+    def addAllPorts(self):
+        if(self.subckt is None): return
+        nodes = self.subckt.nodes
+
+        for node in nodes:
+
+            if(node in self.ports): continue
+            rects = self.findRectanglesByNode("^" + node + "$",None,None)
+            if(len(rects) > 0):
+                self.updatePort(node,rects[0])
+            else:
+                self.log.warning(r"No rects found on " + node)
 
     def fromJson(self,o):
         super().fromJson(o)
@@ -247,7 +300,7 @@ class LayoutCell(Cell):
             elif(cl == "Cell" or cl== "cIcCore::Route" or cl == "cIcCore::RouteRing" or cl == "cIcCore::Guard" or cl == "cIcCore::Cell" or cl == "cIcCore::LayoutCell"):
                 c = LayoutCell()
             else:
-                print(f"Unkown class {cl}")
+                self.log.warning(f"Unkown class {cl}")
 
             if(c is not None):
                 c.design = self.design

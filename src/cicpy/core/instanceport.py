@@ -10,9 +10,9 @@ class InstancePort(Port):
         super().__init__(name)
         self.childport = port
         self.parent = parent
-        r = p.get()
-        rules = Rules()
+        r = port.get()
+        rules = Rules.getInstance()
         if(r):
             l = rules.getLayer(r.layer)
-            self.routeLayer = l
-            self.setRect(r.layer,r.x1,r.y1,r.width,r.height)
+            self.routeLayer = l.name
+            self.setRect(r)

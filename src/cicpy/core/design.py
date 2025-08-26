@@ -35,6 +35,7 @@ import os
 import gzip
 import json
 import re
+import logging
 
 class Design():
 
@@ -42,6 +43,7 @@ class Design():
         self.cells = dict()
         self.cellnames = list()
         self.jcells = dict()
+        self.log = logging.getLogger("DesignPrinter")
         self.prefix = ""
 
 
@@ -102,7 +104,7 @@ class Design():
         with open(filename)as fi:
 
             for line in fi:
-                if(re.search("^\s*//",line)):
+                if(re.search(r"^\s*//",line)):
                     continue
                 buffer += line
 

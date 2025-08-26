@@ -5,6 +5,7 @@ import cicspi
 import glob
 import os
 import re
+import logging
 
 class MagicFile():
     def __init__(self,filename,parent):
@@ -14,6 +15,7 @@ class MagicFile():
         self.libname = os.path.basename(self.dirname)
         self.parent = parent
         self._lay = None
+
         pass
 
     def loadLayoutCell(self):
@@ -41,6 +43,7 @@ class MagicDesign(cic.Design):
         self.maglib = dict()
         self.rules = rules
         self.techlib = techlib
+        self.log = logging.getLogger("MagicDesign")
 
     def scanLibraryPath(self,libdir):
         files = glob.glob(libdir + "**/*mag")
@@ -52,7 +55,7 @@ class MagicDesign(cic.Design):
         sp = cicspi.SpiceParser()
         sp.parseFile(filename)
         if(cellname not in sp):
-            print(f"Could not find {cellname} in {str(sp.keys())}")
+            self.log.warning(f"Could not find {cellname} in {str(sp.keys())}")
             return
 
         #- Make top cell
@@ -60,6 +63,7 @@ class MagicDesign(cic.Design):
         cell = cic.LayoutCell()
         cell.name = cellname
         cell.ckt = ckt
+        cell.subckt = ckt
         cell.parent = self
         self.add(cell)
         return cell

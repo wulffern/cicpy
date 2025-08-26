@@ -27,6 +27,7 @@
 import sys
 import os
 import json
+import re
 from .layer import Layer
 
 class Rules:
@@ -162,10 +163,20 @@ class Rules:
         return self.getField("layers",layer,"alias")
 
     #def
+    #
+    def getLayer(self,layer):
 
+        if(layer in self.layers):
+            return self.layers[layer]
+        else:
+            return self.layers["PR"]
     def aliasToLayer(self,alias):
         if(alias in self.alias):
             return self.alias[alias]
+        elif(re.search(r"m\d",alias)):
+            alias =  alias.replace("m","metal")
+            if(alias in self.alias):
+                return self.alias[alias]
 
 
     def layerToDataType(self,layer):

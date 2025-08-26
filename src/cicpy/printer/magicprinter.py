@@ -32,7 +32,7 @@ import time
 import re
 from os import path
 import os
-
+import logging
 
 class MagicPrinter(DesignPrinter):
 
@@ -55,7 +55,8 @@ class MagicPrinter(DesignPrinter):
         pass
 
     def openCellFile(self,name):
-        print(f"Writing {name}")
+        log = logging.getLogger("MagicPrinter")
+        log.info(f"Writing {name}")
         self.fcell = open(name,"w")
 
     def closeCellFile(self):
@@ -141,7 +142,7 @@ class MagicPrinter(DesignPrinter):
                                                             yu2))
             pass
         else:
-            print("Warning: Skip bounding box")
+            self.log.warning(" Skip bounding box")
 
         self.closeCellFile()
 
@@ -173,7 +174,6 @@ class MagicPrinter(DesignPrinter):
         routeLayerAlias = self.rules.layerToAlias(p.layer)
 
         if(p.name not in self.portOrder):
-            print(self.portOrder)
             raise(Exception(f"Could not find {p.name} in circuit nodes"))
 
 

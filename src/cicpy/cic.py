@@ -32,12 +32,39 @@ import cicpy as cic
 import json
 import cicspi
 import yaml
+import logging
+
+
+class ColorFormatter(logging.Formatter):
+    COLORS = {
+        'DEBUG': '\033[36m',     # Cyan
+        'INFO': '\033[32m',      # Green
+        'WARNING': '\033[33m',   # Yellow
+        'ERROR': '\033[31m',     # Red
+        'CRITICAL': '\033[1;31m' # Bold Red
+    }
+    RESET = '\033[0m'
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelname, self.RESET)
+        message = super().format(record)
+        return f"{color}{message}{self.RESET}"
+
+log = logging.getLogger("spi2mag")
 
 @click.group()
 @click.pass_context
 def cli(ctx):
     """ Python toolbox for Custom Integrated Circuit Creator (ciccreator). """
     ctx.ensure_object(dict)
+    handler = logging.StreamHandler()
+    formatter = ColorFormatter('%(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
+
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+
     pass
 
 @cli.command("transpile")
@@ -251,17 +278,23 @@ def _runMethod(lcell,module,method):
     if(module is not None):
         if(hasattr(module,method)):
             fn = getattr(module,method)
+            log.info("Running " + method + " from " + lcell.name + ".py")
             fn(lcell)
 
 
 def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
 
+
+
     techfile = f"../tech/cic/{techlib}.tech"
-    print(f"INFO: Loading rules {techfile}")
+    log.info(f"Loading rules {techfile}")
     rules = cic.Rules(techfile)
 
+    log.info(f"Finding Magic cells in {libdir}")
     design = cic.MagicDesign(techlib,rules)
     design.scanLibraryPath(libdir)
+
+    log.info(f"Reading {spi}")
     lcell = design.readFromSpice(spi,cell)
 
     if("," in gbreak):
@@ -288,25 +321,41 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
         pycell = importlib.import_module(lcell.name)
         dir(pycell)
 
-
+    log.info(f"Assembling layout....")
 
     _runMethod(lcell,pycell,"beforePlace")
+
+
     #- Place cell
+    log.info(f"place()")
     lcell.place()
 
     _runMethod(lcell,pycell,"afterPlace")
 
+    _runMethod(lcell,pycell,"beforeRoute")
 
+    log.info(f"route()")
+    lcell.route()
 
+    _runMethod(lcell,pycell,"afterRoute")
+
+    _runMethod(lcell,pycell,"beforePaint")
+
+    log.info(f"paint()")
+
+    _runMethod(lcell,pycell,"afterPaint")
+
+    log.info(f"addAllPorts()")
+    lcell.addAllPorts()
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.print(design)
-    obj = design.toJson()
-    with open(libdir + lib + os.path.sep + lcell.name + ".cic","w") as fo:
-        fo.write(json.dumps(obj,indent=4))
+    #for m in design.maglib.values():
+        #if(m._lay is not None):
 
-    #obj = cic.MagicPrinter(libdir + lib,cell)
-    #obj.print(design)
+    with open(libdir + lib + os.path.sep + lcell.name + ".cic","w") as fo:
+        fo.write(json.dumps(design.toJson(),indent=4))
+        #fo.write(json.dumps(design.maglib["JNWTR_RPPO2"]._lay.toJson(),indent=4))
 
 
 

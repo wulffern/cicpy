@@ -71,3 +71,11 @@ class Port(Rect):
 
         o["spicePort"] = self.spicePort
         return o
+
+    def get(self,layer=None):
+        r = None
+        if(self.routeLayer):
+            r = self.getCopy(layer)
+            r.layer = self.routeLayer
+            r.net = self.name
+        return r

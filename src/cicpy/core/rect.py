@@ -226,8 +226,10 @@ class Rect:
     def setNet(self,net):
         self.net = net
 
-    def getCopy(self):
+    def getCopy(self,layer=None):
         r = Rect(self.layer,self.x1,self.y1,self.width(),self.height())
+        if(layer is not None):
+            r.layer = layer
         r.setNet(self.net)
         return r
 
@@ -348,6 +350,9 @@ class Rect:
 
     def isPort(self):
         return self.isType("Port")
+
+    def isInstancePort(self):
+        return self.isType("InstancePort")
 
     def isRoute(self):
         return self.isType("Route")

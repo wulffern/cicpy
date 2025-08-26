@@ -40,6 +40,8 @@ class Cell(Rect):
         super().__init__()
         self.subckt = None
         self.name = name
+        self.allports = dict()
+        self.allPortNames = list()
         self.ignoreBoundaryRouting = False
         self.physicalOnly = False
         self.abstract = False
@@ -61,9 +63,10 @@ class Cell(Rect):
 
     def getPort(self,name:str):
         p = None
+
         if(name in self.ports):
             p = self.ports[name]
-        return
+        return p
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
@@ -75,8 +78,10 @@ class Cell(Rect):
         if(child == None):
             raise Exception("Null rectangle added")
 
-        if(child.isPort()):
+        if(child.isPort() or child.isInstancePort()):
             self.ports[child.name] = child
+            self.allPortNames.append(child.name)
+
 
         if(not child in self.children):
             if(child.isRoute()):
@@ -123,7 +128,7 @@ class Cell(Rect):
         super().moveTo(ax,ay)
         for child in self.children:
             child.translate(ax - x1, ay - y1)
-        self.updateBoundingRect
+        self.updateBoundingRect()
         self.emit_updated()
         
 
@@ -300,6 +305,29 @@ class Cell(Rect):
         if(self.name.startswith(self.prefix + ss)):
             return True
         return False
+
+    def isASpicePort(self,name:str):
+        if(self.subckt is None):
+            return True
+        if(name in self.subckt.nodes):
+            return True
+        else:
+            return False
+
+    def updatePort(self,name:str,r:Rect):
+        p = None
+        if(name in self.ports):
+            p = self.ports[name]
+            p.spicePort = self.isASpicePort(name)
+            p.setRect(r)
+        else:
+            if(self.subckt):
+                if(name in self.subckt.nodes):
+                    p = Port(name)
+                    p.spicePort = self.isASpicePort(name)
+                    p.setRect(r)
+                    self.add(p)
+        return p
 
     #     Port * getPort(QString name);
     #     Port * getCellPort(QString name);

@@ -79,6 +79,9 @@ class Instance(Cell):
             cellPort = self.layoutcell.getPort(cktNode)
             if(cellPort):
                 instPort = InstancePort(instNode,cellPort,self)
+                # Track in instance port collections
+                self.instancePorts[instNode] = instPort
+                self.instancePortsList.append(instNode)
                 self.add(instPort)
             else:
                 log.warning(f"Could not find {cktNode} on {ckt.name}")
@@ -115,14 +118,15 @@ class Instance(Cell):
     def findRectanglesByNode(self,node:str,filterChild:str):
         rects = list()
         for pi in self.children:
-            if(pi is None): continue
-            if(not pi.isInstancePort()): continue
-
-            if(re.search(pi.name,node) and ((filterChild is None) or not re.search(pi.childName,filterChild))):
-               r = pi.get()
-               if(r is not None):
-                   r.parent = self
-                   rects.append(r)
+            if(pi is None):
+                continue
+            if(not pi.isInstancePort()):
+                continue
+            if(re.search(node, pi.name) and ((filterChild is None) or not re.search(filterChild, getattr(pi, 'childName', '')))):
+                r = pi.get()
+                if(r is not None):
+                    r.parent = self
+                    rects.append(r)
         return rects
 
 

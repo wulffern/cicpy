@@ -39,12 +39,16 @@ class Point:
 
     def rotate(self,org_x,org_y,angle):
         angle_ = angle*2*math.asin(1)/180.0
-        self.x = math.cos(angle_)*(self.x - org_x) - math.sin(angle_)*(self.y - org_y) + org_x
-        self.y = math.sin(angle_) *(self.y - org_x) + math.cos(angle_) * (self.y- org_y) + org_y
+        xrel = self.x - org_x
+        yrel = self.y - org_y
+        xr = math.cos(angle_)*xrel - math.sin(angle_)*yrel
+        yr = math.sin(angle_)*xrel + math.cos(angle_)*yrel
+        self.x = xr + org_x
+        self.y = yr + org_y
 
     def translate(self,dx,dy):
         self.x = self.x + dx
-        self.y = self.y + dx
+        self.y = self.y + dy
 
     def leftOf(self,point):
         if(point.x < self.x):

@@ -47,6 +47,8 @@ class Design():
         self.prefix = ""
 
 
+        
+
     def fromJsonFile(self,fname):
         jobj = None
 
@@ -96,6 +98,7 @@ class Design():
     
     def getCell(self,name):
         return self.cells[name]
+
 
     def read(self,filename):
         import cicspi as spi

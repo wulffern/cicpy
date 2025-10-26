@@ -43,7 +43,7 @@ class Magic(cic.LayoutCell):
         self.bb_y2 = cic.INT_MIN
         self.found_bbox = False
         self.bboxRect = None
-        self.ignoreBoundaryRouting = False
+        self.ignoreBoundaryRouting = True
         self.rules = cic.Rules.getInstance()
         pass
 
@@ -128,7 +128,6 @@ class Magic(cic.LayoutCell):
                             self.add(r)
 
                     self.updateXYs(rects[0])
-
             pass
 
 
@@ -162,15 +161,11 @@ class Magic(cic.LayoutCell):
 
 
     def calcBoundingRect(self):
-        if(self.found_bbox):
+        if(self.found_bbox and self.ignoreBoundaryRouting):
             return self.bboxRect
-        #return super().calcBoundingRect()
-
         else:
-            r = cic.Rect()
-            r.setPoint1(self.bb_x1,self.bb_y1)
-            r.setPoint2(self.bb_x2,self.bb_y2)
-            return r
+            return super().calcBoundingRect()
+
 
 
 

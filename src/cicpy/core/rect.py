@@ -79,13 +79,14 @@ def Scaled(rect,unit):
     r.setPoint2(rect.x2/unit,rect.y2/unit)
     r.layer = rect.layer
     r.net = rect.net
+    return r
 
 def snap(x):
     GRID = 5
     x = int(x/GRID)*GRID
     return x
 
-def HorizontalRectangleFromTo(self, layer,  x1,  x2,  y,  height):
+def HorizontalRectangleFromTo(layer,  x1,  x2,  y,  height):
     if(x1 > x2):
         r = Rect(layer,x2,y,x1-x2,height)
     else:
@@ -161,6 +162,30 @@ class Rect:
     def bottom(self):
         return self.y1
 
+    def setLeft(self, x):
+        w = self.width()
+        self.x1 = x
+        self.x2 = x + w
+        self.emit_updated()
+
+    def setRight(self, x):
+        w = self.width()
+        self.x2 = x
+        self.x1 = x - w
+        self.emit_updated()
+
+    def setTop(self, y):
+        h = self.height()
+        self.y2 = y
+        self.y1 = y - h
+        self.emit_updated()
+
+    def setBottom(self, y):
+        h = self.height()
+        self.y1 = y
+        self.y2 = y + h
+        self.emit_updated()
+
     def width(self):
         return self.x2 - self.x1
 
@@ -196,11 +221,19 @@ class Rect:
             return True
         return False
 
-    def adjust(self,dx):
-        self.x1 -= dx
-        self.y1 -= dx
-        self.x2 += dx
-        self.y2 += dx
+    def adjust(self,dx,dy1=None,dx2=None,dy2=None):
+
+        if dx2 is None:
+            dx2 = dx
+        if dy1 is None:
+            dy1 = dx
+        if dy2 is None:
+            dy2 = dx
+
+        self.x1 += dx
+        self.y1 += dy1
+        self.x2 += dx2
+        self.y2 += dy2
 
     def translate(self,ax,ay):
         self.x2 += ax
@@ -210,12 +243,12 @@ class Rect:
         self.emit_updated()
 
     def isHorizontal(self):
-        if(self.width >= self.height):
+        if(self.width() >= self.height()):
             return True
         return False
     
     def isVertical(self):
-        if(self.height >= self.width):
+        if(self.height() >= self.width()):
             return True
         return False    
     

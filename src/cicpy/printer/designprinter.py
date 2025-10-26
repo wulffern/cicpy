@@ -29,6 +29,7 @@ import sys
 import os
 import yaml
 import re
+import logging
 
 class DesignPrinter():
 
@@ -39,6 +40,7 @@ class DesignPrinter():
         self.cells = dict()
         self.f = None
         self.exclude = ""
+        self.log = logging.getLogger("Printer")
 
 
     def openFile(self,name):
@@ -66,7 +68,10 @@ class DesignPrinter():
             elif(child.isRect()):
                 self.printRect(child)
             else:
-                print("DesignPrinter: don't know what to do with " + str(child) + " " + child.name)
+                if(hasattr(child,"children")):
+                    self.printChildren(child.children)
+                else:
+                    print("DesignPrinter: don't know what to do with " + str(child) + " " + child.name)
 
 
 

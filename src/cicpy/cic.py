@@ -274,17 +274,9 @@ def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     """Translate a SPICE file to Magic"""
     _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak)
 
-def _runMethod(lcell,module,method):
-    if(module is not None):
-        if(hasattr(module,method)):
-            fn = getattr(module,method)
-            log.info("Running " + method + " from " + lcell.name + ".py")
-            fn(lcell)
 
 
 def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
-
-
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -316,37 +308,14 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     lcell.dirname = libdir + lib + os.path.sep
 
     pycell = None
+    pycellData = None
     if(os.path.exists(lcell.dirname + lcell.name + ".py")):
         sys.path.append(lcell.dirname)
         pycell = importlib.import_module(lcell.name)
-        dir(pycell)
+        if(hasattr(pycell,"data")):
+            pycellData = pycell.data
 
-    log.info(f"Assembling layout....")
-
-    _runMethod(lcell,pycell,"beforePlace")
-
-
-    #- Place cell
-    log.info(f"place()")
-    lcell.place()
-
-    _runMethod(lcell,pycell,"afterPlace")
-
-    _runMethod(lcell,pycell,"beforeRoute")
-
-    log.info(f"route()")
-    lcell.route()
-
-    _runMethod(lcell,pycell,"afterRoute")
-
-    _runMethod(lcell,pycell,"beforePaint")
-
-    log.info(f"paint()")
-
-    _runMethod(lcell,pycell,"afterPaint")
-
-    log.info(f"addAllPorts()")
-    lcell.addAllPorts()
+    lcell.layout(pycell,pycellData)
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.print(design)

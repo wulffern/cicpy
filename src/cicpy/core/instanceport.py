@@ -10,6 +10,7 @@ class InstancePort(Port):
         super().__init__(name)
         self.childport = port
         self.parent = parent
+        self.childName = port.name
         r = port.get()
         rules = Rules.getInstance()
         if(r):

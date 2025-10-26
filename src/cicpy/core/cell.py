@@ -59,6 +59,7 @@ class Cell(Rect):
         self.has_pr = False
         self.meta = list()
         self.obj = False #- Original JSON obj
+        self.named_rects = dict()
 
 
     def getPort(self,name:str):
@@ -70,8 +71,12 @@ class Cell(Rect):
 
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
-        raise Exception("Not implemented")
-        pass
+        for child in self.children:
+            if(child is None):
+                continue
+            if(child.layer == layer):
+                return child
+        return None
     
     # Add a rectangle to the cell, hooks updated() of the child to updateBoundingRect
     def add(self, child):
@@ -90,6 +95,8 @@ class Cell(Rect):
             self.children.append(child)
             child.connect(self.updateBoundingRect)
 
+        self.updateBoundingRect()
+
     
     # Move this cell, and all children by dx and dy
     def translate(self, dx, dy):
@@ -104,7 +111,7 @@ class Cell(Rect):
         super().mirrorX(ax)
         for child in self.children:
             child.mirrorX(ax)
-        for port in self.ports:
+        for _, port in self.ports.items():
             port.mirrorX(ax)
         self.updateBoundingRect()
         self.emit_updated()
@@ -115,8 +122,8 @@ class Cell(Rect):
         super().mirrorY(ay)
         for child in self.children:
             child.mirrorY(ay)
-        for port in self.ports:
-            port.mirrorY()
+        for _, port in self.ports.items():
+            port.mirrorY(ay)
         self.updateBoundingRect()
         self.emit_updated
         
@@ -135,28 +142,29 @@ class Cell(Rect):
     # Center this cell, and all children on ax and ay
     def moveCenter(self,ax, ay):
         self.updateBoundingRect()
-
-        xc1 = self.centerX
-        yc1 = self.centerY
-
-        xpos = self.left - (xc1 - ax)
-        ypos = self.bottom - (yc1 - ay)
-
-        self.moveTo(xpos,ypos)
+        xc1 = self.centerX()
+        yc1 = self.centerY()
+        dx = ax - xc1
+        dy = ay - yc1
+        self.translate(dx, dy)
 
     # Shortcut for adding ports
     def addPort(name, rect):
-        raise Exception("Not implemented")
-        pass
+        if(rect is None):
+            return None
+        p = Port(name)
+        p.setRect(rect)
+        self.add(p)
+        return p
         
     # Mirror this cell, and all children around horizontal center point (basically flip horizontal)
     def mirrorCenterX(self):
-        self.mirrorX(self.centerY)
+        self.mirrorX(self.centerY())
         pass
         
         
     def mirrorCenterY(self):
-        self.mirrorY(self.centerX)
+        self.mirrorY(self.centerX())
         pass
 
     def updateBoundingRect(self):
@@ -404,9 +412,34 @@ class Cell(Rect):
   
 
     #     //! Find all rectangles by regular expression
-    #     virtual QList<Rect *> findRectanglesByRegex(QString regex,QString layer);
-    #     virtual void findRectangles(QList<Rect*> &rects,QString name,QString layer);
-    #     virtual QList<Rect *> findAllRectangles(QString regex, QString layer);
+    def findRectanglesByRegex(self, regex:str, layer:str):
+        rects = list()
+        self.findRectangles(rects, regex, layer)
+        return rects
+
+    def findRectangles(self, rects:list, name:str, layer:str):
+        for child in self.children:
+            if child is None:
+                continue
+            if layer and child.layer != layer:
+                continue
+            if re.search(name, getattr(child,'name', '')):
+                rects.append(child)
+            # Also include plain rects on layer when name matches empty or wildcard
+            elif name == "" and (hasattr(child,'isRect') and child.isRect()):
+                rects.append(child)
+
+    def findAllRectangles(self, regex:str, layer:str):
+        rects = list()
+        for child in self.children:
+            if child is None:
+                continue
+            if layer and child.layer != layer:
+                continue
+            cname = getattr(child,'name','')
+            if re.search(regex, cname) or (hasattr(child,'isRect') and child.isRect() and re.search(regex, layer)):
+                rects.append(child)
+        return rects
 
     #     QJsonObject toJson();
     #     void fromJson(QJsonObject o);

@@ -33,7 +33,7 @@ class Layer:
         fields = dir(self)
         for f in fields:
             if(f in obj):
-                if(f is "material"):
+                if(f == "material"):
                     self.material = Material[obj["material"].upper()]
                 else:
                     setattr(self,f,obj[f])

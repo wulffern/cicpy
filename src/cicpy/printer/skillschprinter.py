@@ -125,7 +125,7 @@ mybBox{pinCommonName} = dbTransformBBox(myprebBox{pinCommonName} my{pinCommonNam
 
         sl = self.rules.symbol_lib
 
-        short_name = re.sub("(X\d+)*(_CV|_EV)?","",cell.name)
+        short_name = re.sub(r"(X\d+)*(_CV|_EV)?","",cell.name)
 
         if(cell.name.startswith("PCH")):
             short_name = "PCH"
@@ -333,7 +333,7 @@ unless( ddGetObj(schLibName schName "symbol")
                 m = re.search("({\w+})",ddict[key]["str"])
                 if(m):
                     for mg in m.groups():
-                        rkey = re.sub("{|}","",mg)
+                        rkey = re.sub(r"{|}","",mg)
                         if(rkey in ddict):
                             ddict[key]["str"] = re.sub(mg,str(ddict[rkey]["val"]),ddict[key]["str"])
 

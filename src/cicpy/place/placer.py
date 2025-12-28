@@ -16,11 +16,11 @@ class Placer():
         return np.round(n*1000)/1000
 
     def getGroup(self,instName):
-        group = re.sub("\(\d+\)","",instName)
+        group = re.sub(r"\(\d+\)","",instName)
         return group
 
     def getIndex(self,instName):
-        m = re.search("\((\d+)\)",instName)
+        m = re.search(r"\((\d+)\)",instName)
         if(m):
             return int(m.group(1))
         else:

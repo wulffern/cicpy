@@ -86,9 +86,10 @@ def cli(ctx):
 def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash,exclude):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
 
+    rules = cic.Rules(techfile)
     design = cic.Design()
     design.fromJsonFile(cicfile)
-    rules = cic.Rules(techfile)
+
 
 
     if(layskill):

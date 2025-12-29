@@ -158,7 +158,7 @@ class SpicePrinter(DesignPrinter):
         new_nodes = list()
         for i in range(0,len(nodes)):
             n = nodes[i]
-            if(re.search("<|>",nodes[i])):
+            if(re.search(r"<|>",nodes[i])):
                 n = n.replace("<","_").replace(">","")
             new_nodes.append(n)
 
@@ -205,7 +205,7 @@ class SpicePrinter(DesignPrinter):
 
             #- If a parameter is used in a string, then replace it
             for key in ddict:
-                m = re.search("({\w+})",ddict[key]["str"])
+                m = re.search(r"({\w+})",ddict[key]["str"])
 
                 if(m):
                     for mg in m.groups():

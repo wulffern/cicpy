@@ -330,7 +330,7 @@ unless( ddGetObj(schLibName schName "symbol")
 
             #- If a parameter is used in a string, then replace it
             for key in ddict:
-                m = re.search("({\w+})",ddict[key]["str"])
+                m = re.search(r"({\w+})",ddict[key]["str"])
                 if(m):
                     for mg in m.groups():
                         rkey = re.sub(r"{|}","",mg)

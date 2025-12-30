@@ -144,9 +144,11 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 def jcell(ctx,cicfile,techfile,cell,child):
     """Extract a cell from .cic """
 
+    rules = cic.Rules(techfile)
+
     design = cic.Design()
     design.fromJsonFile(cicfile)
-    rules = cic.Rules(techfile)
+
 
     if(cell in design.jcells):
         obj = design.jcells[cell]
@@ -174,9 +176,11 @@ def jcell(ctx,cicfile,techfile,cell,child):
 def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
     """Place a bunch of transistors according to pattern, outputs SKILL"""
 
+    rules = cic.Rules(techfile)
+
     design = cic.Design()
     design.fromJsonFile(cicfile)
-    rules = cic.Rules(techfile)
+
 
     placer = cic.Placer(design,layoutfile,pattern)
     if(circuit == "diffpair"):
@@ -206,9 +210,11 @@ def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
 def minecraft(ctx,cicfile,techfile,cell,child,x,y):
     """Make a mincraft script *.mc from *.cic """
 
+    rules = cic.Rules(techfile)
+
     design = cic.Design()
     design.fromJsonFile(cicfile)
-    rules = cic.Rules(techfile)
+
     if(cell in design.cells):
         cell = design.cells[cell]
 
@@ -234,9 +240,10 @@ def minecraft(ctx,cicfile,techfile,cell,child,x,y):
 def svg(ctx,cicfile,techfile,library,scale,x,y):
     """Make an SVG"""
 
+    rules = cic.Rules(techfile)
+
     design = cic.Design()
     design.fromJsonFile(cicfile)
-    rules = cic.Rules(techfile)
 
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)

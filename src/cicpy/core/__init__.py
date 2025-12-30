@@ -3,6 +3,7 @@
 from .cell import *
 from .design import *
 from .instance import *
+from .instancecut import *
 from .layoutcell import *
 from .point import *
 from .port import *

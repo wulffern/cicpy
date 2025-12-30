@@ -163,27 +163,19 @@ class Rect:
         return self.y1
 
     def setLeft(self, x):
-        w = self.width()
         self.x1 = x
-        self.x2 = x + w
         self.emit_updated()
 
     def setRight(self, x):
-        w = self.width()
         self.x2 = x
-        self.x1 = x - w
         self.emit_updated()
 
     def setTop(self, y):
-        h = self.height()
         self.y2 = y
-        self.y1 = y - h
         self.emit_updated()
 
     def setBottom(self, y):
-        h = self.height()
         self.y1 = y
-        self.y2 = y + h
         self.emit_updated()
 
     def width(self):
@@ -369,10 +361,13 @@ class Rect:
         print(json.dumps(self.toJson(),indent=4))
 
     def isType(self,typename):
+        # Check current class
         if(self.__class__.__name__ == typename):
             return True
-        elif(super() and (super().__class__.__name__ == typename)):
-            return True
+        # Check all parent classes in the MRO (Method Resolution Order)
+        for base in self.__class__.__mro__[1:]:  # Skip self.__class__ at index 0
+            if base.__name__ == typename:
+                return True
         return False
 
     def isInstance(self):
@@ -391,7 +386,8 @@ class Rect:
         return self.isType("Route")
 
     def isCut(self):
-        return self.isType("Cut")
+        # Check if this is a Cut cell or an InstanceCut instance
+        return self.isType("Cut") or self.isType("InstanceCut")
 
     def isCell(self):
         return self.isType("Cell")

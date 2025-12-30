@@ -147,7 +147,7 @@ class MagicPrinter(DesignPrinter):
         self.closeCellFile()
 
         #- Write netlist
-        if(cell.graph):
+        if(hasattr(cell,"graph") and cell.graph):
             with open(self.libname +  os.path.sep + cell.name + ".net","w") as fo:
                 fo.write(" Netlist File\n")
                 fo.write(" " + cell.name + "\n")

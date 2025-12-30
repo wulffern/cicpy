@@ -78,14 +78,29 @@ class Cell(Rect):
                 return child
         return None
     
+    def setBoundaryIgnoreRouting(self, bir):
+        """Set whether to ignore boundary routing when calculating bounding rect"""
+        self.ignoreBoundaryRouting = bool(bir)
+    
+    def boundaryIgnoreRouting(self):
+        """Get whether boundary routing is ignored"""
+        return self.ignoreBoundaryRouting
+    
     # Add a rectangle to the cell, hooks updated() of the child to updateBoundingRect
     def add(self, child):
         if(child == None):
+            import logging
+            log = logging.getLogger("Cell")
+            log.error(f"Attempted to add None/Null rectangle to cell {self.name}")
             raise Exception("Null rectangle added")
 
         if(child.isPort() or child.isInstancePort()):
             self.ports[child.name] = child
             self.allPortNames.append(child.name)
+            # Populate allports dict - each port name maps to a list of ports
+            if child.name not in self.allports:
+                self.allports[child.name] = []
+            self.allports[child.name].append(child)
 
 
         if(not child in self.children):
@@ -137,7 +152,6 @@ class Cell(Rect):
             child.translate(ax - x1, ay - y1)
         self.updateBoundingRect()
         self.emit_updated()
-        
 
     # Center this cell, and all children on ax and ay
     def moveCenter(self,ax, ay):
@@ -149,7 +163,7 @@ class Cell(Rect):
         self.translate(dx, dy)
 
     # Shortcut for adding ports
-    def addPort(name, rect):
+    def addPort(self, name, rect):
         if(rect is None):
             return None
         p = Port(name)
@@ -207,6 +221,40 @@ class Cell(Rect):
         r.setPoint1(x1,y1)
         r.setPoint2(x2,y2)
 
+        return r
+
+    @staticmethod
+    def calcBoundingRectFromList(children, ignoreBoundaryRouting=False):
+        """Static method to calculate bounding rect from a list of rectangles"""
+        x1 = INT_MAX
+        y1 = INT_MAX
+        x2 = INT_MIN
+        y2 = INT_MIN
+
+        if len(children) == 0:
+            x1 = y1 = x2 = y2 = 0
+
+        for cr in children:
+            if ignoreBoundaryRouting and (not cr.isInstance() or cr.isCut()):
+                continue
+
+            cx1 = cr.x1
+            cx2 = cr.x2
+            cy1 = cr.y1
+            cy2 = cr.y2
+
+            if cx1 < x1:
+                x1 = cx1
+            if cy1 < y1:
+                y1 = cy1
+            if cx2 > x2:
+                x2 = cx2
+            if cy2 > y2:
+                y2 = cy2
+
+        r = Rect()
+        r.setPoint1(x1, y1)
+        r.setPoint2(x2, y2)
         return r
 
     def isEmpty(self):
@@ -305,7 +353,7 @@ class Cell(Rect):
         return ss
 
     def getCell(self,cellname):
-        if(cellname in self.design.cells):
+        if self.design and cellname in self.design.cells:
             return self.design.cells[cellname]
         return None
 

@@ -47,7 +47,14 @@ class Design():
         self.prefix = ""
 
 
-        
+    def addCuts(self):
+        # Import all cuts and add them to the design (matching C++ behavior)
+        from .cut import Cut
+        for cut in Cut.getCuts():
+            if cut.name not in self.cells:
+                print(f"Adding cut {cut.name}")
+                self.cells[cut.name] = cut
+                self.cellnames.insert(0, cut.name)  # Add at the beginning like C++
 
     def fromJsonFile(self,fname):
         jobj = None
@@ -60,6 +67,9 @@ class Design():
                 jobj = json.load(f)
 
         if(jobj is None):
+            import logging
+            log = logging.getLogger("Design")
+            log.error(f"Could not read {fname}, unrecognized format")
             raise Exception("Could not read %s, unrecognized format" % fname)
 
         for o in jobj["cells"]:
@@ -74,6 +84,8 @@ class Design():
             self.cells[c.name] = c
             self.jcells[c.name] = o
             self.cellnames.append(c.name)
+        
+
 
     def toJson(self):
         obj = dict()

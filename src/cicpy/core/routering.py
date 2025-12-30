@@ -71,6 +71,18 @@ class RouteRing(Cell):
 
     def get(self, location: str):
         """Get a copy of the rectangle at the specified location"""
+        # Handle multi-character location strings (e.g., "btrl", "rtbl")
+        # Return the first matching side
+        if "b" == location and hasattr(self, 'bottom') and self.bottom:
+            return self.bottom.getCopy()
+        elif "t" == location and hasattr(self, 'top') and self.top:
+            return self.top.getCopy()
+        elif "r" == location and hasattr(self, 'right') and self.right:
+            return self.right.getCopy()
+        elif "l" == location and hasattr(self, 'left') and self.left:
+            return self.left.getCopy()
+        
+        # Fallback to exact matches
         if location == "bottom":
             return self.bottom.getCopy()
         elif location == "top":
@@ -83,6 +95,18 @@ class RouteRing(Cell):
 
     def getPointer(self, location: str):
         """Get a pointer to the rectangle at the specified location"""
+        # Handle multi-character location strings (e.g., "btrl", "rtbl")
+        # Return the first matching side
+        if "b" == location and hasattr(self, 'bottom') and self.bottom:
+            return self.bottom
+        elif "t" == location and hasattr(self, 'top') and self.top:
+            return self.top
+        elif "r" == location and hasattr(self, 'right') and self.right:
+            return self.right
+        elif "l" == location and hasattr(self, 'left') and self.left:
+            return self.left
+        
+        # Fallback to exact matches
         if location == "bottom":
             return self.bottom
         elif location == "top":

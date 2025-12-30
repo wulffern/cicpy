@@ -67,6 +67,7 @@ class LayoutCell(Cell):
 
 
     def addInstance(self,cktInst,x:int,y:int):
+        self.log.info(f"addInstance(cktInst={cktInst.name if cktInst else None}, x={x}, y={y})")
 
         if(cktInst is None):
             return
@@ -92,20 +93,17 @@ class LayoutCell(Cell):
         keys = inst.allPortNames
 
         for s in keys:
-            for p in allp:
-                if(p is None): continue
-                if(p.name in self.nodeGraph):
-                    self.nodeGraph[p.name].append(p)
-                else:
-                    g = Graph()
-                    g.name = p.name
-                    g.append(p)
-                    self.nodeGraphList.append(p.name)
-                    self.nodeGraph[p.name] = g
-
-
-        
-        pass
+            if s in allp:
+                for p in allp[s]:
+                    if(p is None): continue
+                    if(p.name in self.nodeGraph):
+                        self.nodeGraph[p.name].append(p)
+                    else:
+                        g = Graph()
+                        g.name = p.name
+                        g.append(p)
+                        self.nodeGraphList.append(p.name)
+                        self.nodeGraph[p.name] = g
 
     def toJson(self):
         o = super().toJson()
@@ -135,7 +133,8 @@ class LayoutCell(Cell):
     def setYoffsetHalf(self, val):
         try:
             self.useHalfHeight = bool(int(val))
-        except Exception:
+        except Exception as e:
+            self.log.debug(f"setYoffsetHalf: Could not parse '{val}' as int, using as bool: {e}")
             self.useHalfHeight = bool(val)
 
     def alternateGroupFlag(self, *_):
@@ -154,13 +153,15 @@ class LayoutCell(Cell):
     def placeHorizontal(self, val):
         try:
             self._placeHorizontal = int(val) > 0
-        except Exception:
+        except Exception as e:
+            self.log.debug(f"placeHorizontal: Could not parse '{val}' as int, using as bool: {e}")
             self._placeHorizontal = bool(val)
 
     def resetOrigin(self, val):
         try:
             reset = int(val) > 0
-        except Exception:
+        except Exception as e:
+            self.log.debug(f"resetOrigin: Could not parse '{val}' as int, using as bool: {e}")
             reset = bool(val)
         if reset:
             self.updateBoundingRect()
@@ -273,14 +274,16 @@ class LayoutCell(Cell):
                 if off != "width":
                     try:
                         inst_x = inst_x + Rules.getInstance().get("ROUTE","horizontalgrid")*float(off)
-                    except Exception:
+                    except Exception as e:
+                        self.log.warning(f"Could not parse xoffset '{off}' for instance {inst.name}: {e}")
                         pass
             if inst.hasProperty("yoffset"):
                 offy = inst.getPropertyString("yoffset")
                 if offy != "height":
                     try:
                         inst_y = inst_y + Rules.getInstance().get("ROUTE","verticalgrid")*float(offy)
-                    except Exception:
+                    except Exception as e:
+                        self.log.warning(f"Could not parse yoffset '{offy}' for instance {inst.name}: {e}")
                         pass
 
             linst = self.addInstance(inst,inst_x,inst_y)
@@ -312,6 +315,7 @@ class LayoutCell(Cell):
         pass
 
     def addPortRectangle(self, layer, x1, y1, width, height, angle, portname):
+        self.log.info(f"addPortRectangle(layer={layer}, x1={x1}, y1={y1}, width={width}, height={height}, angle={angle}, portname={portname})")
         r = Rect(layer,x1,y1,width,height)
         if angle == "R90":
             r.rotate(90)
@@ -325,6 +329,7 @@ class LayoutCell(Cell):
         self.add(p)
 
     def addDirectedRoute(self, layer:str, net:str, route:str, options:str=""):
+        self.log.info(f"addDirectedRoute(layer={layer}, net={net}, route={route}, options={options})")
         # route is of form: startRegex + routeType symbols + stopRegex
         m = re.match(r"^([^-\|<>]*)([-\|<>]+)([^-\|<>]*)$", route)
         if not m:
@@ -340,8 +345,9 @@ class LayoutCell(Cell):
                 from .route import Route
                 r = Route(net, layer, start, stop, options, routeType)
                 self.add(r)
-            except Exception:
+            except Exception as e:
                 # Fallback: connect by a straight rect between bbox centers
+                self.log.error(f"addDirectedRoute: Failed to create route for net '{net}': {e}. Using fallback.")
                 sb = self.calcBoundingRect()
                 rb = self.calcBoundingRect()
                 (sb, rb)  # no-op to appease linters
@@ -349,6 +355,7 @@ class LayoutCell(Cell):
             self.log.error(f"Route did not work [ {layer} {net} {route} {options} ] stop={len(stop)} start={len(start)}")
 
     def addVerticalRect(self, layer:str, path:str, cuts:int=0):
+        self.log.info(f"addVerticalRect(layer={layer}, path={path}, cuts={cuts})")
         rects = self.findAllRectangles(path, layer)
         for r in rects:
             width = r.width()
@@ -356,6 +363,7 @@ class LayoutCell(Cell):
             self.add(rn)
 
     def addHorizontalRect(self, layer:str, path:str, xsize:float=1, ysize:float=1):
+        self.log.info(f"addHorizontalRect(layer={layer}, path={path}, xsize={xsize}, ysize={ysize})")
         xspace = Rules.getInstance().get("ROUTE","horizontalgrid")*xsize
         yspace = Rules.getInstance().get("ROUTE","verticalgrid")*ysize
         rects = self.findAllRectangles(path, layer)
@@ -372,6 +380,7 @@ class LayoutCell(Cell):
             self.add(rn)
 
     def addRouteHorizontalRect(self, layer:str, rectpath:str, x:int, name:str=""):
+        self.log.info(f"addRouteHorizontalRect(layer={layer}, rectpath={rectpath}, x={x}, name={name})")
         rects = self.findAllRectangles(rectpath, layer)
         xgrid = Rules.getInstance().get("ROUTE","horizontalgrid")
         mw = Rules.getInstance().get(layer, "width")
@@ -382,34 +391,67 @@ class LayoutCell(Cell):
             self.add(p)
 
     def addPowerConnection(self, name:str, includeInstances:str, location:str):
-        print(self.nodeGraph)
-        if (name not in self.nodeGraph) or (f"power_{name}" not in self.named_rects):
-            self.log.warning(f"Could not find rail {name} in {self.name}")
+        # Check if node exists in nodeGraph
+        if name not in self.nodeGraph:
             return
+        # Check if power rail exists in named_rects
+        if f"power_{name}" not in self.named_rects:
+            return
+        
         g = self.nodeGraph[name]
         rects = g.getRectangles("", includeInstances, "")
-        rr = self.named_rects[f"power_{name}"]
-        rrect = rr.get(location)
+        routering = self.named_rects[f"power_{name}"]
+        rrect = routering.get(location)
         for r in rects:
-            rr.add(r.getCopy())
+            # Create cut between layers
+            from .cut import Cut
+            ct = Cut.getInstance(r.layer, rrect.layer, 2, 2)
+            
+            # Create a copy of the rectangle
+            rr = r.getCopy()
+            
+            # Adjust position based on location
+            if location == "top":
+                rr.setTop(rrect.y2)
+                if ct:
+                    ct.moveTo(rr.x1, rrect.y1)
+            elif location == "bottom":
+                rr.setBottom(rrect.y1)
+                if ct:
+                    ct.moveTo(rr.x1, rrect.y1)
+            elif location == "left":
+                rr.setLeft(rrect.x1)
+                if ct:
+                    ct.moveTo(rrect.x1, rr.y1)
+            elif location == "right":
+                rr.setRight(rrect.x2)
+                if ct:
+                    ct.moveTo(rrect.x1, rr.y1)
+            
+            # Add rectangle and cut to routering
+            routering.add(rr)
+            if ct:
+                routering.add(ct)
 
     def addRouteConnection(self, path:str, includeInstances:str, layer:str, location:str, options:str, routeTypeOverride:str=""):
+        self.log.info(f"addRouteConnection(path={path}, includeInstances={includeInstances}, layer={layer}, location={location}, options={options}, routeTypeOverride={routeTypeOverride})")
         routeType = "-|--"
         if routeTypeOverride == "":
             if location == "top":
                 routeType = "||"
-                options = (options + ",onTopB,fillvcut").strip(',')
+                options += ",onTopB,fillvcut"
             elif location == "bottom":
                 routeType = "||"
-                options = (options + ",onTopT,fillvcut").strip(',')
+                options += ",onTopT,fillvcut"
             elif location == "right":
                 routeType = "-"
-                options = (options + ",onTopL,fillhcut").strip(',')
+                options += ",onTopL,fillhcut"
             elif location == "left":
                 routeType = "-"
-                options = (options + ",onTopR,fillhcut").strip(',')
+                options += ",onTopR,fillhcut"
         else:
             routeType = routeTypeOverride
+        
         for node in list(self.nodeGraphList):
             if not re.search(path, node):
                 continue
@@ -419,16 +461,18 @@ class LayoutCell(Cell):
             g = self.nodeGraph[node]
             rects = g.getRectangles("", includeInstances, layer)
             rr = self.named_rects[rail_key]
-            routering = rr.get(location)
-            empty = []
-            for r in rects:
-                stop = [r, routering]
-                from .route import Route
-                ro = Route(node, layer, empty, stop, options, routeType)
-                self.routes.append(ro)
-                rr.add(ro)
+            if rr:
+                routering = rr.get(location)
+                empty = []
+                for r in rects:
+                    stop = [r, routering]
+                    from .route import Route
+                    ro = Route(node, layer, empty, stop, options, routeType)
+                    self.routes.append(ro)
+                    rr.add(ro)
 
     def addRectangle(self, layer, x1, y1, width, height, angle=""):
+        self.log.info(f"addRectangle(layer={layer}, x1={x1}, y1={y1}, width={width}, height={height}, angle={angle})")
         r = Rect(layer,x1,y1,width,height)
         if angle == "R90":
             r.rotate(90)
@@ -439,6 +483,7 @@ class LayoutCell(Cell):
         self.add(r)
 
     def addPowerRing(self, layer:str, name:str, location:str="rtbl", widthmult:int=1, spacemult:int=10):
+        self.log.info(f"addPowerRing(layer={layer}, name={name}, location={location}, widthmult={widthmult}, spacemult={spacemult})")
         c = Cut.getInstance("M3","M4",2,2)
         mw = c.height()*widthmult
         xgrid = Rules.getInstance().get("ROUTE","horizontalgrid")*spacemult
@@ -455,6 +500,7 @@ class LayoutCell(Cell):
             self.add(rr)
 
     def addRouteRing(self, layer:str, name:str, location:str="rtbl", widthmult:int=1, spacemult:int=2, useGridForSpace:bool=True):
+        self.log.info(f"addRouteRing(layer={layer}, name={name}, location={location}, widthmult={widthmult}, spacemult={spacemult}, useGridForSpace={useGridForSpace})")
         mw = Rules.getInstance().get(layer, "width")*widthmult
         if useGridForSpace:
             xgrid = Rules.getInstance().get("ROUTE","horizontalgrid")*spacemult + mw
@@ -493,13 +539,74 @@ class LayoutCell(Cell):
             self.noPowerRoute = o["noPowerRoute"]
 
     def route(self):
-
-        pass
-
+        """Route all routes in this layout cell"""
+        for r in self.routes:
+            if r.isRoute():
+                r.route()
 
     def paint(self):
-
+        """Paint the cell - route power if needed"""
+        if not self.noPowerRoute:
+            self.routePower()
+        
+        # Call parent paint (currently empty but following C++ structure)
+        super().paint()
+    
+    def routePower(self):
+        """Route power rails"""
+        self.addPowerRoute("AVDD", "NCH|DMY")
+        self.addPowerRoute("AVSS", "PCH|DMY")
         pass
+    
+    def addPowerRoute(self, net: str, excludeInstances: str):
+        """Add power route for a net, excluding certain instances"""
+        # Find rectangles for this net, filtering out B/G/BULKP/BULKN ports
+        foundrects = self.findRectanglesByNode(net, "^(B|G|BULKP|BULKN)$", "")
+        
+        rects = []
+        for r in foundrects:
+            parent = r.parent
+            if parent and parent.isCell():
+                skip = False
+                
+                if excludeInstances != "" and parent.isInstance():
+                    lname = parent.name
+                    instName = getattr(parent, 'instanceName', '')
+                    if re.search(excludeInstances, lname):
+                        skip = True
+                    if re.search(excludeInstances, instName):
+                        skip = True
+                
+                if not skip:
+                    rects.append(r)
+            else:
+                rects.append(r)
+        
+        # TODO: If there are multiple rectangles horizontally this
+        # method makes a sheet, should really make it better
+        if len(rects) > 0:
+            from .cut import Cut
+            cuts = Cut.getCutsForRects("M4", rects, 2, 1)
+            rp = None
+            
+            if len(cuts) > 0:
+                r_bound = Cell.calcBoundingRectFromList(cuts, False)
+                r_bound.setTop(self.top())
+                r_bound.setBottom(self.bottom())
+                for cut in cuts:
+                    self.add(cut)
+                rp = Rect("M4", r_bound.x1, r_bound.y1, r_bound.width(), r_bound.height())
+            else:
+                r_bound = Cell.calcBoundingRectFromList(rects, False)
+                r_bound.setTop(self.top())
+                r_bound.setBottom(self.bottom())
+                rp = Rect("M4", r_bound.x1, r_bound.y1, r_bound.width(), r_bound.height())
+            
+            if rp:
+                self.add(rp)
+                if net in self.ports:
+                    p = self.ports[net]
+                    p.setRect(rp)
 
     def findRectanglesByNode(self,node:str,filterChild:str=None,matchInstance:str=None):
         rects = list()
@@ -517,6 +624,7 @@ class LayoutCell(Cell):
 
 
     def addAllPorts(self):
+        self.log.info(f"addAllPorts()")
         if(self.subckt is None): return
         nodes = self.subckt.nodes
 
@@ -567,29 +675,39 @@ class LayoutCell(Cell):
             if(c is not None):
                 c.design = self.design
                 c.fromJson(child)
+                # Add instances to node graph after loading from JSON
+                if(cl == "Instance"):
+                    self.addToNodeGraph(c)
                 self.add(c)
 
     def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances):
+        self.log.info(f"addConnectivityRoute(layer={layer}, regex={regex}, routeType={routeType}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances})")
         for node in list(self.nodeGraphList):
             if not re.search(regex, node):
                 continue
+            log = logging.getLogger("LayoutCell")
+            log.info(f"addConnectivityRoute: node={node}")
             g = self.nodeGraph.get(node)
             if g is None:
                 continue
             rects = g.getRectangles(excludeInstances, includeInstances, layer)
             if len(rects) == 0:
                 self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
-                continue
+                continue    
             try:
                 from .route import Route
                 empty = list()
+                #log.info(f"addConnectivityRoute: empty={empty}, rects={rects}")
                 r = Route(node, layer, empty, rects, options, routeType)
+                log.info(f"addConnectivityRoute: r={r}")
                 self.add(r)
-            except Exception:
+            except Exception as e:
+                log.error(f"addConnectivityRoute: Exception={e}")
                 for rr in rects:
                     self.add(rr.getCopy(layer))
 
     def addPortOnEdge(self,layer,node,location,routeType, options):
+        self.log.info(f"addPortOnEdge(layer={layer}, node={node}, location={location}, routeType={routeType}, options={options})")
         if node not in self.ports:
             self.log.error(f"{node} not a port")
             return
@@ -616,7 +734,8 @@ class LayoutCell(Cell):
             self.add(rp)
             self.add(route)
             p.setRect(rp)
-        except Exception:
+        except Exception as e:
+            self.log.error(f"addPortOnEdge: Failed to create route for node '{node}': {e}. Adding rect directly.")
             self.add(rp)
             p.setRect(rp)
 
@@ -652,8 +771,6 @@ class LayoutCell(Cell):
         self.log.info(f"Assembling layout....")
 
         self._runMethod(pycell,data,"beforePlace")
-
-
         #- Place cell
         self.log.info(f"place()")
         self.place()

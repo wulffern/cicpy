@@ -14,6 +14,16 @@ class Material(Enum):
 
 
 class Layer:
+    # Static constants matching C++ enum naming (lowercase)
+    diffusion = Material.DIFFUSION
+    metal = Material.METAL
+    poly = Material.POLY
+    cut = Material.CUT
+    metalres = Material.METALRES
+    marker = Material.MARKER
+    implant = Material.IMPLANT
+    other = Material.OTHER
+    
     def __init__(self):
         self.name = "M1"
         self.alias = "metal1"

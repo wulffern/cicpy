@@ -4,14 +4,16 @@ from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo
 from .text import Text
 from .rules import Rules
 import re
+import logging
 
 class Route(Cell):
 
     def __init__(self, net, layer, start, stop, options, routeType):
         super().__init__(net)
+        self.log = logging.getLogger("Route")
         self.routeLayer = layer
         self.routeType = "ROUTE_UNKNOWN"
-        self.route = routeType
+        self.route_ = routeType
         self.options = options or ""
         self.net = net
         self.track = 0
@@ -171,30 +173,69 @@ class Route(Cell):
         self.updateBoundingRect()
 
     def route(self):
-        start_org = list(self.startRects)
-        stop_org = list(self.stopRects)
-        self.startRects = [r.getCopy() for r in start_org]
-        self.stopRects = [r.getCopy() for r in stop_org]
+        print(self)
+        self.log.info(f"route() called: net={self.net}, layer={self.routeLayer}, routeType={self.routeType}, route={self.route_}, options={self.options}")
+        
+        # Take a copy of all route rects to ensure we don't change the originals
+        start_rects_org = self.startRects
+        stop_rects_org = self.stopRects
+        self.startRects = []
+        self.stopRects = []
+        
+        for r in start_rects_org:
+            self.startRects.append(r.getCopy())
+        for r in stop_rects_org:
+            self.stopRects.append(r.getCopy())
+
+        self.log.info(f"  startRects count: {len(self.startRects)}, stopRects count: {len(self.stopRects)}")
+
+        # TODO: To make it horribly confusing, it matters for the routing which
+        # sequence the cuts are added. Should they be added first, or after.
+        #
+        # For LEFT/RIGHT routes, the bounding box for routing will include the
+        # cuts, which may lead to an extra nub on the routes
+        #
+        # If the cuts are added after, then the routing might not reach the cuts.
 
         self.addStartCuts()
         self.addEndCuts()
 
-        if self.routeType == "LEFT" or self.routeType == "RIGHT":
+        # Route based on routeType
+        if self.routeType == "LEFT":
+            self.log.info(f"  Routing with: routeOne()")
+            self.routeOne()
+        elif self.routeType == "RIGHT":
+            self.log.info(f"  Routing with: routeOne()")
             self.routeOne()
         elif self.routeType == "STRAIGHT":
+            self.log.info(f"  Routing with: routeStraight()")
             self.routeStraight()
         elif self.routeType == "VERTICAL":
+            self.log.info(f"  Routing with: routeVertical()")
             self.routeVertical()
-        elif self.routeType in ("U_RIGHT", "U_LEFT"):
+        elif self.routeType == "U_RIGHT":
+            self.log.info(f"  Routing with: routeU()")
             self.routeU()
-        elif self.routeType in ("U_TOP", "U_BOTTOM"):
+        elif self.routeType == "U_LEFT":
+            self.log.info(f"  Routing with: routeU()")
+            self.routeU()
+        elif self.routeType == "U_TOP":
+            self.log.info(f"  Routing with: routeUHorizontal()")
+            self.routeUHorizontal()
+        elif self.routeType == "U_BOTTOM":
+            self.log.info(f"  Routing with: routeUHorizontal()")
             self.routeUHorizontal()
         elif self.routeType == "LEFT_DOWN_LEFT_UP":
+            self.log.info(f"  Routing with: routeLeftDownLeftUp()")
             self.routeLeftDownLeftUp()
         elif self.routeType == "LEFT_UP_LEFT_DOWN":
+            self.log.info(f"  Routing with: routeLeftUpLeftDown()")
             self.routeLeftUpLeftDown()
         elif self.routeType == "STRAP":
+            self.log.info(f"  Routing with: routeStrap()")
             self.routeStrap()
+        else:
+            self.log.error(f"Error(route.py): Unknown route routeType={self.route_} net={self.net} layer={self.routeLayer} options={self.options}")
 
         if len(self.startRects) > 0:
             r = self.startRects[0]
@@ -203,6 +244,8 @@ class Route(Cell):
             self.add(t)
 
     def routeOne(self):
+        self.log.info(f"routeOne: net={self.net}, layer={self.routeLayer}, route={self.route_}, options={self.options}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         space = rules.get(self.routeLayer, "space")
@@ -240,6 +283,8 @@ class Route(Cell):
             self.add(r)
 
     def routeLeftDownLeftUp(self):
+        self.log.info(f"routeLeftDownLeftUp: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         space = rules.get(self.routeLayer, "space")
@@ -262,6 +307,8 @@ class Route(Cell):
         self.add(r)
 
     def routeLeftUpLeftDown(self):
+        self.log.info(f"routeLeftUpLeftDown: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         space = rules.get(self.routeLayer, "space")
@@ -287,6 +334,8 @@ class Route(Cell):
         self.updateBoundingRect()
 
     def routeStrap(self):
+        self.log.info(f"routeStrap: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}, options={self.options}")
+        
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         vertical = re.search(r"vertical(,|\\s+|$)", self.options) is not None
@@ -314,14 +363,21 @@ class Route(Cell):
         if re.search(r"novert", self.options):
             return
         if len(self.routes) == 0:
+            # Log warning if routes is empty
+            self.log.warning(f"addVertical: No routes found for net {self.net}, cannot create vertical connection")
             return
-        y1_m = min(r.y1 for r in self.routes)
-        y2_m = max(r.y2 for r in self.routes)
+        # Don't include cuts into the equation for start and stop rects
+        from .cell import Cell
+        route_bound = Cell.calcBoundingRectFromList(self.routes)
+        y1_m = route_bound.y1
+        y2_m = route_bound.y2
         r = VerticalRectangleFromTo(self.routeLayer, x, y1_m, y2_m, width)
         if r:
             self.add(r)
 
     def routeVertical(self):
+        self.log.info(f"routeVertical: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
         if not (len(self.startRects) > 0 and len(self.stopRects) > 0):
             return
         rules = Rules.getInstance()
@@ -330,9 +386,12 @@ class Route(Cell):
         height = max(r.y2 for r in self.stopRects) - yc
         xc = int(min(r.centerX() for r in self.startRects)) - int(width/2)
         r = Rect(self.routeLayer, xc, yc, width, height)
+        
         self.add(r)
 
     def routeStraight(self):
+        self.log.info(f"routeStraight: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
         if len(self.startRects) == len(self.stopRects):
             count = len(self.startRects)
             for x in range(count):
@@ -356,7 +415,8 @@ class Route(Cell):
         minwidth = width
         try:
             minwidth = rules.get(self.routeLayer, "minwidth")
-        except Exception:
+        except Exception as e:
+            self.log.debug(f"No minwidth rule for layer {self.routeLayer}, using width: {e}")
             pass
         for r in rects:
             if offset in ("HIGH", "LOW"):

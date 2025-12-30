@@ -45,6 +45,24 @@ class Instance(Cell):
         self.angle = ""
         self.xcell = 0
         self.ycell = 0
+        self._cell_obj = None  # Direct reference to Cell object
+    
+    def setCell(self, cell):
+        """Set the cell - accepts either a Cell object or a string name"""
+        if isinstance(cell, str):
+            # String name - look up in design
+            self.cell = cell
+            self._cell_obj = self.getCell(cell)
+            if self._cell_obj:
+                self.name = self._cell_obj.name
+                self.updateBoundingRect()
+        else:
+            # Cell object - store directly
+            self._cell_obj = cell
+            if cell:
+                self.cell = cell.name
+                self.name = cell.name
+                self.updateBoundingRect()
 
     def setSubcktInstance(self,inst:spi.SubcktInstance):
 
@@ -109,8 +127,12 @@ class Instance(Cell):
         return o
 
     def isLayoutCell(self):
+        # Use direct cell reference if available (e.g., for InstanceCut)
+        if hasattr(self, '_cell_obj') and self._cell_obj is not None:
+            return self._cell_obj.isLayoutCell()
+        
+        # Otherwise look up by name
         c = self.getCell(self.cell)
-
         if(c is not None):
             return c.isLayoutCell()
         return False
@@ -136,12 +158,20 @@ class Instance(Cell):
         return p
 
     def calcBoundingRect(self):
-
-        if(self.layoutcell is None):
+        # Use direct cell reference if available (e.g., for InstanceCut)
+        cell_to_use = None
+        if hasattr(self, '_cell_obj') and self._cell_obj is not None:
+            cell_to_use = self._cell_obj
+        elif self.layoutcell is not None:
+            cell_to_use = self.layoutcell
+        
+        if cell_to_use is None:
+            # No cell set, return self as bounding rect
             return self
 
-        r = self.layoutcell.getCopy()
-        r.moveTo(self.x1,self.y1)
+        r = cell_to_use.calcBoundingRect()
+        # TODO: Handle rotation if self.angle is set
+        r.moveTo(self.x1, self.y1)
         return r
 
     def __str__(self):

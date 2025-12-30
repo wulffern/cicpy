@@ -55,8 +55,7 @@ class DesignPrinter():
         for child in children:
             if(not child): 
                 continue
-
-            if(child.isInstance()):
+            if(child.isInstance() or child.isCut()):
                 self.printReference(child)
             elif(child.isPort()):
                 if(child.spicePort):

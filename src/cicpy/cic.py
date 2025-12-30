@@ -318,6 +318,9 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
 
     lcell.layout(pycell,pycellData)
 
+    #- Add cuts after the layout has been routed
+    design.addCuts()
+
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.print(design)
     #for m in design.maglib.values():

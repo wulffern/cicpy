@@ -106,10 +106,19 @@ class Rules:
                 if(field in lay):
                     return lay[field]
                 else:
+                    import logging
+                    log = logging.getLogger("Rules")
+                    log.error(f"RuleError: {category}->{key} does not contain field '{field}'")
                     raise Exception(f"RuleError: {category}->{key} does not contain {field}")
             else:
+                import logging
+                log = logging.getLogger("Rules")
+                log.error(f"RuleError: {category} does not contain key '{key}'")
                 raise Exception(f"RuleError: {category} does not contain {key}")
         else:
+            import logging
+            log = logging.getLogger("Rules")
+            log.error(f"RuleError: Rulefile does not have category '{category}'")
             raise Exception(f"RuleError: Rulefile does not have category {category}")
 
     def getValue(self,category, key ):
@@ -120,8 +129,14 @@ class Rules:
                 val = obj[key]
                 return val
             else:
+                import logging
+                log = logging.getLogger("Rules")
+                log.error(f"RuleError: {category} does not contain key '{key}'")
                 raise Exception(f"RuleError: {category} does not contain {key}")
         else:
+            import logging
+            log = logging.getLogger("Rules")
+            log.error(f"RuleError: Rulefile does not have category '{category}'")
             raise Exception(f"RuleError: Rulefile does not have category {category}")
 
     def get(self,layer,key):
@@ -170,6 +185,74 @@ class Rules:
             return self.layers[layer]
         else:
             return self.layers["PR"]
+    
+    def getNextLayer(self, layer):
+        """Get the next layer in the stack"""
+        if layer in self.layers:
+            return getattr(self.layers[layer], 'next', "")
+        else:
+            import logging
+            logging.getLogger("Rules").warning(f"Error: Could not find next layer for {layer}")
+            return ""
+    
+    def getPreviousLayer(self, layer):
+        """Get the previous layer in the stack"""
+        if layer in self.layers:
+            return getattr(self.layers[layer], 'previous', "")
+        else:
+            import logging
+            logging.getLogger("Rules").warning(f"Error: Could not find previous layer for {layer}")
+            return ""
+    
+    def isLayerBeforeLayer(self, layer1, layer2):
+        """Check if layer1 comes before layer2 in the stack"""
+        if layer1 not in self.layers or layer2 not in self.layers:
+            return False
+        # Walk through the stack from layer1
+        current = layer1
+        counter = 100
+        while current and counter > 0:
+            if current == layer2:
+                return True
+            current = self.getNextLayer(current)
+            counter -= 1
+        return False
+    
+    def getConnectStack(self, layer1, layer2):
+        """Get the list of layers needed to connect layer1 to layer2"""
+        stack = []
+        start = None
+        stop = None
+        
+        if self.isLayerBeforeLayer(layer1, layer2):
+            start = layer1
+            stop = layer2
+        elif self.isLayerBeforeLayer(layer2, layer1):
+            start = layer2
+            stop = layer1
+        elif layer1 == "OD":
+            start = layer1
+            stop = layer2
+        elif layer2 == "OD":
+            start = layer2
+            stop = layer1
+        else:
+            import logging
+            logging.getLogger("Rules").debug(f"No connect rules that tie {layer1} to {layer2}")
+            return stack
+        
+        current = start
+        counter = 100
+        while current != stop and counter > 0:
+            stack.append(self.getLayer(current))
+            current = self.getNextLayer(current)
+            counter -= 1
+            if counter <= 0:
+                break
+        
+        stack.append(self.getLayer(stop))
+        return stack
+    
     def aliasToLayer(self,alias):
         if(alias in self.alias):
             return self.alias[alias]

@@ -67,10 +67,10 @@ class LayoutCell(Cell):
 
 
     def addInstance(self,cktInst,x:int,y:int):
-        self.log.info(f"addInstance(cktInst={cktInst.name if cktInst else None}, x={x}, y={y})")
+        self.log.info(f"addInstance(cktInst={cktInst.name if cktInst else None}, cellName={cktInst.subcktName} x={x}, y={y})")
 
         if(cktInst is None):
-            return
+            return None
 
         i = Instance()
         layoutCell = self.parent.getLayoutCell(cktInst.subcktName)

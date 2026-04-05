@@ -3,6 +3,7 @@
 import re
 
 from .cell import Cell
+from .route import Route
 
 
 class _PhysicalInst:
@@ -17,11 +18,12 @@ class StackGroup(Cell):
         self.layout = layout
         self.instances = []
         self.tap_instances = []
+        self.dummy_routes = []
 
     def _members(self):
         members = []
         seen = set()
-        for obj in self.instances + self.tap_instances:
+        for obj in self.instances + self.tap_instances + self.dummy_routes:
             if obj is None:
                 continue
             oid = id(obj)
@@ -154,6 +156,73 @@ class StackGroup(Cell):
     def _tap_name(self, cell_name, suffix):
         return re.sub(r"C\d+F\d+$", suffix, cell_name)
 
+    def _overlap_amount(self, a, b, axis="y"):
+        if a is None or b is None:
+            return 0
+        if axis == "x":
+            return max(0, min(a.x2, b.x2) - max(a.x1, b.x1))
+        return max(0, min(a.y2, b.y2) - max(a.y1, b.y1))
+
+    def _choose_access_rect(self, access, reference=None, axis="y", prefer_lower=True):
+        if access is None or not access.accessRects:
+            return None
+        if reference is None:
+            rects = sorted(access.accessRects, key=lambda r: (r.y1, r.x1))
+            return rects[0] if prefer_lower else rects[-1]
+
+        def score(rect):
+            overlap = self._overlap_amount(rect, reference, axis)
+            distance = abs(rect.centerY() - reference.centerY()) + abs(rect.centerX() - reference.centerX())
+            tie = rect.y1 if prefer_lower else -rect.y2
+            return (-overlap, distance, tie, rect.x1)
+
+        return sorted(access.accessRects, key=score)[0]
+
+    def _add_dummy_route(self, net_name, route_layer, start_rects, stop_rects, route_type):
+        if not start_rects or not stop_rects:
+            return None
+        route = Route(net_name, route_layer, start_rects, stop_rects, "", route_type)
+        if hasattr(self.layout, "_annotateRoute"):
+            self.layout._annotateRoute(route, "routeDummyTerminals", {
+                "stack": self.name,
+                "net": net_name,
+                "layer": route_layer,
+                "routeType": route_type,
+                "internal": True,
+            })
+        self.layout.add(route)
+        self.dummy_routes.append(route)
+        return route
+
+    def routeDummyTerminals(self, inst):
+        if inst is None:
+            return self
+
+        d_access = inst.getTerminalAccess("D", target_layer="M1")
+        g_access = inst.getTerminalAccess("G", target_layer="M1")
+        s_access = inst.getTerminalAccess("S", target_layer="M1")
+        b_access = inst.getTerminalAccess("B", target_layer="M1")
+        if d_access is None or g_access is None or s_access is None or b_access is None:
+            return self
+        if d_access.isEmpty() or g_access.isEmpty() or s_access.isEmpty() or b_access.isEmpty():
+            return self
+
+        d_rect = self._choose_access_rect(d_access)
+        g_rect = self._choose_access_rect(g_access, reference=d_rect)
+        s_rect = self._choose_access_rect(s_access, reference=d_rect, prefer_lower=True)
+        b_mid = self._choose_access_rect(b_access, reference=d_rect)
+        b_side = self._choose_access_rect(b_access, reference=s_rect)
+
+        if d_rect is None or g_rect is None or s_rect is None or b_mid is None or b_side is None:
+            return self
+
+        base = inst.instanceName or inst.name or self.name
+        self._add_dummy_route(f"{base}_dummy_mid", "M1", [b_mid], [d_rect], "-")
+        self._add_dummy_route(f"{base}_dummy_side", "M1", [b_side], [s_rect], "-")
+        self._add_dummy_route(f"{base}_dummy_vert", "M1", [d_rect], [s_rect], "||")
+        self.updateBoundingRect()
+        return self
+
     def addTaps(self, prefix=None):
         if not self.instances:
             return self
@@ -175,7 +244,25 @@ class StackGroup(Cell):
         self.updateBoundingRect()
         return self
 
-    def fillDummyTransistors(self, target_height):
+    def routeDummyDevices(self):
+        for inst in list(self.instances):
+            inst_name = getattr(inst, "instanceName", "") or ""
+            if not inst_name.startswith("xfill_"):
+                continue
+            self.routeDummyTerminals(inst)
+        self.updateBoundingRect()
+        return self
+
+    def _get_or_create_dummy(self, base, dname, x, y):
+        dummy = self.layout.getInstanceFromInstanceName(dname)
+        if dummy is None:
+            dummy = self.layout.addPhysicalInstance(base.cell, dname, int(x), int(y))
+        else:
+            dummy.moveTo(int(x), int(y))
+            dummy.updateBoundingRect()
+        return dummy
+
+    def fillDummyTransistors(self, target_height, direction="top"):
         if not self.instances:
             return self
         self.sort()
@@ -184,16 +271,28 @@ class StackGroup(Cell):
             return self
         base = self.instances[0]
         dummy_index = 0
-        ypos = int(self.top())
-        while current_height < target_height:
-            dname = f"xfill_{self.name}_{dummy_index}"
-            dummy = self.layout.addPhysicalInstance(base.cell, dname, int(base.x1), ypos)
-            if dummy is None:
-                break
-            self.addInstance(dummy)
-            ypos = int(dummy.y2)
-            current_height = self.height()
-            dummy_index += 1
+        if direction == "bottom":
+            ypos = int(self.bottom())
+            while current_height < target_height:
+                dname = f"xfill_{self.name}_{dummy_index}"
+                dummy = self._get_or_create_dummy(base, dname, int(base.x1), int(ypos - base.height()))
+                if dummy is None:
+                    break
+                self.addInstance(dummy)
+                ypos = int(dummy.y1)
+                current_height = self.height()
+                dummy_index += 1
+        else:
+            ypos = int(self.top())
+            while current_height < target_height:
+                dname = f"xfill_{self.name}_{dummy_index}"
+                dummy = self._get_or_create_dummy(base, dname, int(base.x1), ypos)
+                if dummy is None:
+                    break
+                self.addInstance(dummy)
+                ypos = int(dummy.y2)
+                current_height = self.height()
+                dummy_index += 1
         self.sort()
         self.updateBoundingRect()
         return self
@@ -284,11 +383,17 @@ class CellGroup(Cell):
     def moveBelow(self, other, ygap=0):
         return self.abutBottom(other, ygap)
 
-    def fillDummyTransistors(self):
+    def fillDummyTransistors(self, direction="top"):
         if not self.stacks:
             return self
         target_height = max(stack.height() for stack in self.stacks)
         for stack in self.stacks:
-            stack.fillDummyTransistors(target_height)
+            stack.fillDummyTransistors(target_height, direction=direction)
+        self.updateBoundingRect()
+        return self
+
+    def routeDummyDevices(self):
+        for stack in self.stacks:
+            stack.routeDummyDevices()
         self.updateBoundingRect()
         return self

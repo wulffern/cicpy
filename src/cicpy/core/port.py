@@ -61,8 +61,9 @@ class Port(Rect):
 
         super().fromJson(o)
         self.name = o["name"]
-        self.spicePort = o["spicePort"]
-        self.pinLayer = o["pinLayer"]
+        self.spicePort = o.get("spicePort", True)
+        self.pinLayer = o.get("pinLayer", self.layer)
+        self.routeLayer = self.pinLayer
     
     def toJson(self):
         o = super().toJson()

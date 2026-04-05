@@ -147,9 +147,112 @@ class Route(Cell):
             self.routeType = "STRAP"
 
     def add(self, child):
+        if child is not None and hasattr(child, "isRect") and child.isRect():
+            child.route_owner = self
+            child.route_owner_info = {
+                "name": getattr(self, "name", ""),
+                "net": getattr(self, "net", ""),
+                "layer": getattr(self, "routeLayer", ""),
+                "route": getattr(self, "route_", ""),
+                "options": getattr(self, "options", ""),
+                "debug_api": getattr(self, "debug_api", ""),
+                "debug_callsite": getattr(self, "debug_callsite", ""),
+                "debug_command": getattr(self, "debug_command", ""),
+            }
         super().add(child)
         if child and (not hasattr(child, 'isCut') or not child.isCut()):
             self.routes.append(child)
+
+    def _candidateVerticalRect(self, x):
+        if len(self.startRects) == 0 and len(self.stopRects) == 0:
+            return None
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        y1 = min([r.y1 for r in self.startRects + self.stopRects])
+        y2 = max([r.y2 for r in self.startRects + self.stopRects])
+        return VerticalRectangleFromTo(self.routeLayer, x, y1, y2, width)
+
+    def _shiftRect(self, rect, dx, dy):
+        rr = rect.getCopy()
+        rr.translate(dx, dy)
+        return rr
+
+    def _segmentsForCandidate(self, x):
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        minwidth = width
+        try:
+            minwidth = rules.get(self.routeLayer, "minwidth")
+        except Exception:
+            pass
+
+        segments = []
+        vrect = self._candidateVerticalRect(x)
+        if vrect:
+            segments.append(vrect)
+
+        def add_hsegments(rects, offset):
+            for r in rects:
+                shifted = self._shiftRect(r, 0, 0)
+                if offset in ("HIGH", "LOW"):
+                    x1 = shifted.centerX()
+                    if x1 < x:
+                        rect1 = HorizontalRectangleFromTo(self.routeLayer, shifted.centerX(), shifted.x2, shifted.y1, width)
+                        rect2 = HorizontalRectangleFromTo(self.routeLayer, shifted.x2 - minwidth, x, shifted.y1, width)
+                        if rect1:
+                            segments.append(rect1)
+                        if rect2:
+                            if offset == "HIGH":
+                                rect2.translate(0, width)
+                            elif offset == "LOW":
+                                rect2.translate(0, -width)
+                            segments.append(rect2)
+                    else:
+                        rect1 = HorizontalRectangleFromTo(self.routeLayer, shifted.x1, shifted.centerX(), shifted.y1, width)
+                        rect2 = HorizontalRectangleFromTo(self.routeLayer, x, shifted.x1 + minwidth, shifted.y1, width)
+                        if rect1:
+                            segments.append(rect1)
+                        if rect2:
+                            if offset == "HIGH":
+                                rect2.translate(0, width)
+                            elif offset == "LOW":
+                                rect2.translate(0, -width)
+                            segments.append(rect2)
+                else:
+                    hrect = HorizontalRectangleFromTo(self.routeLayer, shifted.centerX(), x, shifted.centerY() - width/2, width)
+                    if hrect:
+                        segments.append(hrect)
+
+        add_hsegments(self.startRects, self.startOffset)
+        add_hsegments(self.stopRects, self.stopOffset)
+        return segments
+
+    def _isCandidateBlocked(self, x):
+        parent = getattr(self, "parent", None)
+        if parent is None or not hasattr(parent, "getOccupiedRectangles"):
+            return False
+
+        rules = Rules.getInstance()
+        space = rules.get(self.routeLayer, "space")
+        blocked = parent.getOccupiedRectangles(self.routeLayer, ignoreNet=self.net)
+        for segment in self._segmentsForCandidate(x):
+            test_rect = segment.getCopy()
+            test_rect.adjust(-space, -space, space, space)
+            for occ in blocked:
+                if test_rect.overlaps(occ):
+                    return True
+        return False
+
+    def _findFreeTrack(self, x, direction):
+        rules = Rules.getInstance()
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+        candidate = x
+        max_steps = 200
+        for _ in range(max_steps):
+            if not self._isCandidateBlocked(candidate):
+                return candidate
+            candidate += direction * hgrid
+        return x
 
     def addMany(self, children):
         for r in children:
@@ -259,10 +362,12 @@ class Route(Cell):
             x = x_left - space - width
             if self.hasTrack:
                 x = x - hgrid*self.track - space
+            x = self._findFreeTrack(x, -1)
         elif self.routeType == "LEFT":
             x = x_right + space
             if self.hasTrack:
                 x = x + hgrid*self.track + space
+            x = self._findFreeTrack(x, +1)
         if self.startTrim == "TRIM_START_LEFT":
             for rect in self.startRects:
                 rect.setLeft(rect.x2 - 2*width)

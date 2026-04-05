@@ -257,14 +257,15 @@ def svg(ctx,cicfile,techfile,library,scale,x,y):
 @click.option("--xspace",default="0",help="Group X space")
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
+@click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity):
     """Netlist a xschem to spice, and load file to Magic"""
 
     os.system(f"make xsch LIB={lib} CELL={cell}")
 
     spi = "xsch/" + cell + ".spice"
 
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity)
 
 
 
@@ -278,13 +279,14 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
 @click.option("--xspace",default="0",help="Group X space")
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
+@click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
+def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity):
     """Translate a SPICE file to Magic"""
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity)
 
 
 
-def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
+def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -324,6 +326,9 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
             pycellData = pycell.data
 
     lcell.layout(pycell,pycellData)
+    _report_route_shorts(lcell)
+    if check_connectivity:
+        _report_connectivity(lcell)
 
     #- Add cuts after the layout has been routed
     design.addCuts()
@@ -336,6 +341,80 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     with open(libdir + lib + os.path.sep + lcell.name + ".cic","w") as fo:
         fo.write(json.dumps(design.toJson(),indent=4))
         #fo.write(json.dumps(design.maglib["JNWTR_RPPO2"]._lay.toJson(),indent=4))
+
+
+def _format_route_desc(short):
+    routes = short.get("routes", [])
+    if not routes:
+        return "none"
+
+    external = [route for route in routes if not route.get("debug_internal", False)]
+    if external:
+        routes = external
+
+    primary = routes[0]
+    desc = (
+        f"{primary['name']}[{primary['layer']} {primary['route']} {primary['options']}]"
+        + (f" cmd={primary['debug_command']}" if primary.get("debug_command") else "")
+        + (f" at {primary['debug_callsite']}" if primary.get("debug_callsite") else "")
+    )
+    extra = len(routes) - 1
+    if extra > 0:
+        desc += f" (+{extra} more routes)"
+    return desc
+
+
+def _report_route_shorts(lcell):
+    try:
+        result = lcell.checkRouteShorts()
+    except Exception as exc:
+        log.warning(f"Route short report failed for {lcell.name}: {exc}")
+        return
+
+    shorts = result.get("shorts", [])
+    log.info(
+        f"Route short report for {lcell.name}: "
+        f"shorts={len(shorts)} components={result.get('component_count', 0)} "
+        f"shapes={result.get('shape_count', 0)}"
+    )
+
+    for short in shorts:
+        bounds = short["bounds"]
+        log.warning(
+            f"ROUTE SHORT component={short['component']} nets={','.join(short['nets'])} "
+            f"bounds=({bounds.x1},{bounds.y1})-({bounds.x2},{bounds.y2}) rects={short['rect_count']} "
+            f"routes={_format_route_desc(short)}"
+        )
+
+
+def _report_connectivity(lcell):
+    try:
+        result = lcell.checkConnectivity()
+    except Exception as exc:
+        log.warning(f"Connectivity report failed for {lcell.name}: {exc}")
+        return
+
+    shorts = result.get("shorts", [])
+    opens = result.get("opens", [])
+    log.info(
+        f"Connectivity report for {lcell.name}: "
+        f"shorts={len(shorts)} opens={len(opens)} "
+        f"components={result.get('component_count', 0)} shapes={result.get('shape_count', 0)}"
+    )
+
+    for short in shorts:
+        bounds = short["bounds"]
+        log.warning(
+            f"SHORT component={short['component']} nets={','.join(short['nets'])} "
+            f"bounds=({bounds.x1},{bounds.y1})-({bounds.x2},{bounds.y2}) rects={short['rect_count']} "
+            f"routes={_format_route_desc(short)}"
+        )
+
+    for open_net in opens:
+        if open_net["type"] == "split":
+            log.warning(f"OPEN net={open_net['net']} split_components={open_net['components']}")
+        else:
+            log.warning(f"OPEN net={open_net['net']} unmatched_anchors={open_net['anchors']}")
 
 
 
@@ -361,4 +440,3 @@ def filter(ctx,cicfile,cell):
 
 if __name__ == '__main__':
     cli(obj={})
-

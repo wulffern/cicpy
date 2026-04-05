@@ -258,6 +258,15 @@ class Rect:
         r.setNet(self.net)
         return r
 
+    def overlaps(self, other):
+        if other is None:
+            return False
+        if self.x2 <= other.x1 or other.x2 <= self.x1:
+            return False
+        if self.y2 <= other.y1 or other.y2 <= self.y1:
+            return False
+        return True
+
     def CopyToLayer(self,layer):
         r = self.getCopy()
         r.layer = layer

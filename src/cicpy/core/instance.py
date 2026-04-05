@@ -173,6 +173,24 @@ class Instance(Cell):
                     rects.append(r)
         return rects
 
+    def getOccupiedRectangles(self, layer: str):
+        rects = []
+        if self.layoutcell is None:
+            return rects
+
+        for child in self.layoutcell.children:
+            if child is None:
+                continue
+            if not child.isRect():
+                continue
+            if child.layer != layer:
+                continue
+            rr = child.getCopy()
+            rr.translate(self.x1, self.y1)
+            rr.parent = self
+            rects.append(rr)
+        return rects
+
     def _normalizeLayerName(self, layer_name):
         rules = Rules.getInstance()
         if rules is None or layer_name is None:

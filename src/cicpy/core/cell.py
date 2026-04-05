@@ -305,7 +305,7 @@ class Cell(Rect):
 
 
         #- Handle subckt
-        if("ckt" in o):
+        if("ckt" in o and isinstance(o["ckt"], dict) and len(o["ckt"]) > 0 and "name" in o["ckt"] and "nodes" in o["ckt"]):
             self.ckt = spi.Subckt()
             self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])

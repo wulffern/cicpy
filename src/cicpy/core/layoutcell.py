@@ -39,6 +39,8 @@ from .cut import Cut
 import cicspi as spi
 import re
 import logging
+import inspect
+from collections import defaultdict
 
 
 class LayoutCell(Cell):
@@ -142,6 +144,41 @@ class LayoutCell(Cell):
                     data.append(c)
         return data
 
+    def getOccupiedRectangles(self, layer: str, excludeInstances: str = "", ignoreNet: str = ""):
+        rects = []
+        for child in self.children:
+            if child is None:
+                continue
+
+            if child.isInstance():
+                instanceName = getattr(child, "instanceName", "")
+                if excludeInstances != "" and (re.search(excludeInstances, instanceName) or re.search(excludeInstances, getattr(child, "name", ""))):
+                    continue
+                rects.extend(child.getOccupiedRectangles(layer))
+                continue
+
+            if child.isRect():
+                if child.layer != layer:
+                    continue
+                if ignoreNet != "" and getattr(child, "net", "") == ignoreNet:
+                    continue
+                rects.append(child.getCopy())
+                continue
+
+            if child.isCell():
+                if ignoreNet != "" and getattr(child, "name", "") == ignoreNet:
+                    continue
+                for grandchild in child.children:
+                    if grandchild is None or not grandchild.isRect():
+                        continue
+                    if grandchild.layer != layer:
+                        continue
+                    if ignoreNet != "" and getattr(grandchild, "net", "") == ignoreNet:
+                        continue
+                    rects.append(grandchild.getCopy())
+
+        return rects
+
     def getInstancesByCellname(self,regex):
         data = list()
         for c in self.children:
@@ -149,6 +186,348 @@ class LayoutCell(Cell):
                 if(re.search(regex,c.cell)):
                     data.append(c)
         return data
+
+    def _normalizeLayerName(self, layer_name):
+        rules = Rules.getInstance()
+        if rules is None or layer_name is None:
+            return layer_name
+        if layer_name in rules.layers:
+            return rules.layers[layer_name].name
+        if hasattr(rules, "alias") and layer_name in rules.alias:
+            return rules.alias[layer_name].name
+        return layer_name
+
+    def _rectsTouchOrOverlap(self, rect1, rect2):
+        if rect1 is None or rect2 is None:
+            return False
+        if rect1.x2 < rect2.x1 or rect2.x2 < rect1.x1:
+            return False
+        if rect1.y2 < rect2.y1 or rect2.y2 < rect1.y1:
+            return False
+        return True
+
+    def _layersDirectlyConnect(self, layer1, layer2):
+        l1 = self._normalizeLayerName(layer1)
+        l2 = self._normalizeLayerName(layer2)
+        if l1 == l2:
+            return True
+        rules = Rules.getInstance()
+        if rules is None:
+            return False
+        layer_obj_1 = rules.getLayer(l1)
+        layer_obj_2 = rules.getLayer(l2)
+        if layer_obj_1 is None or layer_obj_2 is None:
+            return False
+        if getattr(layer_obj_1, "next", "") == l2:
+            return True
+        if getattr(layer_obj_1, "previous", "") == l2:
+            return True
+        if getattr(layer_obj_2, "next", "") == l1:
+            return True
+        if getattr(layer_obj_2, "previous", "") == l1:
+            return True
+        return False
+
+    def _collectPhysicalRects(self, obj=None, dx=0, dy=0, out=None, active=None):
+        if out is None:
+            out = []
+        if obj is None:
+            obj = self
+        if active is None:
+            active = set()
+
+        obj_id = id(obj)
+        if obj_id in active:
+            return out
+        active.add(obj_id)
+
+        children = getattr(obj, "children", [])
+        for child in children:
+            if child is None:
+                continue
+
+            if (hasattr(child, "isPort") and child.isPort()) or (hasattr(child, "isInstancePort") and child.isInstancePort()):
+                continue
+
+            if child.isInstance():
+                self._collectPhysicalRects(child.layoutcell, dx + child.x1, dy + child.y1, out, active)
+                continue
+
+            if child.isCell():
+                self._collectPhysicalRects(child, dx, dy, out, active)
+                continue
+
+            if child.isRect():
+                rr = child.getCopy()
+                rr.translate(dx, dy)
+                rr.parent = obj
+                if hasattr(child, "route_owner_info"):
+                    rr.route_owner_info = child.route_owner_info
+                out.append(rr)
+                continue
+
+        active.remove(obj_id)
+        return out
+
+    def _getRouteSource(self, rect):
+        if hasattr(rect, "route_owner_info"):
+            return rect.route_owner_info
+        parent = getattr(rect, "parent", None)
+        seen = set()
+        while parent is not None and id(parent) not in seen:
+            seen.add(id(parent))
+            if hasattr(parent, "isRoute") and parent.isRoute():
+                return {
+                    "name": getattr(parent, "name", ""),
+                    "net": getattr(parent, "net", ""),
+                    "layer": getattr(parent, "routeLayer", ""),
+                    "route": getattr(parent, "route_", ""),
+                    "options": getattr(parent, "options", ""),
+                    "debug_api": getattr(parent, "debug_api", ""),
+                    "debug_callsite": getattr(parent, "debug_callsite", ""),
+                    "debug_command": getattr(parent, "debug_command", ""),
+                    "debug_internal": getattr(parent, "debug_internal", False),
+                }
+            parent = getattr(parent, "parent", None)
+        return None
+
+    def _captureRouteDebug(self, api_name, params):
+        callsite = ""
+        command = f"{api_name}(" + ", ".join(f"{k}={params[k]!r}" for k in params) + ")"
+        try:
+            for frame in inspect.stack()[2:]:
+                filename = frame.filename or ""
+                if filename.endswith("layoutcell.py") or filename.endswith("cellgroup.py") or filename.endswith("route.py"):
+                    continue
+                callsite = f"{filename}:{frame.lineno}"
+                break
+        except Exception:
+            callsite = ""
+        return {
+            "api": api_name,
+            "callsite": callsite,
+            "command": command,
+        }
+
+    def _annotateRoute(self, route, api_name, params):
+        if route is None:
+            return None
+        debug = self._captureRouteDebug(api_name, params)
+        route.debug_api = debug["api"]
+        route.debug_callsite = debug["callsite"]
+        route.debug_command = debug["command"]
+        route.debug_internal = bool(params.get("internal", False))
+        return route
+
+    def _collectNetAnchorRects(self, target_layer=""):
+        anchors = []
+        seen = set()
+        for node in self.nodeGraphList:
+            graph = self.nodeGraph.get(node)
+            if graph is None:
+                continue
+            rects = []
+            if target_layer:
+                rects = graph.getRectangles("", "", target_layer)
+            if len(rects) == 0:
+                rects = graph.getRectangles("", "", "")
+            for rect in rects:
+                if rect is None:
+                    continue
+                rr = rect.getCopy()
+                key = (node, rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
+                if key in seen:
+                    continue
+                seen.add(key)
+                anchors.append((node, rr))
+        for node, port in self.ports.items():
+            if port is None:
+                continue
+            rr = port.get(target_layer) if target_layer else port.get()
+            if rr is None:
+                rr = port.get()
+            if rr is None:
+                continue
+            rr = rr.getCopy()
+            key = (node, rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
+            if key in seen:
+                continue
+            seen.add(key)
+            anchors.append((node, rr))
+        return anchors
+
+    def _findRoot(self, parent, idx):
+        while parent[idx] != idx:
+            parent[idx] = parent[parent[idx]]
+            idx = parent[idx]
+        return idx
+
+    def _unionRoots(self, parent, a, b):
+        ra = self._findRoot(parent, a)
+        rb = self._findRoot(parent, b)
+        if ra != rb:
+            parent[rb] = ra
+
+    def checkConnectivity(self, target_layer=""):
+        shapes = self._collectPhysicalRects()
+        parent = list(range(len(shapes)))
+
+        for i in range(len(shapes)):
+            for j in range(i + 1, len(shapes)):
+                if not self._rectsTouchOrOverlap(shapes[i], shapes[j]):
+                    continue
+                if not self._layersDirectlyConnect(shapes[i].layer, shapes[j].layer):
+                    continue
+                self._unionRoots(parent, i, j)
+
+        components = defaultdict(list)
+        for idx, rect in enumerate(shapes):
+            components[self._findRoot(parent, idx)].append(rect)
+
+        anchors = self._collectNetAnchorRects(target_layer)
+        net_components = defaultdict(set)
+        component_nets = defaultdict(set)
+        unmatched = defaultdict(list)
+
+        for comp_id, rects in components.items():
+            for rect in rects:
+                net_name = getattr(rect, "net", "")
+                if net_name:
+                    component_nets[comp_id].add(net_name)
+                route_owner = getattr(rect, "route_owner_info", None)
+                if route_owner is not None:
+                    route_net = route_owner.get("net", "")
+                    if route_net:
+                        component_nets[comp_id].add(route_net)
+
+        for net_name, anchor in anchors:
+            matched = False
+            for comp_id, rects in components.items():
+                for rect in rects:
+                    if not self._layersDirectlyConnect(anchor.layer, rect.layer):
+                        continue
+                    if not self._rectsTouchOrOverlap(anchor, rect):
+                        continue
+                    net_components[net_name].add(comp_id)
+                    component_nets[comp_id].add(net_name)
+                    matched = True
+                    break
+                if matched:
+                    break
+            if not matched:
+                unmatched[net_name].append(anchor)
+
+        shorts = []
+        for comp_id, nets in component_nets.items():
+            if len(nets) > 1:
+                rects = components[comp_id]
+                bounds = Cell.calcBoundingRectFromList(rects, False)
+                route_sources = []
+                route_seen = set()
+                for rect in rects:
+                    source = self._getRouteSource(rect)
+                    if source is None:
+                        continue
+                    key = (
+                        source["name"],
+                        source["layer"],
+                        source["route"],
+                        source["options"],
+                        source.get("debug_callsite", ""),
+                        source.get("debug_command", ""),
+                    )
+                    if key in route_seen:
+                        continue
+                    route_seen.add(key)
+                    route_sources.append(source)
+                shorts.append({
+                    "component": comp_id,
+                    "nets": sorted(nets),
+                    "rect_count": len(rects),
+                    "bounds": bounds,
+                    "routes": route_sources,
+                })
+
+        opens = []
+        for net_name in self.nodeGraphList:
+            comp_ids = sorted(net_components.get(net_name, set()))
+            if len(comp_ids) == 0:
+                opens.append({
+                    "net": net_name,
+                    "type": "unmatched",
+                    "anchors": len(unmatched.get(net_name, [])),
+                })
+            elif len(comp_ids) > 1:
+                opens.append({
+                    "net": net_name,
+                    "type": "split",
+                    "components": comp_ids,
+                })
+
+        return {
+            "shorts": shorts,
+            "opens": opens,
+            "component_nets": component_nets,
+            "net_components": net_components,
+            "unmatched": unmatched,
+            "component_count": len(components),
+            "shape_count": len(shapes),
+        }
+
+    def checkRouteShorts(self, target_layer=""):
+        result = self.checkConnectivity(target_layer)
+        route_shorts = []
+        for short in result.get("shorts", []):
+            routes = short.get("routes", [])
+            if not routes:
+                continue
+
+            external_routes = [route for route in routes if not route.get("debug_internal", False)]
+            if len(external_routes) == 0:
+                continue
+
+            external_nets = [net for net in short.get("nets", []) if not re.match(r"^xfill_.*_dummy_", net)]
+            if len(external_nets) < 2:
+                continue
+
+            filtered_short = dict(short)
+            filtered_short["nets"] = external_nets
+            filtered_short["routes"] = external_routes
+            filtered_short["route_count"] = len(external_routes)
+            route_shorts.append(filtered_short)
+        return {
+            "shorts": route_shorts,
+            "component_count": result.get("component_count", 0),
+            "shape_count": result.get("shape_count", 0),
+        }
+
+    def reportShorts(self, target_layer=""):
+        result = self.checkConnectivity(target_layer)
+        for short in result["shorts"]:
+            bounds = short["bounds"]
+            route_desc = "none"
+            if short.get("routes"):
+                route_desc = "; ".join(
+                    f"{route['name']}[{route['layer']} {route['route']} {route['options']}]"
+                    + (f" cmd={route['debug_command']}" if route.get("debug_command") else "")
+                    + (f" at {route['debug_callsite']}" if route.get("debug_callsite") else "")
+                    for route in short["routes"]
+                )
+            self.log.warning(
+                f"SHORT component={short['component']} nets={','.join(short['nets'])} "
+                f"bounds=({bounds.x1},{bounds.y1})-({bounds.x2},{bounds.y2}) rects={short['rect_count']} "
+                f"routes={route_desc}"
+            )
+        return result["shorts"]
+
+    def reportOpens(self, target_layer=""):
+        result = self.checkConnectivity(target_layer)
+        for open_net in result["opens"]:
+            if open_net["type"] == "split":
+                self.log.warning(f"OPEN net={open_net['net']} split_components={open_net['components']}")
+            else:
+                self.log.warning(f"OPEN net={open_net['net']} unmatched_anchors={open_net['anchors']}")
+        return result["opens"]
 
     # ---- Translated utility methods from C++ ----
 
@@ -366,6 +745,12 @@ class LayoutCell(Cell):
             try:
                 from .route import Route
                 r = Route(net, layer, start, stop, options, routeType)
+                self._annotateRoute(r, "addDirectedRoute", {
+                    "layer": layer,
+                    "net": net,
+                    "route": route,
+                    "options": options,
+                })
                 self.add(r)
             except Exception as e:
                 # Fallback: connect by a straight rect between bbox centers
@@ -416,13 +801,21 @@ class LayoutCell(Cell):
         # Check if node exists in nodeGraph
         if name not in self.nodeGraph:
             return
-        # Check if power rail exists in named_rects
-        if f"power_{name}" not in self.named_rects:
+        router_key = None
+        if f"power_{name}" in self.named_rects:
+            router_key = f"power_{name}"
+        elif f"rail_{name}" in self.named_rects:
+            router_key = f"rail_{name}"
+        else:
             return
         
-        g = self.nodeGraph[name]
-        rects = g.getRectangles("", includeInstances, "")
-        routering = self.named_rects[f"power_{name}"]
+        graph = self.nodeGraph.get(name)
+        rects = []
+        if graph is not None:
+            rects = graph.getRectangles("", includeInstances, "M1")
+            if len(rects) == 0:
+                rects = graph.getRectangles("", includeInstances, "")
+        routering = self.named_rects[router_key]
         rrect = routering.get(location)
         for r in rects:
             # Create cut between layers
@@ -490,6 +883,14 @@ class LayoutCell(Cell):
                     stop = [r, routering]
                     from .route import Route
                     ro = Route(node, layer, empty, stop, options, routeType)
+                    self._annotateRoute(ro, "addRouteConnection", {
+                        "path": path,
+                        "includeInstances": includeInstances,
+                        "layer": layer,
+                        "location": location,
+                        "options": options,
+                        "routeTypeOverride": routeTypeOverride,
+                    })
                     self.routes.append(ro)
                     rr.add(ro)
 
@@ -689,7 +1090,10 @@ class LayoutCell(Cell):
                 c  = Text()
             elif(cl == "Instance"):
                 c  = Instance()
-            elif(cl == "Cell" or cl== "cIcCore::Route" or cl == "cIcCore::RouteRing" or cl == "cIcCore::Guard" or cl == "cIcCore::Cell" or cl == "cIcCore::LayoutCell"):
+            elif(cl == "InstanceCut"):
+                from .instancecut import InstanceCut
+                c = InstanceCut()
+            elif(cl in ("Cell", "Route", "RouteRing", "Guard", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
                 c = LayoutCell()
             else:
                 self.log.warning(f"Unkown class {cl}")
@@ -721,6 +1125,16 @@ class LayoutCell(Cell):
                 empty = list()
                 #log.info(f"addConnectivityRoute: empty={empty}, rects={rects}")
                 r = Route(node, layer, empty, rects, options, routeType)
+                self._annotateRoute(r, "addConnectivityRoute", {
+                    "layer": layer,
+                    "regex": regex,
+                    "routeType": routeType,
+                    "options": options,
+                    "cuts": cuts,
+                    "excludeInstances": excludeInstances,
+                    "includeInstances": includeInstances,
+                    "node": node,
+                })
                 log.info(f"addConnectivityRoute: r={r}")
                 self.add(r)
             except Exception as e:
@@ -752,6 +1166,13 @@ class LayoutCell(Cell):
         try:
             from .route import Route
             route = Route(node,layer,start,stop,options,routeType)
+            self._annotateRoute(route, "addPortOnEdge", {
+                "layer": layer,
+                "node": node,
+                "location": location,
+                "routeType": routeType,
+                "options": options,
+            })
             route.route()
             self.add(rp)
             self.add(route)

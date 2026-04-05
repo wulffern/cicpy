@@ -32,6 +32,7 @@ from .rules import Rules
 from .instance import Instance
 from .text import Text
 from .graph import Graph
+from .cellgroup import CellGroup
 from .routering import RouteRing
 from .guard import Guard
 from .cut import Cut
@@ -84,6 +85,27 @@ class LayoutCell(Cell):
         self.addToNodeGraph(i)
         i.updateBoundingRect()
         return i
+
+    def addPhysicalInstance(self, cellName: str, instanceName: str, x: int, y: int):
+        layoutCell = self.parent.getLayoutCell(cellName)
+        if layoutCell is None:
+            self.log.warning(f"Could not find physical-only layoutcell {cellName}")
+            return None
+
+        i = Instance()
+        i.cell = layoutCell.name
+        i.layoutcell = layoutCell
+        i.libpath = layoutCell.libpath
+        i.instanceName = instanceName
+        i.name = layoutCell.name
+        i.physicalOnly = True
+        self.add(i)
+        i.moveTo(x, y)
+        i.updateBoundingRect()
+        return i
+
+    def makeCellGroup(self, name: str):
+        return CellGroup(self, name)
 
     def addToNodeGraph(self,inst):
 

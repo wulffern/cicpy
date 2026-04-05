@@ -116,7 +116,12 @@ class Magic(cic.LayoutCell):
 
                     l = self.rules.aliasToLayer(category)
                     if(l is not None):
-                        if(l.material == cic.Material.METAL):
+                        if l.material in (
+                            cic.Material.METAL,
+                            cic.Material.DIFFUSION,
+                            cic.Material.POLY,
+                            cic.Material.CUT,
+                        ):
                             rect = rects[0]
                             x1 = self.toAngstrom(rect[0])
                             y1 = self.toAngstrom(rect[1])

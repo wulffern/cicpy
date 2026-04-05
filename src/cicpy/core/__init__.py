@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from .cell import *
+from .cellgroup import *
 from .design import *
 from .instance import *
 from .instancecut import *

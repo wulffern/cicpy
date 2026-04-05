@@ -28,9 +28,31 @@
 from .point import Point
 from .cell import Cell
 from .instanceport import InstancePort
+from .rect import Rect
+from .rules import Rules
 import cicspi as spi
 import logging
 import re
+
+
+class TerminalAccess:
+
+    def __init__(self, terminal_name, source_layer, target_layer, port_rect, connected_rects, access_rects):
+        self.terminalName = terminal_name
+        self.sourceLayer = source_layer
+        self.targetLayer = target_layer
+        self.portRect = port_rect
+        self.connectedRects = connected_rects
+        self.accessRects = access_rects
+
+    def primary(self):
+        if self.accessRects:
+            return self.accessRects[0]
+        return None
+
+    def isEmpty(self):
+        return len(self.accessRects) == 0
+
 
 class Instance(Cell):
 
@@ -150,6 +172,128 @@ class Instance(Cell):
                     r.parent = self
                     rects.append(r)
         return rects
+
+    def _normalizeLayerName(self, layer_name):
+        rules = Rules.getInstance()
+        if rules is None or layer_name is None:
+            return layer_name
+        if layer_name in rules.layers:
+            return rules.layers[layer_name].name
+        if hasattr(rules, "alias") and layer_name in rules.alias:
+            return rules.alias[layer_name].name
+        return layer_name
+
+    def _rectsOverlapOrTouch(self, rect1, rect2):
+        if rect1 is None or rect2 is None:
+            return False
+        if rect1.x2 < rect2.x1 or rect2.x2 < rect1.x1:
+            return False
+        if rect1.y2 < rect2.y1 or rect2.y2 < rect1.y1:
+            return False
+        return True
+
+    def _layersCanConnect(self, layer1, layer2):
+        l1 = self._normalizeLayerName(layer1)
+        l2 = self._normalizeLayerName(layer2)
+        if l1 == l2:
+            return True
+
+        rules = Rules.getInstance()
+        if rules is None:
+            return False
+
+        next1 = self._normalizeLayerName(rules.getNextLayer(l1))
+        prev1 = self._normalizeLayerName(rules.getPreviousLayer(l1))
+        next2 = self._normalizeLayerName(rules.getNextLayer(l2))
+        prev2 = self._normalizeLayerName(rules.getPreviousLayer(l2))
+
+        return l2 in (next1, prev1) or l1 in (next2, prev2)
+
+    def _collectConnectedCellRects(self, seed_rect):
+        if self.layoutcell is None or seed_rect is None:
+            return []
+
+        candidates = []
+        for child in self.layoutcell.children:
+            if child is None:
+                continue
+            if not child.isRect():
+                continue
+            if child.isPort() or child.isText():
+                continue
+            candidates.append(child)
+
+        connected = []
+        queue = [seed_rect]
+        visited = set()
+
+        while queue:
+            current = queue.pop(0)
+            for idx, candidate in enumerate(candidates):
+                if idx in visited:
+                    continue
+                if not self._rectsOverlapOrTouch(current, candidate):
+                    continue
+                if not self._layersCanConnect(current.layer, candidate.layer):
+                    continue
+                visited.add(idx)
+                connected.append(candidate)
+                queue.append(candidate)
+
+        return connected
+
+    def getTerminalAccess(self, terminal_name: str, target_layer: str = "M1"):
+        if self.layoutcell is None:
+            return None
+
+        port = self.layoutcell.getPort(terminal_name)
+        if port is None:
+            return None
+
+        port_rect = port.get()
+        if port_rect is None:
+            return None
+
+        port_rect = port_rect.getCopy()
+        source_layer = self._normalizeLayerName(port_rect.layer)
+        target_layer = self._normalizeLayerName(target_layer or source_layer)
+        port_rect.layer = source_layer
+
+        connected_rects = self._collectConnectedCellRects(port_rect)
+        access_rects = []
+        seen = set()
+        for rect in connected_rects:
+            if self._normalizeLayerName(rect.layer) != target_layer:
+                continue
+            rr = rect.getCopy(target_layer)
+            rr.translate(self.x1, self.y1)
+            key = (rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
+            if key in seen:
+                continue
+            seen.add(key)
+            access_rects.append(rr)
+
+        translated_port = port_rect.getCopy(source_layer)
+        translated_port.translate(self.x1, self.y1)
+        if source_layer == target_layer:
+            key = (translated_port.layer, translated_port.x1, translated_port.y1, translated_port.x2, translated_port.y2)
+            if key not in seen:
+                seen.add(key)
+                access_rects.insert(0, translated_port.getCopy(target_layer))
+        translated_connected = []
+        for rect in connected_rects:
+            rr = rect.getCopy(self._normalizeLayerName(rect.layer))
+            rr.translate(self.x1, self.y1)
+            translated_connected.append(rr)
+
+        return TerminalAccess(
+            terminal_name,
+            source_layer,
+            target_layer,
+            translated_port,
+            translated_connected,
+            access_rects,
+        )
 
 
 

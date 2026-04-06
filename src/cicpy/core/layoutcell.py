@@ -1318,19 +1318,37 @@ class LayoutCell(Cell):
             self.log.error(f"{node} not a port")
             return
         p = self.ports[node]
+        if not getattr(p, "routeLayer", None) and getattr(p, "layer", ""):
+            p.routeLayer = p.layer
+        if not getattr(p, "pinLayer", None) and getattr(p, "routeLayer", ""):
+            p.pinLayer = Port._resolve_pin_layer(p.routeLayer)
         r = p.get()
         if not r:
             self.log.error("no port rectangle")
             return
         rp = r.getCopy(layer)
+        rules = Rules.getInstance()
+        offset_tracks = 0
+        if options:
+            m = re.search(r"offset_track([+-]?\d+)", options)
+            if m:
+                offset_tracks = int(m.group(1))
         if(location == "bottom"):
             rp.moveTo(rp.x1,self.y1)
+            if offset_tracks != 0 and rules is not None:
+                rp.translate(offset_tracks * rules.get("ROUTE", "horizontalgrid"), 0)
         elif (location == "top"):
-            rp.moveTo(rp.x1,self.y2()-rp.height())
+            rp.moveTo(rp.x1,self.y2-rp.height())
+            if offset_tracks != 0 and rules is not None:
+                rp.translate(offset_tracks * rules.get("ROUTE", "horizontalgrid"), 0)
         elif (location == "right"):
-            rp.moveTo(self.x2() - r.width(),rp.y1)
+            rp.moveTo(self.x2 - r.width(),rp.y1)
+            if offset_tracks != 0 and rules is not None:
+                rp.translate(0, offset_tracks * rules.get("ROUTE", "verticalgrid"))
         elif (location == "left"):
             rp.moveTo(self.x1,rp.y1)
+            if offset_tracks != 0 and rules is not None:
+                rp.translate(0, offset_tracks * rules.get("ROUTE", "verticalgrid"))
         start = [p]
         stop = [rp]
         try:
@@ -1346,11 +1364,11 @@ class LayoutCell(Cell):
             route.route()
             self.add(rp)
             self.add(route)
-            p.setRect(rp)
+            p.set(rp)
         except Exception as e:
             self.log.error(f"addPortOnEdge: Failed to create route for node '{node}': {e}. Adding rect directly.")
             self.add(rp)
-            p.setRect(rp)
+            p.set(rp)
 
     def _runSelfMethod(self,name,args=()):
         if(hasattr(self,name)):
@@ -1421,5 +1439,7 @@ class LayoutCell(Cell):
         self._runMethod(pycell,data,"afterPaint")
 
 
+        self._runMethod(pycell,data,"beforePorts")
         self.log.info(f"addAllPorts()")
         self.addAllPorts()
+        self._runMethod(pycell,data,"afterPorts")

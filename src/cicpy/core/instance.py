@@ -190,10 +190,44 @@ class Instance(Cell):
             if child.layer != layer:
                 continue
             rr = child.getCopy()
-            rr.translate(self.x1, self.y1)
+            self._transformRect(rr)
             rr.parent = self
             rects.append(rr)
         return rects
+
+    def _transformRect(self, rect):
+        if rect is None:
+            return None
+        if self.angle == "R90":
+            rect.rotate(90)
+            rect.translate(self.xcell, self.ycell)
+        elif self.angle == "MY":
+            rect.mirrorY(0)
+            rect.translate(self.xcell, self.ycell)
+        elif self.angle == "MX":
+            rect.mirrorX(0)
+            rect.translate(self.xcell, self.ycell)
+        rect.translate(self.x1, self.y1)
+        return rect
+
+    def setAngle(self, angle: str):
+        self.angle = angle or ""
+        self.xcell = 0
+        self.ycell = 0
+        if self.layoutcell is None:
+            return
+        if self.angle == "R90":
+            self.xcell = self.layoutcell.y2
+        elif self.angle == "MY":
+            self.xcell = self.layoutcell.x2
+        elif self.angle == "MX":
+            self.ycell = self.layoutcell.y1 + self.layoutcell.y2
+
+        for child in self.children:
+            child.translate(-self.x1, -self.y1)
+            self._transformRect(child)
+
+        self.updateBoundingRect()
 
     def _normalizeLayerName(self, layer_name):
         rules = Rules.getInstance()
@@ -288,7 +322,7 @@ class Instance(Cell):
             if self._normalizeLayerName(rect.layer) != target_layer:
                 continue
             rr = rect.getCopy(target_layer)
-            rr.translate(self.x1, self.y1)
+            self._transformRect(rr)
             key = (rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
             if key in seen:
                 continue
@@ -296,7 +330,7 @@ class Instance(Cell):
             access_rects.append(rr)
 
         translated_port = port_rect.getCopy(source_layer)
-        translated_port.translate(self.x1, self.y1)
+        self._transformRect(translated_port)
         if source_layer == target_layer:
             key = (translated_port.layer, translated_port.x1, translated_port.y1, translated_port.x2, translated_port.y2)
             if key not in seen:
@@ -305,7 +339,7 @@ class Instance(Cell):
         translated_connected = []
         for rect in connected_rects:
             rr = rect.getCopy(self._normalizeLayerName(rect.layer))
-            rr.translate(self.x1, self.y1)
+            self._transformRect(rr)
             translated_connected.append(rr)
 
         return TerminalAccess(
@@ -336,7 +370,14 @@ class Instance(Cell):
             return self
 
         r = cell_to_use.calcBoundingRect()
-        # TODO: Handle rotation if self.angle is set
+        if self.angle == "R90":
+            r.rotate(90)
+        elif self.angle == "MY":
+            r.mirrorY(0)
+            r.translate(self.xcell, self.ycell)
+        elif self.angle == "MX":
+            r.mirrorX(0)
+            r.translate(self.xcell, self.ycell)
         r.moveTo(self.x1, self.y1)
         return r
 

@@ -26,19 +26,32 @@
 ######################################################################
 
 from .rect import Rect
+from .rules import Rules
 import re
 
 class Port(Rect):
+
+    @staticmethod
+    def _resolve_pin_layer(route_layer):
+        if not route_layer:
+            return None
+        rules = Rules.getInstance()
+        if rules is None:
+            return route_layer
+        layer = rules.getLayer(route_layer)
+        if layer is None:
+            return route_layer
+        return getattr(layer, "pin", route_layer) or route_layer
 
     def __init__(self,name="",routeLayer=None,rect=None):
         super().__init__()
         self.name = name
 
-        self.routeLayer = routeLayer
+        self.routeLayer = routeLayer or (rect.layer if rect else None)
         self.rect = rect
         self.spicePort = True
         self.net = ""
-        self.pinLayer = routeLayer
+        self.pinLayer = self._resolve_pin_layer(self.routeLayer)
         self.direction = "inputOutput"
 
         self.sigclass = "signal"
@@ -49,11 +62,16 @@ class Port(Rect):
             self.sigclass = "power"
 
         if(rect):
-            self.layer = rect.layer
-            self.x1 = rect.x1
-            self.x2 = rect.x2
-            self.y1 = rect.y1
-            self.y2 = rect.y2
+            self.set(rect)
+
+    def set(self, rect):
+        if rect is None:
+            return
+        self.rect = rect
+        if getattr(rect, "layer", ""):
+            self.routeLayer = rect.layer
+            self.pinLayer = self._resolve_pin_layer(rect.layer)
+        self.setRect(rect)
 
 
     
@@ -62,8 +80,10 @@ class Port(Rect):
         super().fromJson(o)
         self.name = o["name"]
         self.spicePort = o.get("spicePort", True)
-        self.pinLayer = o.get("pinLayer", self.layer)
-        self.routeLayer = self.pinLayer
+        self.routeLayer = self.layer
+        self.pinLayer = o.get("pinLayer", self._resolve_pin_layer(self.layer))
+        self.rect = self.getCopy(self.layer)
+        self.rect.net = self.name
     
     def toJson(self):
         o = super().toJson()

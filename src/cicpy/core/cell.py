@@ -167,7 +167,8 @@ class Cell(Rect):
         if(rect is None):
             return None
         p = Port(name)
-        p.setRect(rect)
+        p.set(rect)
+        p.spicePort = self.isASpicePort(name)
         self.add(p)
         return p
         

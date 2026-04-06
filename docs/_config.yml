@@ -1,0 +1,25 @@
+author:
+  email: carsten@wulff.no
+  name: Carsten Wulff
+baseurl: /cicpy
+description: Custom IC Creator Python
+domain: analogicus.com
+exclude:
+- Gemfile
+- Gemfile.lock
+- node_modules
+kramdown:
+  mathjax: true
+markdown: kramdown
+minima:
+  skin: classic
+plugins:
+- jekyll-feed
+- jemoji
+- jekyll-seo-tag
+- jekyll-remote-theme
+- jekyll-paginate
+remote_theme: wulffern/minima
+show_excerpts: false
+title: cicpy
+url: https://analogicus.com

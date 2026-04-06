@@ -1,0 +1,4 @@
+* minimal spi2mag fixture
+.subckt TOP D G S B
+x0 D G S B NCHDL
+.ends TOP

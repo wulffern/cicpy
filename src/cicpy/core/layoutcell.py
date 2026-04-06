@@ -36,7 +36,6 @@ from .cellgroup import CellGroup
 from .routering import RouteRing
 from .guard import Guard
 from .cut import Cut
-from .tilemap import TileMap
 import cicspi as spi
 import re
 import logging
@@ -61,7 +60,6 @@ class LayoutCell(Cell):
         self.um = 10000
         self.log = logging.getLogger("LayoutCell")
         self.dummyCounter = 0
-        self._tile_map = None
         rules = Rules.getInstance()
         if(rules is not None and rules.hasRules()):
             space =rules.get("CELL","space")
@@ -1169,7 +1167,7 @@ class LayoutCell(Cell):
             elif(cl == "InstanceCut"):
                 from .instancecut import InstanceCut
                 c = InstanceCut()
-            elif(cl in ("Cell", "Route", "RouteRing", "Guard", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+            elif(cl in ("Cell", "Route", "RouteRing", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
                 c = LayoutCell()
             else:
                 self.log.warning(f"Unkown class {cl}")
@@ -1197,15 +1195,6 @@ class LayoutCell(Cell):
             if len(rects) == 0:
                 self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
                 continue
-            if self._tile_map is not None:
-                for cand, existing, existing_net, info in self._tile_map.check(layer, rects, node):
-                    log.error(
-                        f"TILE CONFLICT: net='{node}' on layer={getattr(cand,'layer',layer)} "
-                        f"rect=({cand.x1},{cand.y1})-({cand.x2},{cand.y2}) "
-                        f"conflicts with net='{existing_net}' "
-                        f"at ({existing.x1},{existing.y1})-({existing.x2},{existing.y2})"
-                        + (f" [{info}]" if info else "")
-                    )
             try:
                 from .route import Route
                 empty = list()
@@ -1255,7 +1244,6 @@ class LayoutCell(Cell):
         self.log.info(
             f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, accessLayer={accessLayer})"
         )
-        prefer_anymetal = bool(re.search(r"anymetal(,|\s+|$)", options or ""))
         for node in list(self.nodeGraphList):
             if not re.search(regex, node):
                 continue
@@ -1275,11 +1263,19 @@ class LayoutCell(Cell):
                     continue
                 if includeInstances != "" and not (re.search(includeInstances, getattr(i, 'name', '')) or re.search(includeInstances, instanceName)):
                     continue
-                terminal_name = getattr(p, "childName", "")
-                access = i.getTerminalAccess(terminal_name, target_layer=accessLayer)
-                if access is None or access.isEmpty():
-                    continue
-                rr = access.primary(anymetal=prefer_anymetal)
+
+                rr = p.get(accessLayer)
+                if rr is None:
+                    rr = p.get()
+                if rr is not None and getattr(rr, "layer", "") != accessLayer:
+                    rr = None
+
+                if rr is None:
+                    terminal_name = getattr(p, "childName", "")
+                    access = i.getTerminalAccess(terminal_name, target_layer=accessLayer)
+                    if access is not None:
+                        rr = access.primary(anymetal=False)
+
                 if rr is None:
                     continue
                 key = (rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
@@ -1416,14 +1412,11 @@ class LayoutCell(Cell):
 
         self._runMethod(pycell,data,"afterPlace")
 
-        # Route internal (dummy) routes immediately so TileMap can see their geometry
+        # Route internal (dummy) routes immediately so later routes can use their geometry
         for r in list(self.routes):
             if getattr(r, 'debug_internal', False):
                 r.route()
                 r._pre_routed = True
-
-        self._tile_map = TileMap()
-        self._tile_map.populate(self)
 
         self._runMethod(pycell,data,"beforeRoute")
 

@@ -190,7 +190,7 @@ class Rules:
         if(layer in self.layers):
             return self.layers[layer]
         else:
-            return self.layers["PR"]
+            return None
     
     def getNextLayer(self, layer):
         """Get the next layer in the stack"""

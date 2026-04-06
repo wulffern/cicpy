@@ -36,6 +36,7 @@ from .cellgroup import CellGroup
 from .routering import RouteRing
 from .guard import Guard
 from .cut import Cut
+from .tilemap import TileMap
 import cicspi as spi
 import re
 import logging
@@ -60,6 +61,7 @@ class LayoutCell(Cell):
         self.um = 10000
         self.log = logging.getLogger("LayoutCell")
         self.dummyCounter = 0
+        self._tile_map = None
         rules = Rules.getInstance()
         if(rules.hasRules()):
             space =rules.get("CELL","space")
@@ -964,7 +966,7 @@ class LayoutCell(Cell):
     def route(self):
         """Route all routes in this layout cell"""
         for r in self.routes:
-            if r.isRoute():
+            if r.isRoute() and not getattr(r, '_pre_routed', False):
                 r.route()
 
     def paint(self):
@@ -1119,7 +1121,16 @@ class LayoutCell(Cell):
             rects = g.getRectangles(excludeInstances, includeInstances, layer)
             if len(rects) == 0:
                 self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
-                continue    
+                continue
+            if self._tile_map is not None:
+                for cand, existing, existing_net, info in self._tile_map.check(layer, rects, node):
+                    log.error(
+                        f"TILE CONFLICT: net='{node}' on layer={getattr(cand,'layer',layer)} "
+                        f"rect=({cand.x1},{cand.y1})-({cand.x2},{cand.y2}) "
+                        f"conflicts with net='{existing_net}' "
+                        f"at ({existing.x1},{existing.y1})-({existing.x2},{existing.y2})"
+                        + (f" [{info}]" if info else "")
+                    )
             try:
                 from .route import Route
                 empty = list()
@@ -1219,6 +1230,15 @@ class LayoutCell(Cell):
         self.place()
 
         self._runMethod(pycell,data,"afterPlace")
+
+        # Route internal (dummy) routes immediately so TileMap can see their geometry
+        for r in list(self.routes):
+            if getattr(r, 'debug_internal', False):
+                r.route()
+                r._pre_routed = True
+
+        self._tile_map = TileMap()
+        self._tile_map.populate(self)
 
         self._runMethod(pycell,data,"beforeRoute")
 

@@ -11,7 +11,6 @@ class Graph():
             self.ports.append(p)
 
     def getRectangles(self,excludeInstances:str,includeInstances:str,layer:str):
-        print(self,excludeInstances,includeInstances,layer)  
         rects = list()
         for p in self.ports:
             i = p.parent

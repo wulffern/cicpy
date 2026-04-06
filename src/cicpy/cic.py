@@ -326,8 +326,9 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
             pycellData = pycell.data
 
     lcell.layout(pycell,pycellData)
-    _report_route_shorts(lcell)
+
     if check_connectivity:
+        _report_route_shorts(lcell)
         _report_connectivity(lcell)
 
     #- Add cuts after the layout has been routed

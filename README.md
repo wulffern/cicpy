@@ -1,69 +1,68 @@
-
 # Custom IC Creator Python
 
+Python toolbox for transpiling [ciccreator](https://github.com/wulffern/ciccreator) output to other IC design formats.
 
-# Why
-This is a script package I use transpile from the output of ciccreator to other
-formats.
- 
-# Changelog
+## Install
 
-| Version | Status             | Comment                                                    |
-|:--------|:-------------------|:-----------------------------------------------------------|
-| 0.0.1   | :white_check_mark: | First version of cicspy                                    |
-| 0.1.5   | :white_check_mark: | First release to pypi                                      |
-| 0.1.8   | :white_check_mark: | Added cicspi dependency and reorged to include subpackages |
-
-# Install this module
-If you want to follow the latest and greatest
-``` sh
+Latest from git:
+```sh
 git clone https://github.com/wulffern/cicpy
 cd cicpy
-python3 -m pip install  -e . 
+pip install -e .
 ```
 
-If you want something that does not change that often
-``` sh
-python3 -m pip install cicpy 
-
+Stable release from PyPI:
+```sh
+pip install cicpy
 ```
 
-# Commands
-
-For the latest help, check `cicpy --help`, and `cicpy <command> --help`
-
-``` sh
-Usage: cicpy [OPTIONS] COMMAND [ARGS]...
-
-  Python toolbox for Custom Integrated Circuit Creator (ciccreator).
-
-Options:
-  --help  Show this message and exit.
-
-Commands:
-  jcell      Extract a cell from .cic
-  minecraft  Make a mincraft script *.mc from *.cic
-  place      Place a bunch of transistors according to pattern
-  svg        Make an SVG
-  transpile  Translate .cic file into another file format...
-```
-
-``` sh
-Usage: cicpy transpile [OPTIONS] CICFILE TECHFILE LIBRARY
-
-  Translate .cic file into another file format (SKILL,SPECTRE,SPICE)
-
-Options:
-  --layskill      Write Skill Layout file
-  --schskill      Write Skill Schematic file
-  --winfo         Write Info file [ALPHA]
-  --rinfo TEXT    Read Info file [ALPHA]
-  --verilog       Write verilog file [EXPERIMENTAL]
-  --spice         Write spice file
-  --xschem        Write xschem schematics
-  --magic         Write magic layout
-  --smash TEXT    List of transistors to smash schematic hierarchy
-  --exclude TEXT  Regex of cells to ignore
-  --help          Show this message and exit.
+## Commands
 
 ```
+cicpy [OPTIONS] COMMAND [ARGS]...
+```
+
+| Command | Description |
+|---------|-------------|
+| `transpile` | Translate `.cic` to SKILL layout/schematic, SPICE, Verilog, Xschem, Magic, SVG |
+| `jcell` | Extract a single cell from a `.cic` file as JSON |
+| `sch2mag` | Netlist an Xschem schematic to SPICE, then place and route to Magic |
+| `spi2mag` | Place and route a SPICE subcircuit to Magic |
+| `svg` | Generate SVG views from a `.cic` library |
+| `minecraft` | Emit a Minecraft build script from a layout cell |
+| `place` | *(Deprecated)* Place transistors by pattern |
+| `orc` | *(Deprecated)* Orchestration runner |
+| `filter` | *(Deprecated)* Parse-only placeholder |
+
+For full option lists: `cicpy --help` and `cicpy <command> --help`
+
+### Common `transpile` options
+
+```sh
+cicpy transpile SAR9B.cic.gz demo.tech SAR9B \
+  --layskill    # Cadence SKILL layout
+  --schskill    # Cadence SKILL schematic
+  --spice       # ngspice + CDL netlists
+  --xschem      # Xschem schematics
+  --magic       # Magic .mag layout
+  --verilog     # Verilog (experimental)
+```
+
+### Extra library includes
+
+Commands that read `.cic` data accept multiple `--I` flags to merge library cells:
+
+```sh
+cicpy svg top.cic tech/cic/sky130A.tech TOP \
+  --I analog_lib.cic \
+  --I digital_lib.cic
+```
+
+## Changelog
+
+| Version | Comment |
+|---------|---------|
+| 0.0.1 | First version |
+| 0.1.5 | First PyPI release |
+| 0.1.8 | Added cicspi dependency and subpackages |
+| 0.1.9 | Routing, Magic layout, and connectivity improvements |

@@ -33,6 +33,56 @@ class StackGroup(Cell):
             members.append(obj)
         return members
 
+    def _route_instances(self):
+        return [inst for inst in self.instances if inst is not None and getattr(inst, "instanceName", "")]
+
+    def instanceRegex(self):
+        names = [re.escape(inst.instanceName) for inst in self._route_instances()]
+        if not names:
+            return ""
+        return "^(" + "|".join(names) + ")$"
+
+    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=1, excludeInstances=""):
+        include = self.instanceRegex()
+        self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
+        return self
+
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances="", accessLayer=None):
+        include = self.instanceRegex()
+        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
+        return self
+
+    def representativeAccessRects(self, net, accessLayer, anymetal=False):
+        graph = getattr(self.layout, "nodeGraph", None)
+        if graph is None or net not in graph:
+            return []
+        node = graph.get(net)
+        if node is None:
+            return []
+        member_names = {getattr(i, "instanceName", "") for i in self._route_instances()}
+        rects = []
+        for port in getattr(node, "ports", []):
+            inst = getattr(port, "parent", None)
+            if inst is None or not inst.isInstance():
+                continue
+            instance_name = getattr(inst, "instanceName", "")
+            if instance_name not in member_names:
+                continue
+            terminal_name = getattr(port, "childName", "")
+            access = inst.getTerminalAccess(terminal_name, target_layer=accessLayer)
+            if access is None or access.isEmpty():
+                continue
+            rect = access.primary(anymetal=anymetal)
+            if rect is None:
+                continue
+            rects.append(rect)
+        rects = self.layout.collapseRepresentativeRects(net, rects)
+        if not rects:
+            return []
+        target_y = 0.5 * (self.bottom() + self.top())
+        chosen = min(rects, key=lambda r: (abs(r.centerY() - target_y), abs(r.centerX() - self.left()), r.x1, r.y1))
+        return [chosen]
+
     def translate(self, dx, dy):
         for obj in self._members():
             obj.translate(dx, dy)
@@ -303,6 +353,34 @@ class CellGroup(Cell):
         super().__init__(name)
         self.layout = layout
         self.stacks = []
+
+    def _route_instances(self):
+        data = []
+        for stack in self.stacks:
+            data.extend(stack._route_instances())
+        return data
+
+    def instanceRegex(self):
+        names = [re.escape(inst.instanceName) for inst in self._route_instances()]
+        if not names:
+            return ""
+        return "^(" + "|".join(names) + ")$"
+
+    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=1, excludeInstances=""):
+        include = self.instanceRegex()
+        self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
+        return self
+
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances="", accessLayer=None):
+        include = self.instanceRegex()
+        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
+        return self
+
+    def representativeAccessRects(self, net, accessLayer, anymetal=False):
+        rects = []
+        for stack in self.stacks:
+            rects.extend(stack.representativeAccessRects(net, accessLayer, anymetal=anymetal))
+        return self.layout.collapseRepresentativeRects(net, rects)
 
     def addStack(self, name, instances):
         stack = StackGroup(self.layout, name)

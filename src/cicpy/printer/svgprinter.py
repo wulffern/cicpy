@@ -76,6 +76,12 @@ class SvgCell(svgwrite.Drawing):
         
         self.gr.add(r)
 
+    def addText(self, t, color="black"):
+        x = self.translate(t.x1)
+        y = self.translate(t.y1)
+        txt = self.text(t.name, insert=(x, y), fill=color, font_size=8)
+        self.gr.add(txt)
+
     def addRef(self,inst):
 
         p = inst.getCellPoint()
@@ -204,8 +210,6 @@ img {
             
 
     def printText(self,t):
-        pass
-        #x1 = self.toMicron(t.x1)
-        #y1 = self.toMicron(t.y1)
-        #layerNumber = self.rules.layerToNumber(t.layer)
-        #dataType = self.rules.layerToDataType(t.layer)
+        if self.svgcell is None or t is None:
+            return
+        self.svgcell.addText(t)

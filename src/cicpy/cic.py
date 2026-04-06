@@ -52,6 +52,14 @@ class ColorFormatter(logging.Formatter):
 
 log = logging.getLogger("spi2mag")
 
+
+def load_design(cicfile, includes=()):
+    design = cic.Design()
+    files = list(includes or [])
+    files.append(cicfile)
+    design.fromJsonFiles(*files)
+    return design
+
 @click.group()
 @click.pass_context
 def cli(ctx):
@@ -82,13 +90,12 @@ def cli(ctx):
 @click.option("--magic",is_flag=True,help="Write magic layout")
 @click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
 @click.option("--exclude",default="",help="Regex of cells to ignore")
-
-def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash,exclude):
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog,spice,xschem,magic,smash,exclude,includes):
     """Translate .cic file into another file format (SKILL,SPECTRE,SPICE)"""
 
     rules = cic.Rules(techfile)
-    design = cic.Design()
-    design.fromJsonFile(cicfile)
+    design = load_design(cicfile, includes)
 
 
 
@@ -141,13 +148,13 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 @click.argument("techfile")
 @click.argument("cell")
 @click.option("--child",default="",help="Show children")
-def jcell(ctx,cicfile,techfile,cell,child):
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+def jcell(ctx,cicfile,techfile,cell,child,includes):
     """Extract a cell from .cic """
 
     rules = cic.Rules(techfile)
 
-    design = cic.Design()
-    design.fromJsonFile(cicfile)
+    design = load_design(cicfile, includes)
 
 
     if(cell in design.jcells):
@@ -173,13 +180,13 @@ def jcell(ctx,cicfile,techfile,cell,child):
 @click.argument("layoutfile")
 @click.option("--circuit", default="diffpair")
 @click.option("--pattern", default="")
-def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
-    """Place a bunch of transistors according to pattern, outputs SKILL"""
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+def place(ctx,cicfile,techfile,layoutfile,circuit,pattern,includes):
+    """[Deprecated] Place a bunch of transistors according to pattern, outputs SKILL"""
 
     rules = cic.Rules(techfile)
 
-    design = cic.Design()
-    design.fromJsonFile(cicfile)
+    design = load_design(cicfile, includes)
 
 
     placer = cic.Placer(design,layoutfile,pattern)
@@ -207,13 +214,13 @@ def place(ctx,cicfile,techfile,layoutfile,circuit,pattern):
 @click.option("--child",default="",help="Show children")
 @click.option("--x",default=0,help="X coordinate")
 @click.option("--y",default=0,help="Y coordinate")
-def minecraft(ctx,cicfile,techfile,cell,child,x,y):
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+def minecraft(ctx,cicfile,techfile,cell,child,x,y,includes):
     """Make a mincraft script *.mc from *.cic """
 
     rules = cic.Rules(techfile)
 
-    design = cic.Design()
-    design.fromJsonFile(cicfile)
+    design = load_design(cicfile, includes)
 
     if(cell in design.cells):
         cell = design.cells[cell]
@@ -237,13 +244,13 @@ def minecraft(ctx,cicfile,techfile,cell,child,x,y):
 @click.option("--scale",default=10,help="Scale")
 @click.option("--x",default=100,help="X offset")
 @click.option("--y",default=100,help="Y offset")
-def svg(ctx,cicfile,techfile,library,scale,x,y):
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
     """Make an SVG"""
 
     rules = cic.Rules(techfile)
 
-    design = cic.Design()
-    design.fromJsonFile(cicfile)
+    design = load_design(cicfile, includes)
 
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)
@@ -425,7 +432,7 @@ def _report_connectivity(lcell):
 @click.pass_context
 @click.argument("orcfile")
 def orc(ctx,orcfile):
-    """Orchestrate cic"""
+    """[Deprecated] Orchestrate cic"""
     orc = cic.OrcFile(orcfile)
     orc.run()
 
@@ -434,9 +441,10 @@ def orc(ctx,orcfile):
 @click.pass_context
 @click.argument("cicfile")
 @click.argument("cell")
-def filter(ctx,cicfile,cell):
-    d = cic.Design()
-    d.read(cicfile)
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+def filter(ctx,cicfile,cell,includes):
+    """[Deprecated] Parse a .cic file and optional included libraries"""
+    load_design(cicfile, includes)
 
 
 if __name__ == '__main__':

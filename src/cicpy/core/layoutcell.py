@@ -63,7 +63,7 @@ class LayoutCell(Cell):
         self.dummyCounter = 0
         self._tile_map = None
         rules = Rules.getInstance()
-        if(rules.hasRules()):
+        if(rules is not None and rules.hasRules()):
             space =rules.get("CELL","space")
             self.place_groupbreak = [100]
             self.place_xspace = [space]
@@ -144,6 +144,19 @@ class LayoutCell(Cell):
             if(c.isInstance()):
                 if(re.search(regex,c.name)):
                     data.append(c)
+        return data
+
+    def getSortedInstancesByInstanceName(self,regex):
+        data = list()
+        for c in self.children:
+            if(c.isInstance()):
+                if(re.search(regex,c.instanceName)):
+                    data.append(c)
+        if(len(data) == 0):
+            raise ValueError(f"Missing instance {regex}")
+
+        data = sorted(data, key=lambda item: item.instanceName)
+
         return data
 
     def getOccupiedRectangles(self, layer: str, excludeInstances: str = "", ignoreNet: str = ""):
@@ -230,6 +243,56 @@ class LayoutCell(Cell):
             return True
         return False
 
+    def _connectedComponentsFromRects(self, rects):
+        components = []
+        seen = [False] * len(rects)
+        for i, rect in enumerate(rects):
+            if seen[i]:
+                continue
+            queue = [i]
+            seen[i] = True
+            comp = []
+            while queue:
+                idx = queue.pop()
+                current = rects[idx]
+                comp.append(current)
+                for j, other in enumerate(rects):
+                    if seen[j]:
+                        continue
+                    if not self._layersDirectlyConnect(current.layer, other.layer):
+                        continue
+                    if not self._rectsTouchOrOverlap(current, other):
+                        continue
+                    seen[j] = True
+                    queue.append(j)
+            components.append(comp)
+        return components
+
+    def collapseRepresentativeRects(self, net, rects):
+        if not rects:
+            return []
+        same_net_rects = [rr for rr in self._collectPhysicalRects() if getattr(rr, "net", "") == net]
+        if not same_net_rects:
+            return list(rects)
+        components = self._connectedComponentsFromRects(same_net_rects)
+        grouped = {}
+        floating_index = 0
+        for rect in rects:
+            key = None
+            for idx, comp in enumerate(components):
+                if any(self._layersDirectlyConnect(rect.layer, rr.layer) and self._rectsTouchOrOverlap(rect, rr) for rr in comp):
+                    key = ("component", idx)
+                    break
+            if key is None:
+                key = ("floating", floating_index)
+                floating_index += 1
+            grouped.setdefault(key, []).append(rect)
+        out = []
+        for comp_rects in grouped.values():
+            out.append(sorted(comp_rects, key=lambda r: (r.x2, r.centerY(), r.y1), reverse=True)[0])
+        out.sort(key=lambda r: (r.centerY(), r.centerX(), r.x1))
+        return out
+
     def _collectPhysicalRects(self, obj=None, dx=0, dy=0, out=None, active=None):
         if out is None:
             out = []
@@ -252,7 +315,11 @@ class LayoutCell(Cell):
                 continue
 
             if child.isInstance():
-                self._collectPhysicalRects(child.layoutcell, dx + child.x1, dy + child.y1, out, active)
+                child_cell = getattr(child, "layoutcell", None)
+                if child_cell is None:
+                    child_cell = getattr(child, "_cell_obj", None)
+                if child_cell is not None:
+                    self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active)
                 continue
 
             if child.isCell():
@@ -396,11 +463,6 @@ class LayoutCell(Cell):
                 net_name = getattr(rect, "net", "")
                 if net_name:
                     component_nets[comp_id].add(net_name)
-                route_owner = getattr(rect, "route_owner_info", None)
-                if route_owner is not None:
-                    route_net = route_owner.get("net", "")
-                    if route_net:
-                        component_nets[comp_id].add(route_net)
 
         for net_name, anchor in anchors:
             matched = False
@@ -452,7 +514,9 @@ class LayoutCell(Cell):
 
         opens = []
         for net_name in self.nodeGraphList:
-            comp_ids = sorted(net_components.get(net_name, set()))
+            comp_ids = sorted(
+                comp_id for comp_id, nets in component_nets.items() if net_name in nets
+            )
             if len(comp_ids) == 0:
                 opens.append({
                     "net": net_name,
@@ -823,6 +887,15 @@ class LayoutCell(Cell):
             # Create cut between layers
             from .cut import Cut
             ct = Cut.getInstance(r.layer, rrect.layer, 2, 2)
+            if ct and ct.width() > r.width():
+                ct1x2 = Cut.getInstance(r.layer, rrect.layer, 1, 2)
+                ct2x1 = Cut.getInstance(r.layer, rrect.layer, 2, 1)
+                if ct1x2 and ct1x2.width() <= r.width():
+                    ct = ct1x2
+                elif ct2x1 and ct2x1.width() <= r.width():
+                    ct = ct2x1
+                else:
+                    ct = ct1x2 if (ct1x2 and (not ct2x1 or ct1x2.width() <= ct2x1.width())) else ct2x1
             
             # Create a copy of the rectangle
             rr = r.getCopy()
@@ -831,19 +904,19 @@ class LayoutCell(Cell):
             if location == "top":
                 rr.setTop(rrect.y2)
                 if ct:
-                    ct.moveTo(rr.x1, rrect.y1)
+                    ct.moveTo(rr.centerX() - ct.width()//2, rrect.y1)
             elif location == "bottom":
                 rr.setBottom(rrect.y1)
                 if ct:
-                    ct.moveTo(rr.x1, rrect.y1)
+                    ct.moveTo(rr.centerX() - ct.width()//2, rrect.y1)
             elif location == "left":
                 rr.setLeft(rrect.x1)
                 if ct:
-                    ct.moveTo(rrect.x1, rr.y1)
+                    ct.moveTo(rrect.x1, rr.centerY() - ct.height()//2)
             elif location == "right":
                 rr.setRight(rrect.x2)
                 if ct:
-                    ct.moveTo(rrect.x1, rr.y1)
+                    ct.moveTo(rrect.x1, rr.centerY() - ct.height()//2)
             
             # Add rectangle and cut to routering
             routering.add(rr)
@@ -953,6 +1026,8 @@ class LayoutCell(Cell):
                     return i
         return None
 
+
+
     def fromJson(self,o):
         super().fromJson(o)
         self.updateBoundingRect()
@@ -1054,7 +1129,6 @@ class LayoutCell(Cell):
         nodes = self.subckt.nodes
 
         for node in nodes:
-
             if(node in self.ports): continue
             rects = self.findRectanglesByNode("^" + node + "$",None,None)
             if(len(rects) > 0):
@@ -1110,6 +1184,7 @@ class LayoutCell(Cell):
 
     def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances):
         self.log.info(f"addConnectivityRoute(layer={layer}, regex={regex}, routeType={routeType}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances})")
+        prefer_anymetal = bool(re.search(r"anymetal(,|\s+|$)", options or ""))
         for node in list(self.nodeGraphList):
             if not re.search(regex, node):
                 continue
@@ -1152,6 +1227,90 @@ class LayoutCell(Cell):
                 log.error(f"addConnectivityRoute: Exception={e}")
                 for rr in rects:
                     self.add(rr.getCopy(layer))
+
+    def addOrthogonalRouteFromRects(self, net, verticalLayer, horizontalLayer, rects, options="", cuts=1):
+        self.log.info(
+            f"addOrthogonalRouteFromRects(net={net}, verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, options={options}, cuts={cuts}, rects={len(rects or [])})"
+        )
+        if not rects:
+            self.log.error(f"Could not find rectangles on {net} explicit rect list")
+            return None
+        from .route import OrthogonalLayerRoute
+        r = OrthogonalLayerRoute(net, verticalLayer, horizontalLayer, rects, options, cuts=cuts)
+        self._annotateRoute(r, "addOrthogonalRouteFromRects", {
+            "net": net,
+            "verticalLayer": verticalLayer,
+            "horizontalLayer": horizontalLayer,
+            "options": options,
+            "cuts": cuts,
+            "rect_count": len(rects or []),
+        })
+        self.add(r)
+        r.route()
+        return r
+
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, accessLayer=None):
+        if accessLayer is None:
+            accessLayer = verticalLayer
+        self.log.info(
+            f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, accessLayer={accessLayer})"
+        )
+        prefer_anymetal = bool(re.search(r"anymetal(,|\s+|$)", options or ""))
+        for node in list(self.nodeGraphList):
+            if not re.search(regex, node):
+                continue
+            log = logging.getLogger("LayoutCell")
+            log.info(f"addOrthogonalConnectivityRoute: node={node}")
+            g = self.nodeGraph.get(node)
+            if g is None:
+                continue
+            rects = []
+            seen = set()
+            for p in g.ports:
+                i = getattr(p, "parent", None)
+                if i is None or not i.isInstance():
+                    continue
+                instanceName = getattr(i, 'instanceName', '')
+                if excludeInstances != "" and (re.search(excludeInstances, instanceName) or re.search(excludeInstances, getattr(i, 'name', ''))):
+                    continue
+                if includeInstances != "" and not (re.search(includeInstances, getattr(i, 'name', '')) or re.search(includeInstances, instanceName)):
+                    continue
+                terminal_name = getattr(p, "childName", "")
+                access = i.getTerminalAccess(terminal_name, target_layer=accessLayer)
+                if access is None or access.isEmpty():
+                    continue
+                rr = access.primary(anymetal=prefer_anymetal)
+                if rr is None:
+                    continue
+                key = (rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rects.append(rr)
+            if len(rects) == 0:
+                self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
+                continue
+            try:
+                from .route import OrthogonalLayerRoute
+                r = OrthogonalLayerRoute(node, verticalLayer, horizontalLayer, rects, options, cuts=cuts)
+                self._annotateRoute(r, "addOrthogonalConnectivityRoute", {
+                    "verticalLayer": verticalLayer,
+                    "horizontalLayer": horizontalLayer,
+                    "regex": regex,
+                    "options": options,
+                    "cuts": cuts,
+                    "excludeInstances": excludeInstances,
+                    "includeInstances": includeInstances,
+                    "accessLayer": accessLayer,
+                    "node": node,
+                })
+                log.info(f"addOrthogonalConnectivityRoute: r={r}")
+                self.add(r)
+                r.route()
+            except Exception as e:
+                log.error(f"addOrthogonalConnectivityRoute: Exception={e}")
+                for rr in rects:
+                    self.add(rr.getCopy(verticalLayer))
 
     def addPortOnEdge(self,layer,node,location,routeType, options):
         self.log.info(f"addPortOnEdge(layer={layer}, node={node}, location={location}, routeType={routeType}, options={options})")
@@ -1201,6 +1360,17 @@ class LayoutCell(Cell):
             self.log.warning(f"Could not find method {name} on {self.name}")
 
 
+    def _runIfHas(self,module,method,args=()):
+        if(hasattr(module,method)):
+            fn = getattr(module,method)
+            self.log.info("Running " + method + " from " + self.name + ".py")
+            fn(self,*args)
+            return True
+        else:
+            return False
+
+
+
     def _runMethod(self,module,moduleData,method,args=()):
         if(moduleData is not None):
             if(method in moduleData):
@@ -1213,12 +1383,9 @@ class LayoutCell(Cell):
                                 methodname = k[:-1]
                                 for mdata in d[k]:
                                     self._runSelfMethod(methodname,mdata)
+        self._runIfHas(module,method,*args)
 
 
-        if(hasattr(module,method)):
-            fn = getattr(module,method)
-            self.log.info("Running " + method + " from " + self.name + ".py")
-            fn(self,*args)
 
     def layout(self,pycell=None,data=None):
         self.ignoreBoundaryRouting = False

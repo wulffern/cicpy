@@ -555,7 +555,7 @@ spiceprefix=X
 
 
 
-        if(self.rules.techlib == "sky130"):
+        if( "sky130" in self.rules.techlib):
             dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
 L=(length)
 W=(width)
@@ -629,7 +629,7 @@ model=(model)
 
 
 
-        if(self.rules.techlib == "sky130"):
+        if("sky130" in self.rules.techlib):
             dstr = """C {(sym).sym} (x1) (y1) 0 0 {name=(instName)
 W=(width)
 L=(length)

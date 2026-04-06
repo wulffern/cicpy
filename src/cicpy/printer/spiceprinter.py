@@ -129,7 +129,7 @@ class SpicePrinter(DesignPrinter):
                 self.printResistor(o)
 
         else:
-            self.printDevice(o)
+            self.printSingleDevice(o)
 
         pass
 
@@ -166,7 +166,7 @@ class SpicePrinter(DesignPrinter):
         return new_nodes
 
 
-    def printDevice(self,o):
+    def printSingleDevice(self,o):
 
         odev = self.rules.device(o.deviceName)
         typename = odev["name"]

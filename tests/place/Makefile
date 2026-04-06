@@ -13,3 +13,6 @@ vert:
 clean:
 	-rm *_place.csv
 	-rm *.il
+
+docs:
+	${PYTHON} ../gendoc.py place.md ../../docs/place.md

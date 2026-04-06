@@ -43,6 +43,7 @@ class MagicPrinter(DesignPrinter):
     
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
+        self.exclude = r"^cut_"
 
     def startLib(self,name):
 
@@ -59,14 +60,25 @@ class MagicPrinter(DesignPrinter):
         log.info(f"Writing {name}")
         self.fcell = open(name,"w")
 
+    def _printFlattenedCutInstance(self, inst):
+        if inst is None:
+            return
+        cell = getattr(inst, "layoutcell", None)
+        if cell is None:
+            cell = getattr(inst, "_cell_obj", None)
+        if cell is None:
+            return
+        for child in cell.children:
+            if child is None or not child.isRect():
+                continue
+            rr = child.getCopy()
+            rr.translate(inst.x1, inst.y1)
+            self.printRect(rr)
+
     def closeCellFile(self):
 
         for layer in self.rects:
             self.fcell.write(self.rects[layer])
-
-        for layer in self.cuts:
-            r = self.cuts[layer]
-            self.fcell.write(f"<< {layer} >>\nrect %d %d %d %d\n" % (self.toMicron(r.x1),self.toMicron(r.y1),self.toMicron(r.x2),self.toMicron(r.y2)))
 
         for ss in self.use:
             self.fcell.write(ss)
@@ -89,16 +101,11 @@ class MagicPrinter(DesignPrinter):
         self.rects = dict()
         self.use = list()
         self.labels = list()
-        self.cuts = dict()
         self.portOrder = dict()
         self.properties = list()
 
         #- running number if cells don't have instance names
         self.xinst = 0
-
-
-        #- Cut's need to be handled differently
-        self.isCut = False
 
         self.labels.append("<< labels >>\n")
 
@@ -123,10 +130,6 @@ class MagicPrinter(DesignPrinter):
         self.fcell.write("timestamp %d\n" % time.mktime(currentDate.timetuple()))
 
         self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(cell.x1),self.toMicron(cell.y1),self.toMicron(cell.x2),self.toMicron(cell.y2)))
-
-        if(cell.name.startswith("cut_")):
-            self.isCut = True
-
 
     def endCell(self,cell):
 
@@ -209,32 +212,19 @@ port %d nsew %s %s
 
         layerNumber = self.rules.layerToNumber(r.layer)
 
-        #- Handle cuts
-        if(self.isCut and r.layer.startswith("VIA")):
-            if(layerAlias not in self.cuts):
-                self.cuts[layerAlias] = r
+        if(layerAlias not in self.rects):
+            self.rects[layerAlias] = f"<< {layerAlias} >>\n"
 
-            ref = self.cuts[layerAlias]
-            if(r.x1 < ref.x1):
-                ref.x1 = r.x1
-            if(r.x2 > ref.x2):
-                ref.x2 = r.x2
-            if(r.y1 < ref.y1):
-                ref.y1 = r.y1
-            if(r.y2 > ref.y2):
-                ref.y2 = r.y2
-            pass
-
-        else:
-            if(layerAlias not in self.rects):
-                self.rects[layerAlias] = f"<< {layerAlias} >>\n"
-
-            self.rects[layerAlias] += f"rect %d %d %d %d\n" % (self.toMicron(r.x1),self.toMicron(r.y1),self.toMicron(r.x2),self.toMicron(r.y2))
+        self.rects[layerAlias] += f"rect %d %d %d %d\n" % (self.toMicron(r.x1),self.toMicron(r.y1),self.toMicron(r.x2),self.toMicron(r.y2))
 
         
     def printReference(self,inst):
 
         if(not inst or inst.isEmpty()):
+            return
+
+        if inst.isCut():
+            self._printFlattenedCutInstance(inst)
             return
 
 
@@ -280,7 +270,3 @@ box %d %d %d %d
 
         if(layerAlias == ""):
             return
-
-
-
-

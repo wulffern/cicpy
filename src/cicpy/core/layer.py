@@ -11,6 +11,7 @@ class Material(Enum):
     MARKER = 5
     IMPLANT = 6
     OTHER = 7
+    PNR = 8
 
 
 class Layer:
@@ -22,6 +23,7 @@ class Layer:
     metalres = Material.METALRES
     marker = Material.MARKER
     implant = Material.IMPLANT
+    pnr = Material.PNR
     other = Material.OTHER
     
     def __init__(self):

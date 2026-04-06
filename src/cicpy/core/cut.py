@@ -181,6 +181,87 @@ class Cut(Cell):
         else:
             raise RuntimeError(f"Error: Could not create cut from {startlayer} to {stoplayer}")
 
+
+    @staticmethod
+    def getFillInstance(startlayer:str, stoplayer:str, rect:Rect):
+        """Create a cut instance that fills the provided overlap rectangle."""
+        if startlayer == stoplayer or rect is None:
+            return None
+
+        rules = Rules.getInstance()
+        layers = rules.getConnectStack(startlayer, stoplayer)
+        if len(layers) == 0:
+            return None
+
+        fill_cell = Cell()
+        fill_cell.name = "fillCut"
+
+        for l in layers:
+            if l.material in [Layer.metal, Layer.poly, Layer.diffusion]:
+                fill_cell.add(Rect(l.name, 0, 0, rect.width(), rect.height()))
+            elif l.material == Layer.cut:
+                try:
+                    enc_opp = rules.get(l.previous, l.name + "encOpposite")
+                except Exception:
+                    enc_opp = 0
+                try:
+                    enclosure = rules.get(l.previous, l.name + "enclosure")
+                except Exception:
+                    try:
+                        enclosure = rules.get(l.previous, "enclosure")
+                    except Exception:
+                        enclosure = 0
+                cut_width = rules.get(l.name, "width")
+                cut_height = rules.get(l.name, "height")
+                cut_space = rules.get(l.name, "space")
+
+                enc_x = enc_opp
+                enc_y = enclosure
+                if rect.isVertical() and not rect.isHorizontal():
+                    enc_x = enclosure
+                    enc_y = enc_opp
+                elif rect.isHorizontal() and not rect.isVertical():
+                    enc_x = enc_opp
+                    enc_y = enclosure
+                else:
+                    enc_x = enc_opp
+                    enc_y = enc_opp
+
+                width = max(0, rect.width() - enc_x * 2)
+                height = max(0, rect.height() - enc_y * 2)
+                hcuts = width // (cut_width + cut_space)
+                vcuts = height // (cut_height + cut_space)
+                if vcuts == 0 and cut_height > 0:
+                    vcuts = height // cut_height
+                if hcuts == 0 and cut_width > 0:
+                    hcuts = width // cut_width
+                hcuts = max(1, int(hcuts))
+                vcuts = max(1, int(vcuts))
+
+                fill_cell.name = Cut.makeName(layers[0].name, layers[-1].name, hcuts, vcuts)
+
+                xa1 = enc_x
+                ya1 = enc_y
+                if rect.isHorizontal():
+                    xa1 = int((rect.width() - hcuts * (cut_width + cut_space) + cut_space) / 2 / 10) * 10
+                if rect.isVertical():
+                    ya1 = int((rect.height() - vcuts * (cut_height + cut_space) + cut_space) / 2 / 10) * 10
+
+                for _x in range(hcuts):
+                    for _y in range(vcuts):
+                        fill_cell.add(Rect(l.name, xa1, ya1, cut_width, cut_height))
+                        ya1 += cut_height + cut_space
+                    ya1 = enc_y
+                    xa1 += cut_width + cut_space
+
+        fill_cell.updateBoundingRect()
+        fill_inst = InstanceCut()
+        fill_inst.setCell(fill_cell)
+        fill_inst.name = fill_cell.name
+        fill_inst.moveTo(rect.x1, rect.y1)
+        fill_inst.updateBoundingRect()
+        return fill_inst
+
     @staticmethod
     def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True):
         """Get cuts for a list of rectangles, matching C++ implementation"""
@@ -208,9 +289,11 @@ class Cut(Cell):
                     
                     xc = r.centerX()
                     
-                    # Resize rectangle if the center is not contained in the instance
+                    # Ensure the rectangle spans at least the cut width around its center.
                     if inst.x1 > xc or inst.x2 < xc:
-                        r.setWidth(inst.width())
+                        half = inst.width() / 2
+                        r.x1 = xc - half
+                        r.x2 = xc + half
                     
                     cuts_out.append(inst)
         

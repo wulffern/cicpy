@@ -7,11 +7,12 @@ This is a script package I use transpile from the output of ciccreator to other
 formats.
  
 # Changelog
-| Version | Status | Comment |
-|:--|:--|:--|
-|0.0.1| :white_check_mark: | First version of cicspy|
-|0.1.5| :white_check_mark: | First release to pypi|
-|0.1.8| :white_check_mark: | Added cicspi dependency and reorged to include subpackages|
+
+| Version | Status             | Comment                                                    |
+|:--------|:-------------------|:-----------------------------------------------------------|
+| 0.0.1   | :white_check_mark: | First version of cicspy                                    |
+| 0.1.5   | :white_check_mark: | First release to pypi                                      |
+| 0.1.8   | :white_check_mark: | Added cicspi dependency and reorged to include subpackages |
 
 # Install this module
 If you want to follow the latest and greatest

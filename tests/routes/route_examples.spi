@@ -1,0 +1,93 @@
+.subckt NCHDL D G S B
+.ends NCHDL
+
+.subckt ROUTE_STRAIGHT G
+xleft0 nd0 G ns0 nb0 NCHDL
+xright0 nd1 G ns1 nb1 NCHDL
+.ends ROUTE_STRAIGHT
+
+.subckt ROUTE_STRAIGHT_WITH_CUTS D
+xleft0 D ng0 ns0 nb0 NCHDL
+xright0 D ng1 ns1 nb1 NCHDL
+.ends ROUTE_STRAIGHT_WITH_CUTS
+
+.subckt ROUTE_STRAIGHT_WITH_FILLHCUT G
+xleft0 nd0 G ns0 nb0 NCHDL
+xright0 nd1 G ns1 nb1 NCHDL
+.ends ROUTE_STRAIGHT_WITH_FILLHCUT
+
+.subckt ROUTE_LEFT D
+xleft0 D ng0 ns0 nb0 NCHDL
+xleft1 D ng1 ns1 nb1 NCHDL
+xright0 D ng2 ns2 nb2 NCHDL
+.ends ROUTE_LEFT
+
+.subckt ROUTE_RIGHT S
+xleft0 nd0 ng0 S nb0 NCHDL
+xright0 nd1 ng1 S nb1 NCHDL
+xright1 nd2 ng2 S nb2 NCHDL
+.ends ROUTE_RIGHT
+
+.subckt ROUTE_VERTICAL D
+xcol0 D ng0 ns0 nb0 NCHDL
+xcol1 D ng1 ns1 nb1 NCHDL
+.ends ROUTE_VERTICAL
+
+.subckt ROUTE_VERTICAL_ANTENNA D
+xcol0 D ng0 ns0 nb0 NCHDL
+xcol1 D ng1 ns1 nb1 NCHDL
+xcol2 D ng2 ns2 nb2 NCHDL
+xcol3 D ng3 ns3 nb3 NCHDL
+.ends ROUTE_VERTICAL_ANTENNA
+
+.subckt ROUTE_U_LEFT D
+xcol0 D ng0 ns0 nb0 NCHDL
+xcol1 D ng1 ns1 nb1 NCHDL
+.ends ROUTE_U_LEFT
+
+.subckt ROUTE_U_RIGHT D
+xcol0 D ng0 ns0 nb0 NCHDL
+xcol1 D ng1 ns1 nb1 NCHDL
+.ends ROUTE_U_RIGHT
+
+.subckt ROUTE_U_TOP G
+xleft0 nd0 G ns0 nb0 NCHDL
+xright0 nd1 G ns1 nb1 NCHDL
+.ends ROUTE_U_TOP
+
+.subckt ROUTE_U_BOTTOM G
+xleft0 nd0 G ns0 nb0 NCHDL yoffset=4
+xright0 nd1 G ns1 nb1 NCHDL yoffset=4
+.ends ROUTE_U_BOTTOM
+
+.subckt ROUTE_LEFT_DOWN_LEFT_UP G
+xleft0 nd0 G ns0 nb0 NCHDL
+xleft1 nd1 G ns1 nb1 NCHDL
+xright0 nd2 G ns2 nb2 NCHDL
+xright1 nd3 G ns3 nb3 NCHDL
+.ends ROUTE_LEFT_DOWN_LEFT_UP
+
+.subckt ROUTE_LULD G
+xleft0 nd0 G ns0 nb0 NCHDL
+xleft1 nd1 G ns1 nb1 NCHDL
+xright0 nd2 G ns2 nb2 NCHDL yoffset=2
+xright1 nd3 G ns3 nb3 NCHDL yoffset=6
+.ends ROUTE_LULD
+
+.subckt ROUTE_STRAP_HORIZONTAL G
+xleft0 nd0 G ns0 nb0 NCHDL yoffset=2
+xright0 nd1 G ns1 nb1 NCHDL
+xright1 nd2 G ns2 nb2 NCHDL yoffset=4
+.ends ROUTE_STRAP_HORIZONTAL
+
+.subckt ROUTE_STRAP_VERTICAL D
+xsrc0 D ng0 ns0 nb0 NCHDL
+xmid0 D ng1 ns1 nb1 NCHDL yoffset=4
+xright0 D ng2 ns2 nb2 NCHDL yoffset=8
+.ends ROUTE_STRAP_VERTICAL
+
+.subckt ROUTE_ORTHOGONAL D
+xleft0 D ng0 ns0 nb0 NCHDL
+xmid0 D ng1 ns1 nb1 NCHDL yoffset=4
+xright0 D ng2 ns2 nb2 NCHDL yoffset=8
+.ends ROUTE_ORTHOGONAL

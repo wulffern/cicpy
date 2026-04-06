@@ -36,6 +36,7 @@ import gzip
 import json
 import re
 import logging
+import glob
 
 class Design():
 
@@ -56,7 +57,7 @@ class Design():
                 self.cells[cut.name] = cut
                 self.cellnames.insert(0, cut.name)  # Add at the beginning like C++
 
-    def fromJsonFile(self,fname):
+    def _readJsonFile(self, fname):
         jobj = None
 
         if(fname.endswith(".gz")):
@@ -72,6 +73,11 @@ class Design():
             log.error(f"Could not read {fname}, unrecognized format")
             raise Exception("Could not read %s, unrecognized format" % fname)
 
+        return jobj
+
+    def fromJsonFile(self,fname):
+        jobj = self._readJsonFile(fname)
+
         for o in jobj["cells"]:
             if("class" in o):
                 if(o["class"] == "cIcCore::Cell"):
@@ -84,6 +90,30 @@ class Design():
             self.cells[c.name] = c
             self.jcells[c.name] = o
             self.cellnames.append(c.name)
+
+    def fromJsonFiles(self, *fnames):
+        for fname in fnames:
+            if not fname:
+                continue
+            for expanded in sorted(glob.glob(fname)) or [fname]:
+                jobj = self._readJsonFile(expanded)
+                for o in jobj["cells"]:
+                    cname = o.get("name")
+                    if not cname:
+                        continue
+
+                    if("class" in o):
+                        if(o["class"] == "cIcCore::Cell"):
+                            c = LayoutCell()
+                        else:
+                            c = LayoutCell()
+
+                    c.design = self
+                    c.fromJson(o)
+                    self.cells[c.name] = c
+                    self.jcells[c.name] = o
+                    if c.name not in self.cellnames:
+                        self.cellnames.append(c.name)
         
 
 

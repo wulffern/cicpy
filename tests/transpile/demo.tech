@@ -62,6 +62,7 @@
 
             "mresM1" : { "name" : "devices__res",
                          "ports" : ["P","M"],
+                         "devicetype" : "R",
                          "propertymap" : {
                              "l" : { "name" : "length", "str" : "u"},
                              "w" : { "name" : "width", "str" : "u"}
@@ -71,6 +72,7 @@
             "mresM3" : { "inherit" : "mresM1", "name" : "devices__res"},
             "mresM4" : { "inherit" : "mresM1", "name" : "devices__res"},
             "mres" : { "name" : "devices__res",
+                       "devicetype" : "R",
                          "ports" : ["P","M"],
                          "propertymap" : {
                              "l" : { "name" : "length", "str" : "u"},
@@ -78,6 +80,7 @@
                          }
                        },
             "nch_lvt" : { "name" : "devices__nmos4",    "ports" : ["d","g","s","b"],
+                          "devicetype" : "XM",
                           "propertymap" : {
                               "l" : { "name" : "length", "str" : "*1u"},
                               "nf" : { "name" : "multiplier", "str" : ""},

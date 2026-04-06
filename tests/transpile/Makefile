@@ -9,3 +9,6 @@ clean:
 	-rm -rf SAR9B
 	-rm *.il
 	-rm *.v
+
+docs:
+	${PYTHON} ../gendoc.py transpile.md ../../docs/transpile.md

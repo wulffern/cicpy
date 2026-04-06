@@ -1,8 +1,9 @@
 
 from .cell import Cell
-from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo
+from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo, sortLeftOnTop, sortRightOnTop, sortBottomOnTop, sortTopOnTop
 from .text import Text
 from .rules import Rules
+from .cut import Cut
 import re
 import logging
 
@@ -32,6 +33,8 @@ class Route(Cell):
         self.stopRects = list(stop or [])
         self.routes = list()
         self.addAfterRoute = list()
+        self.startCutRects = list()
+        self.endCutRects = list()
         self.leftAlignCut = True
         self.startOffset = "NO_OFFSET"
         self.stopOffset = "NO_OFFSET"
@@ -50,6 +53,19 @@ class Route(Cell):
             self.fillvcut = True
         if re.search(r"antenna", self.options):
             self.antenna = True
+
+        if re.search(r"onTopR", self.options):
+            sortRightOnTop(self.startRects)
+            sortRightOnTop(self.stopRects)
+        elif re.search(r"onTopB", self.options):
+            sortBottomOnTop(self.startRects)
+            sortBottomOnTop(self.stopRects)
+        elif re.search(r"onTopT", self.options):
+            sortTopOnTop(self.startRects)
+            sortTopOnTop(self.stopRects)
+        else:
+            sortLeftOnTop(self.startRects)
+            sortLeftOnTop(self.stopRects)
 
         if len(self.startRects) == 0 and len(self.stopRects) > 0:
             r = self.stopRects.pop(0)
@@ -258,15 +274,77 @@ class Route(Cell):
         for r in children:
             self.add(r)
 
+    def _allowedCutCounts(self, hcuts, vcuts):
+        hcuts = int(hcuts)
+        vcuts = int(vcuts)
+        if vcuts > hcuts:
+            return (1, 2)
+        return (2, 1)
+
+    def _addCuts(self, rects, allcuts, hcuts, vcuts):
+        if self.routeLayer == "PO":
+            return []
+        default_hcuts, default_vcuts = self._allowedCutCounts(hcuts, vcuts)
+        cuts = []
+        for rect in rects:
+            if rect is None or self.routeLayer == rect.layer:
+                continue
+
+            cut_h = default_hcuts
+            cut_v = default_vcuts
+            if self.fillhcut and rect.isHorizontal():
+                cut_h, cut_v = (2, 1)
+            elif self.fillvcut and rect.isVertical():
+                cut_h, cut_v = (1, 2)
+
+            insts = Cut.getCutsForRects(self.routeLayer, [rect], cut_h, cut_v, self.leftAlignCut)
+            inst = insts[0] if insts else None
+            if inst is not None:
+                cuts.append(inst)
+                allcuts.append(inst)
+        return cuts
+
     def addStartCuts(self):
         if re.search(r"nostartcut", self.options):
             return
-        return
+
+        lcuts = self.startCuts if self.startCuts > 0 else self.cuts
+        lvcuts = self.startVCuts if self.startVCuts > 0 else self.vcuts
+        cuts = self._addCuts(self.startRects, self.startCutRects, lcuts, lvcuts)
+
+        if self.startOffsetCut == "HIGH":
+            for cut in cuts:
+                cut.translate(0, cut.height() / 2)
+            for rect in self.startRects:
+                rect.translate(0, rect.height() / 2)
+        elif self.startOffsetCut == "LOW":
+            for cut in cuts:
+                cut.translate(0, -cut.height() / 2)
+            for rect in self.startRects:
+                rect.translate(0, -rect.height() / 2)
+
+        self.addMany(cuts)
 
     def addEndCuts(self):
         if re.search(r"noendcut", self.options):
             return
-        return
+
+        lcuts = self.endCuts if self.endCuts > 0 else self.cuts
+        lvcuts = self.endVCuts if self.endVCuts > 0 else self.vcuts
+        cuts = self._addCuts(self.stopRects, self.endCutRects, lcuts, lvcuts)
+
+        if self.endOffsetCut == "HIGH":
+            for cut in cuts:
+                cut.translate(0, cut.height() / 2)
+            for rect in self.stopRects:
+                rect.translate(0, rect.height() / 2)
+        elif self.endOffsetCut == "LOW":
+            for cut in cuts:
+                cut.translate(0, -cut.height() / 2)
+            for rect in self.stopRects:
+                rect.translate(0, -rect.height() / 2)
+
+        self.addMany(cuts)
 
     def applyOffset(self, width, rect, offset):
         if offset == "HIGH":
@@ -276,7 +354,6 @@ class Route(Cell):
         self.updateBoundingRect()
 
     def route(self):
-        print(self)
         self.log.info(f"route() called: net={self.net}, layer={self.routeLayer}, routeType={self.routeType}, route={self.route_}, options={self.options}")
         
         # Take a copy of all route rects to ensure we don't change the originals
@@ -340,10 +417,798 @@ class Route(Cell):
         else:
             self.log.error(f"Error(route.py): Unknown route routeType={self.route_} net={self.net} layer={self.routeLayer} options={self.options}")
 
-        if len(self.startRects) > 0:
+        if len(self.startRects) > 0 and not re.search(r"nolabel(,|\s+|$)", self.options):
             r = self.startRects[0]
             t = Text(self.name)
             t.moveTo(r.x1, r.y1)
+            self.add(t)
+
+
+    def routeOne(self):
+        self.log.info(f"routeOne: net={self.net}, layer={self.routeLayer}, route={self.route_}, options={self.options}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        if re.search(r"noSpace", self.options):
+            space = -width
+        x_left = min(r.x1 for r in self.startRects) if self.startRects else 0
+        x_right = max(r.x2 for r in self.startRects) if self.startRects else 0
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+        x = 0
+        if self.routeType == "RIGHT":
+            x = x_left - space - width
+            if self.hasTrack:
+                x = x - hgrid*self.track - space
+            x = self._findFreeTrack(x, -1)
+        elif self.routeType == "LEFT":
+            x = x_right + space
+            if self.hasTrack:
+                x = x + hgrid*self.track + space
+            x = self._findFreeTrack(x, +1)
+        if self.startTrim == "TRIM_START_LEFT":
+            for rect in self.startRects:
+                rect.setLeft(rect.x2 - 2*width)
+        elif self.startTrim == "TRIM_START_RIGHT":
+            for rect in self.startRects:
+                rect.setRight(rect.x1 + 2*width)
+        if self.endTrim == "TRIM_END_LEFT":
+            for rect in self.stopRects:
+                rect.setLeft(rect.x2 - 2*width)
+        elif self.endTrim == "TRIM_END_RIGHT":
+            for rect in self.stopRects:
+                rect.setRight(rect.x1 + 2*width)
+        self.addHorizontalTo(x, self.startRects, self.startOffset)
+        self.addHorizontalTo(x, self.stopRects, self.stopOffset)
+        self.updateBoundingRect()
+        self.addVertical(x)
+        for r in self.addAfterRoute:
+            self.add(r)
+
+
+    def routeLeftDownLeftUp(self):
+        self.log.info(f"routeLeftDownLeftUp: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        x = max(r.x2 for r in self.startRects) + space*2 if self.startRects else 0
+        for rect in self.startRects:
+            r = Rect(self.routeLayer, rect.x1, rect.y1, x-rect.x1, width)
+            self.applyOffset(width, r, self.startOffset)
+            self.add(r)
+        for rect in self.stopRects:
+            x1 = rect.x1
+            if x1 > x:
+                ra = Rect(self.routeLayer, x, rect.y1-space-width, x1-x, width)
+            else:
+                ra = Rect(self.routeLayer, x1, rect.y1-space-width, x-x1, width)
+            rb = Rect(self.routeLayer, ra.x2-width, ra.y1, width, rect.y2 - ra.y1)
+            self.add(ra)
+            self.add(rb)
+        self.updateBoundingRect()
+        r = Rect(self.routeLayer, x, self.y1, width, self.height())
+        self.add(r)
+
+
+    def routeLeftUpLeftDown(self):
+        self.log.info(f"routeLeftUpLeftDown: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        x = max(r.x2 for r in self.startRects) + space*2 if self.startRects else 0
+        y = 0
+        for rect in self.startRects:
+            r = Rect(self.routeLayer, rect.x1, rect.y1, x-rect.x1, width)
+            self.applyOffset(width, r, self.startOffset)
+            self.add(r)
+            rc = Rect(self.routeLayer, r.x2, r.y1, width, space+width)
+            self.add(rc)
+            if rc.y2 > y:
+                y = rc.y2
+        for rect in self.stopRects:
+            x1 = rect.x1
+            if x1 > x:
+                ra = Rect(self.routeLayer, x, y, x1-x, width)
+            else:
+                ra = Rect(self.routeLayer, x1, y, x-x1, width)
+            rb = Rect(self.routeLayer, rect.x1-width, rect.y1, width, ra.y2 - rect.y1)
+            self.add(ra)
+            self.add(rb)
+        self.updateBoundingRect()
+
+
+    def routeStrap(self):
+        self.log.info(f"routeStrap: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}, options={self.options}")
+        
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        vertical = re.search(r"vertical(,|\\s+|$)", self.options) is not None
+        if vertical:
+            if len(self.startRects) == 1:
+                sr = self.startRects[0]
+                for r in self.stopRects:
+                    rc = Rect(self.routeLayer, r.x1, sr.y1, width, r.y1 - sr.y1)
+                    self.add(rc)
+        else:
+            if len(self.startRects) == 1:
+                sr = self.startRects[0]
+                for r in self.stopRects:
+                    rc = Rect(self.routeLayer, sr.x1, r.y1, r.x1 - sr.x1, width)
+                    self.add(rc)
+            elif len(self.stopRects) == 1:
+                sr = self.stopRects[0]
+                for r in self.startRects:
+                    rc = Rect(self.routeLayer, r.x2, r.y1, sr.x2 - r.x2, width)
+                    self.add(rc)
+
+
+    def addVertical(self, x):
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        if re.search(r"novert", self.options):
+            return
+        if len(self.routes) == 0:
+            self.log.warning(f"addVertical: No routes found for net {self.net}, cannot create vertical connection")
+            return
+
+        from .cell import Cell
+        route_bound = Cell.calcBoundingRectFromList(self.routes)
+        y1_m = route_bound.y1
+        y2_m = route_bound.y2
+
+        if self.antenna:
+            next1 = rules.getNextLayer(self.routeLayer)
+            next2 = rules.getNextLayer(next1) if next1 else ""
+            if next2:
+                c1 = Cut.getInstance(self.routeLayer, next2, 1, 2)
+                c2 = Cut.getInstance(self.routeLayer, next2, 1, 2)
+                if c1 and c2 and (y2_m - y1_m) > (c1.height() * 2 + width * 2):
+                    r = Rect(next2, x, y1_m, width, y2_m - y1_m)
+                    c1.moveTo(x, y1_m)
+                    c2.moveTo(x, r.y2 - c2.height())
+                    self.add(c1)
+                    self.add(c2)
+                    self.add(r)
+                    return
+
+        r = VerticalRectangleFromTo(self.routeLayer, x, y1_m, y2_m, width)
+        if r:
+            self.add(r)
+
+
+    def routeVertical(self):
+        self.log.info(f"routeVertical: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
+        if not (len(self.startRects) > 0 and len(self.stopRects) > 0):
+            return
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        yc = min(min(r.y1 for r in self.startRects), min(r.y1 for r in self.stopRects))
+        height = max(r.y2 for r in self.stopRects) - yc
+        xc_center = int(min(r.centerX() for r in self.startRects))
+        xc = xc_center - int(width / 2)
+
+        for cut in self.startCutRects + self.endCutRects:
+            cut.moveCenter(xc_center, cut.centerY())
+
+        r = Rect(self.routeLayer, xc, yc, width, height)
+        self.add(r)
+
+
+    def routeStraight(self):
+        self.log.info(f"routeStraight: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        
+        if len(self.startRects) == len(self.stopRects):
+            count = len(self.startRects)
+            for x in range(count):
+                r1 = self.startRects[x]
+                r2 = self.stopRects[x]
+                height = min(r1.height(), r2.height())
+                center = r1.centerY()
+                r = Rect(self.routeLayer, r1.x1, center - height/2.0, r2.x2 - r1.x1, height)
+                self.add(r)
+                if x < len(self.endCutRects):
+                    self.endCutRects[x].moveCenter(r2.centerX(), center)
+        elif len(self.startRects) == 1:
+            r1 = self.startRects[0]
+            for idx, r2 in enumerate(self.stopRects):
+                height = min(r1.height(), r2.height())
+                center = r1.centerY()
+                r = Rect(self.routeLayer, r1.x1, center - height/2.0, r2.x2 - r1.x1, height)
+                self.add(r)
+                if idx < len(self.endCutRects):
+                    self.endCutRects[idx].moveCenter(r2.centerX(), center)
+
+
+    def routeUHorizontal(self):
+        self.log.info(f"routeUHorizontal: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        vgrid = rules.get("ROUTE", "verticalgrid")
+
+        allrect = self.startRects + self.stopRects
+        if len(allrect) == 0:
+            return
+
+        all_bound = Cell.calcBoundingRectFromList(allrect)
+        y = 0
+        if self.routeType == "U_TOP":
+            y = all_bound.top() + space
+            if self.hasTrack:
+                y = y + vgrid * self.track + space
+        elif self.routeType == "U_BOTTOM":
+            y = all_bound.bottom() - space - width
+            if self.hasTrack:
+                y = y - vgrid * self.track - space
+        else:
+            self.log.error(f"Unknown U horizontal route type: {self.routeType}")
+            return
+
+        rect = HorizontalRectangleFromTo(self.routeLayer, all_bound.left(), all_bound.right(), y, width)
+        if rect:
+            self.add(rect)
+
+        for r in allrect:
+            ra = None
+            if self.routeType == "U_BOTTOM":
+                ra = VerticalRectangleFromTo(self.routeLayer, r.x1 - width, rect.y1, r.y2, width)
+            elif self.routeType == "U_TOP":
+                ra = VerticalRectangleFromTo(self.routeLayer, r.x1 - width, r.y1, rect.y2, width)
+            if ra:
+                self.add(ra)
+        self.updateBoundingRect()
+
+
+    def routeU(self):
+        self.log.info(f"routeU: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+
+        allrect = self.startRects + self.stopRects
+        if len(allrect) == 0:
+            return
+
+        all_bound = Cell.calcBoundingRectFromList(allrect)
+        x = 0
+        if self.routeType == "U_RIGHT":
+            x = all_bound.right() + space
+            if self.hasTrack:
+                x = x + hgrid * self.track + space
+        elif self.routeType == "U_LEFT":
+            x = all_bound.left() - space - width
+            if self.hasTrack:
+                x = x - hgrid * self.track - space
+        else:
+            self.log.error(f"Unknown U route type: {self.routeType}")
+            return
+
+        self.addHorizontalTo(x, self.startRects, self.startOffset)
+        self.addHorizontalTo(x, self.stopRects, self.stopOffset)
+        self.updateBoundingRect()
+        self.addVertical(x)
+
+
+    def addHorizontalTo(self, x, rects, offset):
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        minwidth = width
+        try:
+            minwidth = rules.get(self.routeLayer, "minwidth")
+        except Exception as e:
+            self.log.debug(f"No minwidth rule for layer {self.routeLayer}, using width: {e}")
+            pass
+        for r in rects:
+            if offset in ("HIGH", "LOW"):
+                x1 = r.centerX()
+                if x1 < x:
+                    rect1 = HorizontalRectangleFromTo(self.routeLayer, r.centerX(), r.x2, r.y1, width)
+                    rect2 = HorizontalRectangleFromTo(self.routeLayer, r.x2 - minwidth, x, r.y1, width)
+                    if rect1 and rect2:
+                        self.addAfterRoute.append(rect1)
+                        self.add(rect2)
+                        self.applyOffset(width, rect2, offset)
+                else:
+                    rect1 = HorizontalRectangleFromTo(self.routeLayer, r.x1, r.centerX(), r.y1, width)
+                    rect2 = HorizontalRectangleFromTo(self.routeLayer, r.x1 + minwidth, x, r.y1, width)
+                    if rect1 and rect2:
+                        self.addAfterRoute.append(rect1)
+                        self.add(rect2)
+                        self.applyOffset(width, rect2, offset)
+            else:
+                rect = HorizontalRectangleFromTo(self.routeLayer, r.centerX(), x, r.y1, width)
+                if rect:
+                    self.add(rect)
+
+class OrthogonalLayerRoute(Cell):
+
+    def __init__(self, net, vertical_layer, horizontal_layer, access_rects, options="", cuts=1):
+        super().__init__(net)
+        self.log = logging.getLogger("OrthogonalLayerRoute")
+        self.net = net
+        self.verticalLayer = vertical_layer
+        self.horizontalLayer = horizontal_layer
+        self.accessRects = list(access_rects or [])
+        self.options = options or ""
+        self.cuts = cuts
+        self.hasTrack = False
+        self.track = 0
+        self.hasBranchTrack = False
+        self.branchTrack = 0
+        self.trackDirection = +1
+        self.anchorMode = "bbox"
+        if re.search(r"(^|[ ,])left([ ,]|$)", self.options):
+            self.trackDirection = -1
+        elif re.search(r"(^|[ ,])right([ ,]|$)", self.options):
+            self.trackDirection = +1
+        elif re.search(r"(^|[ ,])(center|balanced)([ ,]|$)", self.options):
+            self.trackDirection = 0
+
+        if re.search(r"onTopRight(,|\s+|$)", self.options):
+            self.anchorMode = "right"
+        elif re.search(r"onTopLeft(,|\s+|$)", self.options):
+            self.anchorMode = "left"
+        elif re.search(r"onTopTop(,|\s+|$)", self.options):
+            self.anchorMode = "top"
+        elif re.search(r"onTopBottom(,|\s+|$)", self.options):
+            self.anchorMode = "bottom"
+        m = re.search(r"track(\d+)", self.options)
+        if m:
+            self.hasTrack = True
+            self.track = int(m.group(1))
+        m = re.search(r"branchtrack(\d+)", self.options)
+        if m:
+            self.hasBranchTrack = True
+            self.branchTrack = int(m.group(1))
+        m = re.search(r"routeWidth=([^,\s+,$]+)", self.options)
+        self.routeWidthRule = m.group(1) if m else "width"
+
+    def _rects_touch_or_overlap(self, rect1, rect2):
+        if rect1 is None or rect2 is None:
+            return False
+        if rect1.x2 < rect2.x1 or rect2.x2 < rect1.x1:
+            return False
+        if rect1.y2 < rect2.y1 or rect2.y2 < rect1.y1:
+            return False
+        return True
+
+    def _layers_directly_connect(self, layer1, layer2):
+        if layer1 == layer2:
+            return True
+        rules = Rules.getInstance()
+        if rules is None:
+            return False
+        layer_obj_1 = rules.getLayer(layer1)
+        layer_obj_2 = rules.getLayer(layer2)
+        if layer_obj_1 is None or layer_obj_2 is None:
+            return False
+        if getattr(layer_obj_1, "next", "") == layer2:
+            return True
+        if getattr(layer_obj_1, "previous", "") == layer2:
+            return True
+        if getattr(layer_obj_2, "next", "") == layer1:
+            return True
+        if getattr(layer_obj_2, "previous", "") == layer1:
+            return True
+        return False
+
+    def _same_net_physical_rects(self):
+        parent = getattr(self, "parent", None)
+        if parent is None or not hasattr(parent, "_collectPhysicalRects"):
+            return []
+        rects = parent._collectPhysicalRects()
+        return [rr for rr in rects if getattr(rr, "net", "") == self.net]
+
+    def _connected_components(self, rects):
+        components = []
+        seen = [False] * len(rects)
+        for i, rect in enumerate(rects):
+            if seen[i]:
+                continue
+            queue = [i]
+            seen[i] = True
+            comp = []
+            while queue:
+                idx = queue.pop()
+                current = rects[idx]
+                comp.append(current)
+                for j, other in enumerate(rects):
+                    if seen[j]:
+                        continue
+                    if not self._layers_directly_connect(current.layer, other.layer):
+                        continue
+                    if not self._rects_touch_or_overlap(current, other):
+                        continue
+                    seen[j] = True
+                    queue.append(j)
+            components.append(comp)
+        return components
+
+    def _collapse_access_rects(self):
+        same_net_rects = self._same_net_physical_rects()
+        if not same_net_rects:
+            return list(self.accessRects)
+
+        components = self._connected_components(same_net_rects)
+        grouped = {}
+        floating_index = 0
+        for rect in self.accessRects:
+            key = None
+            for idx, comp in enumerate(components):
+                if any(self._layers_directly_connect(rect.layer, rr.layer) and self._rects_touch_or_overlap(rect, rr) for rr in comp):
+                    key = ("component", idx)
+                    break
+            if key is None:
+                key = ("floating", floating_index)
+                floating_index += 1
+            grouped.setdefault(key, []).append(rect)
+
+        collapsed = []
+        for rects in grouped.values():
+            rect = sorted(rects, key=lambda r: (r.x2, r.centerY(), r.y1), reverse=True)[0]
+            collapsed.append(rect)
+        collapsed.sort(key=lambda r: (r.centerY(), r.centerX(), r.x1))
+        return collapsed
+
+    def _cut_shape_for_rect(self, rect):
+        if rect.height() >= rect.width():
+            return (1, 2)
+        return (2, 1)
+
+    def _anchor_sorted_access_rects(self, rects):
+        ordered = list(rects)
+        if self.anchorMode == "left":
+            sortLeftOnTop(ordered)
+        elif self.anchorMode == "right":
+            sortRightOnTop(ordered)
+        elif self.anchorMode == "top":
+            sortTopOnTop(ordered)
+        elif self.anchorMode == "bottom":
+            sortBottomOnTop(ordered)
+        return ordered
+
+    def _trunk_anchor_rect(self):
+        if not self.accessRects:
+            return None
+        ordered = self._anchor_sorted_access_rects(self.accessRects)
+        if ordered:
+            return ordered[0]
+        return self.accessRects[0]
+
+    def _instantiate_cut(self, layer1, layer2, hcuts, vcuts, xc, yc):
+        cut = Cut.getInstance(layer1, layer2, hcuts, vcuts)
+        cut.moveCenter(xc, yc)
+        return cut
+
+    def _instantiate_cut_on_rect_x(self, route_layer, rect, hcuts, vcuts, yc, left_align=True):
+        if rect is None or route_layer == rect.layer:
+            return None
+        cut = Cut.getInstance(route_layer, rect.layer, hcuts, vcuts)
+        if cut is None:
+            return None
+        if (rect.isVertical() and cut.isHorizontal()) or (rect.isHorizontal() and cut.isVertical()):
+            cut = Cut.getInstance(route_layer, rect.layer, vcuts, hcuts)
+        if cut is None:
+            return None
+        x = rect.x1 if left_align else rect.x2 - cut.width()
+        y = yc - cut.height() / 2
+        cut.moveTo(x, y)
+        return cut
+
+    def _translated_cut_rects(self, cut_inst, layer):
+        cell = getattr(cut_inst, "_cell_obj", None)
+        rects = []
+        if cell is None:
+            return rects
+        for child in cell.children:
+            if child is None or not child.isRect() or child.layer != layer:
+                continue
+            rr = child.getCopy()
+            rr.translate(cut_inst.x1, cut_inst.y1)
+            rects.append(rr)
+        return rects
+
+    def _connect_pads_with_horizontal(self, left_pad, right_pad, height):
+        if left_pad.centerX() <= right_pad.centerX():
+            x1 = left_pad.x2
+            x2 = right_pad.x1
+        else:
+            x1 = left_pad.x1
+            x2 = right_pad.x2
+        return HorizontalRectangleFromTo(
+            self.horizontalLayer,
+            x1,
+            x2,
+            left_pad.centerY() - height / 2,
+            height,
+        )
+
+    def _connect_pads_with_vertical(self, lower_pad, upper_pad, width):
+        if lower_pad.centerY() <= upper_pad.centerY():
+            y1 = lower_pad.y2
+            y2 = upper_pad.y1
+        else:
+            y1 = upper_pad.y2
+            y2 = lower_pad.y1
+        return VerticalRectangleFromTo(
+            self.verticalLayer,
+            lower_pad.centerX(),
+            y1,
+            y2,
+            width,
+        )
+
+    def _branch_band_y(self):
+        if not self.accessRects:
+            return 0
+        if not self.hasBranchTrack:
+            return None
+        rules = Rules.getInstance()
+        vgrid = rules.get("ROUTE", "verticalgrid")
+        base_y = min(rect.centerY() for rect in self.accessRects)
+        return base_y + self.branchTrack * vgrid
+
+    def add(self, child):
+        if child is not None and hasattr(child, "isRect") and child.isRect():
+            child.route_owner = self
+            child.route_owner_info = {
+                "name": getattr(self, "name", ""),
+                "net": getattr(self, "net", ""),
+                "layer": f"{getattr(self, 'verticalLayer', '')}/{getattr(self, 'horizontalLayer', '')}",
+                "route": "orthogonal",
+                "options": getattr(self, "options", ""),
+                "debug_api": getattr(self, "debug_api", ""),
+                "debug_callsite": getattr(self, "debug_callsite", ""),
+                "debug_command": getattr(self, "debug_command", ""),
+            }
+        super().add(child)
+
+    def _candidate_vertical_rect(self, x):
+        if len(self.accessRects) == 0:
+            return None
+        rules = Rules.getInstance()
+        width = rules.get(self.verticalLayer, self.routeWidthRule)
+        y1 = min(rect.y1 for rect in self.accessRects)
+        y2 = max(rect.y2 for rect in self.accessRects)
+        return VerticalRectangleFromTo(self.verticalLayer, x, y1, y2, width)
+
+    def _segments_for_candidate(self, x):
+        rules = Rules.getInstance()
+        hwidth = rules.get(self.horizontalLayer, self.routeWidthRule)
+        segments = []
+        trunk = self._candidate_vertical_rect(x)
+        if trunk is not None:
+            segments.append(trunk)
+        for rect in self.accessRects:
+            branch = HorizontalRectangleFromTo(
+                self.horizontalLayer,
+                rect.centerX(),
+                x,
+                rect.centerY() - hwidth / 2,
+                hwidth,
+            )
+            if branch is not None:
+                segments.append(branch)
+        return segments
+
+    def _is_candidate_blocked(self, x):
+        parent = getattr(self, "parent", None)
+        if parent is None or not hasattr(parent, "getOccupiedRectangles"):
+            return False
+
+        rules = Rules.getInstance()
+        vspace = rules.get(self.verticalLayer, "space")
+        hspace = rules.get(self.horizontalLayer, "space")
+        blocked_vertical = parent.getOccupiedRectangles(self.verticalLayer, ignoreNet=self.net)
+        blocked_horizontal = parent.getOccupiedRectangles(self.horizontalLayer, ignoreNet=self.net)
+
+        for segment in self._segments_for_candidate(x):
+            test_rect = segment.getCopy()
+            if segment.layer == self.verticalLayer:
+                test_rect.adjust(-vspace, -vspace, vspace, vspace)
+                for occ in blocked_vertical:
+                    if self._rects_touch_or_overlap(test_rect, occ):
+                        return True
+            elif segment.layer == self.horizontalLayer:
+                test_rect.adjust(-hspace, -hspace, hspace, hspace)
+                for occ in blocked_horizontal:
+                    if self._rects_touch_or_overlap(test_rect, occ):
+                        return True
+        return False
+
+    def _find_free_track(self, x, direction):
+        rules = Rules.getInstance()
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+        candidate = x
+        max_steps = 200
+        for _ in range(max_steps):
+            if not self._is_candidate_blocked(candidate):
+                return candidate
+            candidate += direction * hgrid
+        return x
+
+    def _find_balanced_track(self, x_target):
+        rules = Rules.getInstance()
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+        candidate = int(round(x_target / hgrid)) * hgrid
+        max_steps = 200
+        best = None
+        for step in range(max_steps + 1):
+            for sign in (0, -1, 1):
+                if step == 0 and sign != 0:
+                    continue
+                if step != 0 and sign == 0:
+                    continue
+                trial = candidate + sign * step * hgrid
+                if self._is_candidate_blocked(trial):
+                    continue
+                score = (abs(trial - x_target), step, trial)
+                if best is None or score < best[0]:
+                    best = (score, trial)
+            if best is not None:
+                return best[1]
+        return candidate
+
+    def route(self):
+        self.accessRects = self._collapse_access_rects()
+        if len(self.accessRects) == 0:
+            return
+        if len(self.accessRects) == 1:
+            if not re.search(r"nolabel(,|\s+|$)", self.options):
+                r = self.accessRects[0]
+                t = Text(self.name)
+                t.moveTo(r.x1, r.y1)
+                self.add(t)
+            return
+
+        rules = Rules.getInstance()
+        vspace = rules.get(self.verticalLayer, "space")
+        vwidth = rules.get(self.verticalLayer, self.routeWidthRule)
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+        x_right = max(rect.x2 for rect in self.accessRects)
+        x_left = min(rect.x1 for rect in self.accessRects)
+        anchor_rect = self._trunk_anchor_rect() if self.anchorMode != "bbox" else None
+        anchor_left = anchor_rect.x1 if anchor_rect is not None else x_left
+        anchor_right = anchor_rect.x2 if anchor_rect is not None else x_right
+        if self.trackDirection < 0:
+            if self.hasTrack:
+                # Explicit track: trackN = anchor - (N+1)*space - (N+1)*metal_width
+                trunk_x = anchor_left - (self.track + 1) * (vspace + vwidth)
+            else:
+                trunk_x = anchor_left - vspace
+                trunk_x = self._find_free_track(trunk_x, -1)
+        elif self.trackDirection > 0:
+            if self.hasTrack:
+                # Explicit track: trackN = anchor + (N+1)*space + N*metal_width
+                trunk_x = anchor_right + (self.track + 1) * vspace + self.track * vwidth
+            else:
+                trunk_x = anchor_right + vspace
+                trunk_x = self._find_free_track(trunk_x, +1)
+        else:
+            trunk_x = 0.5 * (x_left + x_right)
+            if self.hasTrack:
+                trunk_x += self.track * hgrid
+            trunk_x = self._find_balanced_track(trunk_x)
+
+        segments = self._segments_for_candidate(trunk_x)
+        trunk = None
+        raw_branches = []
+        for segment in segments:
+            if segment.layer == self.verticalLayer:
+                trunk = segment
+            elif segment.layer == self.horizontalLayer:
+                raw_branches.append(segment)
+
+        access_branches = []
+        trunk_cuts = []
+        branch_band_y = self._branch_band_y()
+        vwidth = rules.get(self.verticalLayer, self.routeWidthRule)
+        for access, branch in zip(self.accessRects, raw_branches):
+            hcuts, vcuts = self._cut_shape_for_rect(access)
+            if branch_band_y is None:
+                access_cut = self._instantiate_cut(self.horizontalLayer, access.layer, hcuts, vcuts, access.centerX(), access.centerY())
+                access_route_pads = self._translated_cut_rects(access_cut, self.horizontalLayer)
+                access_access_pads = self._translated_cut_rects(access_cut, access.layer)
+                if not access_route_pads:
+                    continue
+                access_route_pad = access_route_pads[0]
+
+                trunk_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, trunk, 1, 2, access_route_pad.centerY(), True)
+                trunk_route_pads = self._translated_cut_rects(trunk_cut, self.horizontalLayer)
+                trunk_vertical_pads = self._translated_cut_rects(trunk_cut, self.verticalLayer)
+                if not trunk_route_pads:
+                    continue
+                trunk_route_pad = trunk_route_pads[0]
+
+                if access_access_pads:
+                    for rr in access_access_pads:
+                        rr.net = self.net
+                        self.add(rr)
+                for rr in access_route_pads:
+                    rr.net = self.net
+                    self.add(rr)
+                for rr in trunk_route_pads:
+                    rr.net = self.net
+                    self.add(rr)
+                for rr in trunk_vertical_pads:
+                    rr.net = self.net
+                    self.add(rr)
+
+                branch = self._connect_pads_with_horizontal(access_route_pad, trunk_route_pad, branch.height())
+                if branch is not None:
+                    branch.net = self.net
+                    self.add(branch)
+                    access_branches.append(branch)
+
+                self.add(access_cut)
+                self.add(trunk_cut)
+                trunk_cuts.append(trunk_cut)
+                continue
+
+            access_cut = None
+            access_vertical_pads = []
+            access_access_pads = []
+            if access.layer == self.verticalLayer:
+                access_vertical_pad = access.getCopy()
+                access_vertical_pads = [access_vertical_pad]
+            else:
+                access_cut = self._instantiate_cut(self.verticalLayer, access.layer, hcuts, vcuts, access.centerX(), access.centerY())
+                access_vertical_pads = self._translated_cut_rects(access_cut, self.verticalLayer)
+                access_access_pads = self._translated_cut_rects(access_cut, access.layer)
+                if not access_vertical_pads:
+                    continue
+                access_vertical_pad = access_vertical_pads[0]
+
+            branch_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, access_vertical_pad, 1, 2, branch_band_y, True)
+            branch_route_pads = self._translated_cut_rects(branch_cut, self.horizontalLayer)
+            branch_vertical_pads = self._translated_cut_rects(branch_cut, self.verticalLayer)
+            if not branch_route_pads or not branch_vertical_pads:
+                continue
+            branch_route_pad = branch_route_pads[0]
+            branch_vertical_pad = branch_vertical_pads[0]
+
+            trunk_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, trunk, 1, 2, branch_route_pad.centerY(), True)
+            trunk_route_pads = self._translated_cut_rects(trunk_cut, self.horizontalLayer)
+            trunk_vertical_pads = self._translated_cut_rects(trunk_cut, self.verticalLayer)
+            if not trunk_route_pads or not trunk_vertical_pads:
+                continue
+            trunk_route_pad = trunk_route_pads[0]
+
+            if access_access_pads:
+                for rr in access_access_pads:
+                    rr.net = self.net
+                    self.add(rr)
+            for rr in access_vertical_pads + branch_route_pads + branch_vertical_pads + trunk_route_pads + trunk_vertical_pads:
+                rr.net = self.net
+                self.add(rr)
+
+            jog = self._connect_pads_with_vertical(access_vertical_pad, branch_vertical_pad, vwidth)
+            if jog is not None:
+                jog.net = self.net
+                self.add(jog)
+            branch = self._connect_pads_with_horizontal(branch_route_pad, trunk_route_pad, branch.height())
+            if branch is not None:
+                branch.net = self.net
+                self.add(branch)
+                access_branches.append(branch)
+
+            if access_cut is not None:
+                self.add(access_cut)
+            self.add(branch_cut)
+            self.add(trunk_cut)
+            trunk_cuts.append(trunk_cut)
+
+        if trunk is not None:
+            trunk.net = self.net
+            self.add(trunk)
+
+        if not re.search(r"nolabel(,|\s+|$)", self.options):
+            t = Text(self.name)
+            t.moveTo(trunk_x, min(rect.y1 for rect in self.accessRects))
             self.add(t)
 
     def routeOne(self):
@@ -468,14 +1333,29 @@ class Route(Cell):
         if re.search(r"novert", self.options):
             return
         if len(self.routes) == 0:
-            # Log warning if routes is empty
             self.log.warning(f"addVertical: No routes found for net {self.net}, cannot create vertical connection")
             return
-        # Don't include cuts into the equation for start and stop rects
+
         from .cell import Cell
         route_bound = Cell.calcBoundingRectFromList(self.routes)
         y1_m = route_bound.y1
         y2_m = route_bound.y2
+
+        if self.antenna:
+            next1 = rules.getNextLayer(self.routeLayer)
+            next2 = rules.getNextLayer(next1) if next1 else ""
+            if next2:
+                c1 = Cut.getInstance(self.routeLayer, next2, 1, 2)
+                c2 = Cut.getInstance(self.routeLayer, next2, 1, 2)
+                if c1 and c2 and (y2_m - y1_m) > (c1.height() * 2 + width * 2):
+                    r = Rect(next2, x, y1_m, width, y2_m - y1_m)
+                    c1.moveTo(x, y1_m)
+                    c2.moveTo(x, r.y2 - c2.height())
+                    self.add(c1)
+                    self.add(c2)
+                    self.add(r)
+                    return
+
         r = VerticalRectangleFromTo(self.routeLayer, x, y1_m, y2_m, width)
         if r:
             self.add(r)
@@ -489,9 +1369,13 @@ class Route(Cell):
         width = rules.get(self.routeLayer, self.routeWidthRule)
         yc = min(min(r.y1 for r in self.startRects), min(r.y1 for r in self.stopRects))
         height = max(r.y2 for r in self.stopRects) - yc
-        xc = int(min(r.centerX() for r in self.startRects)) - int(width/2)
+        xc_center = int(min(r.centerX() for r in self.startRects))
+        xc = xc_center - int(width / 2)
+
+        for cut in self.startCutRects + self.endCutRects:
+            cut.moveCenter(xc_center, cut.centerY())
+
         r = Rect(self.routeLayer, xc, yc, width, height)
-        
         self.add(r)
 
     def routeStraight(self):
@@ -506,13 +1390,86 @@ class Route(Cell):
                 center = r1.centerY()
                 r = Rect(self.routeLayer, r1.x1, center - height/2.0, r2.x2 - r1.x1, height)
                 self.add(r)
+                if x < len(self.endCutRects):
+                    self.endCutRects[x].moveCenter(r2.centerX(), center)
         elif len(self.startRects) == 1:
             r1 = self.startRects[0]
-            for r2 in self.stopRects:
+            for idx, r2 in enumerate(self.stopRects):
                 height = min(r1.height(), r2.height())
                 center = r1.centerY()
                 r = Rect(self.routeLayer, r1.x1, center - height/2.0, r2.x2 - r1.x1, height)
                 self.add(r)
+                if idx < len(self.endCutRects):
+                    self.endCutRects[idx].moveCenter(r2.centerX(), center)
+
+    def routeUHorizontal(self):
+        self.log.info(f"routeUHorizontal: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        vgrid = rules.get("ROUTE", "verticalgrid")
+
+        allrect = self.startRects + self.stopRects
+        if len(allrect) == 0:
+            return
+
+        all_bound = Cell.calcBoundingRectFromList(allrect)
+        y = 0
+        if self.routeType == "U_TOP":
+            y = all_bound.top() + space
+            if self.hasTrack:
+                y = y + vgrid * self.track + space
+        elif self.routeType == "U_BOTTOM":
+            y = all_bound.bottom() - space - width
+            if self.hasTrack:
+                y = y - vgrid * self.track - space
+        else:
+            self.log.error(f"Unknown U horizontal route type: {self.routeType}")
+            return
+
+        rect = HorizontalRectangleFromTo(self.routeLayer, all_bound.left(), all_bound.right(), y, width)
+        if rect:
+            self.add(rect)
+
+        for r in allrect:
+            ra = None
+            if self.routeType == "U_BOTTOM":
+                ra = VerticalRectangleFromTo(self.routeLayer, r.x1 - width, rect.y1, r.y2, width)
+            elif self.routeType == "U_TOP":
+                ra = VerticalRectangleFromTo(self.routeLayer, r.x1 - width, r.y1, rect.y2, width)
+            if ra:
+                self.add(ra)
+        self.updateBoundingRect()
+
+    def routeU(self):
+        self.log.info(f"routeU: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
+        rules = Rules.getInstance()
+        width = rules.get(self.routeLayer, self.routeWidthRule)
+        space = rules.get(self.routeLayer, "space")
+        hgrid = rules.get("ROUTE", "horizontalgrid")
+
+        allrect = self.startRects + self.stopRects
+        if len(allrect) == 0:
+            return
+
+        all_bound = Cell.calcBoundingRectFromList(allrect)
+        x = 0
+        if self.routeType == "U_RIGHT":
+            x = all_bound.right() + space
+            if self.hasTrack:
+                x = x + hgrid * self.track + space
+        elif self.routeType == "U_LEFT":
+            x = all_bound.left() - space - width
+            if self.hasTrack:
+                x = x - hgrid * self.track - space
+        else:
+            self.log.error(f"Unknown U route type: {self.routeType}")
+            return
+
+        self.addHorizontalTo(x, self.startRects, self.startOffset)
+        self.addHorizontalTo(x, self.stopRects, self.stopOffset)
+        self.updateBoundingRect()
+        self.addVertical(x)
 
     def addHorizontalTo(self, x, rects, offset):
         rules = Rules.getInstance()

@@ -45,9 +45,13 @@ class TerminalAccess:
         self.connectedRects = connected_rects
         self.accessRects = access_rects
 
-    def primary(self):
+    def primary(self, anymetal=False):
+        if not anymetal and self.portRect is not None:
+            return self.portRect.getCopy(self.sourceLayer)
         if self.accessRects:
             return self.accessRects[0]
+        if self.portRect is not None:
+            return self.portRect.getCopy(self.sourceLayer)
         return None
 
     def isEmpty(self):

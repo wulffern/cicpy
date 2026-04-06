@@ -5,3 +5,6 @@ test:
 clean:
 	-rm -rf SAR9B_svg
 	-rm *.html
+
+docs:
+	${PYTHON} ../gendoc.py svg.md ../../docs/svg.md

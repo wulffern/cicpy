@@ -149,6 +149,12 @@ class Rules:
         else:
             raise Exception(f"RuleError: Coult not find rule {key} on layer {layer}")
 
+    def hasRule(self, layer, key):
+        try:
+            obj = self.getValue("rules", layer)
+        except Exception:
+            return False
+        return key in obj
 
 
     def colorTranslate(self,color):
@@ -208,13 +214,15 @@ class Rules:
         """Check if layer1 comes before layer2 in the stack"""
         if layer1 not in self.layers or layer2 not in self.layers:
             return False
-        # Walk through the stack from layer1
         current = layer1
         counter = 100
         while current and counter > 0:
             if current == layer2:
                 return True
-            current = self.getNextLayer(current)
+            next_layer = getattr(self.layers[current], 'next', '') if current in self.layers else ''
+            if not next_layer or next_layer not in self.layers:
+                break
+            current = next_layer
             counter -= 1
         return False
     

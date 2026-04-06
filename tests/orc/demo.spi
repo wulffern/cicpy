@@ -1,0 +1,4 @@
+* minimal orc fixture
+.subckt ORC_TOP D G S B
+x0 D G S B NCHDL
+.ends ORC_TOP

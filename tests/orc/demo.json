@@ -1,0 +1,14 @@
+{
+  "orc_cells": [
+    {
+      "name": "ORC_TOP",
+      "spice": "demo.spi",
+      "groups": [
+        {
+          "name": "top",
+          "description": "Minimal ORC top cell"
+        }
+      ]
+    }
+  ]
+}

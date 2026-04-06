@@ -106,6 +106,9 @@ def cli(finame, foname):
     collecting = False
     buff = []
 
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
+
     with open(finame) as fi, open(foname, "w") as fo:
         for line in fi:
             if re.search(r"^-->", line):

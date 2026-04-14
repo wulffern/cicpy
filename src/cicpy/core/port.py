@@ -53,6 +53,7 @@ class Port(Rect):
         self.net = ""
         self.pinLayer = self._resolve_pin_layer(self.routeLayer)
         self.direction = "inputOutput"
+        self.side = "left"
 
         self.sigclass = "signal"
 

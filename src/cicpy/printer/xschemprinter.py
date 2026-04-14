@@ -66,11 +66,6 @@ class XschemSymbol(Cell):
         pass
 
     def read(self,filename):
-
-    #TODO: Add Bounding box after reading ports
-    #TODO: Figure out a way to inform on what is a "left,right,top,bottom" port. Could probably use the center of bounding box, and how the ports are
-    #located compared to that
-
         self.symbuffer = list()
         self.symbol_from_lib = True
 
@@ -110,8 +105,16 @@ class XschemSymbol(Cell):
 
                         self.ports[name] = p
 
-
-
+        self.updateBoundingRect()
+        cx = self.centerX()
+        cy = self.centerY()
+        for p in self.ports.values():
+            dx = p.centerX() - cx
+            dy = p.centerY() - cy
+            if abs(dx) >= abs(dy):
+                p.side = "right" if dx >= 0 else "left"
+            else:
+                p.side = "bottom" if dy >= 0 else "top"
 
 
     def getPin(self,x,y,name):
@@ -394,36 +397,25 @@ E {}
                 print(f"Could not find {portName} in {symbolName}")
                 continue
 
+            side = instsym.ports[portName].side
             r = instsym.ports[portName].rect.getCopy()
 
-
-            isRight = True
-            if(r.centerX() < instsym.centerX()):
-                isRight = False
-
-            
-            r.translate(self.ix1,self.iy1)
+            r.translate(self.ix1, self.iy1)
 
             xb2 = r.centerX()
             yb = r.centerY()
 
-
-            rot = 0
-            xb1 = xb2 - 20
-            if(isRight):
-                xb1 = xb2 + 20
-                rot = 2
-
-            #xb1 = xb2+80
-            #if(portName == "B" and "Transistor" in instsym.cell.ckt.classname):
-            #
-            #else:
-            #
-            xlab = xb1
-
-            self.fcell.write(f"N {xb1} {yb} {xb2} {yb} " + "{lab=" + netName + "}\n")
-
-            self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0 " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
+            if side in ("left", "right"):
+                rot = 2 if side == "right" else 0
+                xb1 = xb2 + 20 if side == "right" else xb2 - 20
+                xlab = xb1
+                self.fcell.write(f"N {xb1} {yb} {xb2} {yb} " + "{lab=" + netName + "}\n")
+                self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0 " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
+            else:
+                rot = 3 if side == "top" else 1
+                yb1 = yb - 20 if side == "top" else yb + 20
+                self.fcell.write(f"N {xb2} {yb1} {xb2} {yb} " + "{lab=" + netName + "}\n")
+                self.fcell.write("C {devices/lab_pin.sym}" + f" {xb2} {yb1} {rot} 0 " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
 
             self.label_count +=1
 

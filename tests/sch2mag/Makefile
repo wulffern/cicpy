@@ -23,6 +23,7 @@ clean:
 	rm -rf lelo_temp_sky130a
 	rm -rf jnw_tr_sky130a
 	rm -rf jnw_atr_sky130a
+	rm -rf lelo_atr_sky130a
 	rm -rf tech_sky130A
 	-rm -rf LELOTEMP_CMP_svg LELOTEMP_CMP_svg.html
 

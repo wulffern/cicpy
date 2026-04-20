@@ -176,6 +176,8 @@ class Route(Cell):
 
     def add(self, child):
         if child is not None and hasattr(child, "isRect") and child.isRect():
+            if not getattr(child, "net", ""):
+                child.net = self.net
             child.route_owner = self
             child.route_owner_info = self._route_owner_info()
         super().add(child)
@@ -253,7 +255,19 @@ class Route(Cell):
 
         rules = Rules.getInstance()
         space = rules.get(self.routeLayer, "space")
-        blocked = parent.getOccupiedRectangles(self.routeLayer, ignoreNet=self.net)
+        blocked = []
+        if re.search(r"(avoidblocks)(,|\s+|$)", self.options or ""):
+            blocked.extend(parent.getOccupiedRectangles(self.routeLayer, ignoreNet=self.net))
+        if re.search(r"(avoidboundaries|blockboundaries)(,|\s+|$)", self.options or ""):
+            blocked.extend(parent.getOccupiedRectangles(self.routeLayer, ignoreNet=self.net, includeBoundaries=True))
+        if re.search(r"(avoidkeepouts|blockkeepouts)(,|\s+|$)", self.options or "") and hasattr(parent, "getRouteKeepouts"):
+            keepout_filter = ""
+            m = re.search(r"keepout=([^,\s]+)", self.options or "")
+            if m:
+                keepout_filter = m.group(1)
+            blocked.extend(parent.getRouteKeepouts(self.routeLayer, keepout_filter))
+        if len(blocked) == 0:
+            return False
         for segment in self._segmentsForCandidate(x):
             test_rect = segment.getCopy()
             test_rect.adjust(-space, -space, space, space)
@@ -261,6 +275,19 @@ class Route(Cell):
                 if test_rect.overlaps(occ):
                     return True
         return False
+
+    def _find_unblocked_x(self, x, step, prefer_negative=False, search_limit=32):
+        if step == 0 or not re.search(r"(avoidblocks|avoidboundaries|blockboundaries|avoidkeepouts|blockkeepouts)(,|\s+|$)", self.options or ""):
+            return x
+        if not self._isCandidateBlocked(x):
+            return x
+        directions = [-1, 1] if prefer_negative else [1, -1]
+        for idx in range(1, search_limit + 1):
+            for direction in directions:
+                candidate = x + direction * idx * step
+                if not self._isCandidateBlocked(candidate):
+                    return candidate
+        return x
 
     def addMany(self, children):
         for r in children:
@@ -432,10 +459,12 @@ class Route(Cell):
             x = x_left - space - width
             if self.hasTrack:
                 x = x - hgrid*self.track - space
+            x = self._find_unblocked_x(x, hgrid, prefer_negative=True)
         elif self.routeType == "LEFT":
             x = x_right + space
             if self.hasTrack:
                 x = x + hgrid*self.track + space
+            x = self._find_unblocked_x(x, hgrid, prefer_negative=False)
         if self.startTrim == "TRIM_START_LEFT":
             for rect in self.startRects:
                 rect.setLeft(rect.x2 - 2*width)
@@ -694,10 +723,12 @@ class Route(Cell):
             x = all_bound.right() + space
             if self.hasTrack:
                 x = x + hgrid * self.track + space
+            x = self._find_unblocked_x(x, hgrid, prefer_negative=False)
         elif self.routeType == "U_LEFT":
             x = all_bound.left() - space - width
             if self.hasTrack:
                 x = x - hgrid * self.track - space
+            x = self._find_unblocked_x(x, hgrid, prefer_negative=True)
         else:
             self.log.error(f"Unknown U route type: {self.routeType}")
             return
@@ -839,9 +870,10 @@ class OrthogonalLayerRoute(Route):
         return collapsed
 
     def _cut_shape_for_rect(self, rect):
+        count = max(2, int(getattr(self, "cuts", 2)))
         if rect.height() >= rect.width():
-            return (1, 2)
-        return (2, 1)
+            return (1, count)
+        return (count, 1)
 
     def _anchor_sorted_access_rects(self, rects):
         ordered = list(rects)
@@ -952,7 +984,7 @@ class OrthogonalLayerRoute(Route):
         base_y = min(rect.centerY() for rect in self.accessRects)
         return base_y + self.branchTrack * vgrid
 
-    def _candidate_vertical_rect(self, x):
+    def _trunk_rect(self, x):
         if len(self.accessRects) == 0:
             return None
         rules = Rules.getInstance()
@@ -960,83 +992,6 @@ class OrthogonalLayerRoute(Route):
         y1 = min(rect.y1 for rect in self.accessRects)
         y2 = max(rect.y2 for rect in self.accessRects)
         return VerticalRectangleFromTo(self.verticalLayer, x, y1, y2, width)
-
-    def _segments_for_candidate(self, x):
-        rules = Rules.getInstance()
-        hwidth = rules.get(self.horizontalLayer, self.routeWidthRule)
-        segments = []
-        trunk = self._candidate_vertical_rect(x)
-        if trunk is not None:
-            segments.append(trunk)
-        for rect in self.accessRects:
-            branch = HorizontalRectangleFromTo(
-                self.horizontalLayer,
-                rect.centerX(),
-                x,
-                rect.centerY() - hwidth / 2,
-                hwidth,
-            )
-            if branch is not None:
-                segments.append(branch)
-        return segments
-
-    def _is_candidate_blocked(self, x):
-        parent = getattr(self, "parent", None)
-        if parent is None or not hasattr(parent, "getOccupiedRectangles"):
-            return False
-
-        rules = Rules.getInstance()
-        vspace = rules.get(self.verticalLayer, "space")
-        hspace = rules.get(self.horizontalLayer, "space")
-        blocked_vertical = parent.getOccupiedRectangles(self.verticalLayer, ignoreNet=self.net)
-        blocked_horizontal = parent.getOccupiedRectangles(self.horizontalLayer, ignoreNet=self.net)
-
-        for segment in self._segments_for_candidate(x):
-            test_rect = segment.getCopy()
-            if segment.layer == self.verticalLayer:
-                test_rect.adjust(-vspace, -vspace, vspace, vspace)
-                for occ in blocked_vertical:
-                    if self._rects_touch_or_overlap(test_rect, occ):
-                        return True
-            elif segment.layer == self.horizontalLayer:
-                test_rect.adjust(-hspace, -hspace, hspace, hspace)
-                for occ in blocked_horizontal:
-                    if self._rects_touch_or_overlap(test_rect, occ):
-                        return True
-        return False
-
-    def _find_free_track(self, x, direction):
-        rules = Rules.getInstance()
-        hgrid = rules.get("ROUTE", "horizontalgrid")
-        candidate = x
-        max_steps = 200
-        for _ in range(max_steps):
-            if not self._is_candidate_blocked(candidate):
-                return candidate
-            candidate += direction * hgrid
-        return x
-
-    def _find_balanced_track(self, x_target):
-        rules = Rules.getInstance()
-        hgrid = rules.get("ROUTE", "horizontalgrid")
-        candidate = int(round(x_target / hgrid)) * hgrid
-        max_steps = 200
-        best = None
-        for step in range(max_steps + 1):
-            for sign in (0, -1, 1):
-                if step == 0 and sign != 0:
-                    continue
-                if step != 0 and sign == 0:
-                    continue
-                trial = candidate + sign * step * hgrid
-                if self._is_candidate_blocked(trial):
-                    continue
-                score = (abs(trial - x_target), step, trial)
-                if best is None or score < best[0]:
-                    best = (score, trial)
-            if best is not None:
-                return best[1]
-        return candidate
 
     def route(self):
         self.accessRects = self._collapse_access_rects()
@@ -1061,48 +1016,50 @@ class OrthogonalLayerRoute(Route):
         anchor_right = anchor_rect.x2 if anchor_rect is not None else x_right
         if self.trackDirection < 0:
             if self.hasTrack:
-                # Explicit track: trackN = anchor - (N+1)*space - (N+1)*metal_width
                 trunk_x = anchor_left - (self.track + 1) * (vspace + vwidth)
             else:
                 trunk_x = anchor_left - vspace
-                trunk_x = self._find_free_track(trunk_x, -1)
         elif self.trackDirection > 0:
             if self.hasTrack:
-                # Explicit track: trackN = anchor + (N+1)*space + N*metal_width
                 trunk_x = anchor_right + (self.track + 1) * vspace + self.track * vwidth
             else:
                 trunk_x = anchor_right + vspace
-                trunk_x = self._find_free_track(trunk_x, +1)
         else:
             trunk_x = 0.5 * (x_left + x_right)
             if self.hasTrack:
                 trunk_x += self.track * hgrid
-            trunk_x = self._find_balanced_track(trunk_x)
-
-        segments = self._segments_for_candidate(trunk_x)
-        trunk = None
-        raw_branches = []
-        for segment in segments:
-            if segment.layer == self.verticalLayer:
-                trunk = segment
-            elif segment.layer == self.horizontalLayer:
-                raw_branches.append(segment)
+        trunk = self._trunk_rect(trunk_x)
 
         access_branches = []
         trunk_cuts = []
         branch_band_y = self._branch_band_y()
         vwidth = rules.get(self.verticalLayer, self.routeWidthRule)
-        for access, branch in zip(self.accessRects, raw_branches):
+        hwidth = rules.get(self.horizontalLayer, self.routeWidthRule)
+        for access in self.accessRects:
+            branch = HorizontalRectangleFromTo(
+                self.horizontalLayer,
+                access.centerX(),
+                trunk_x,
+                access.centerY() - hwidth / 2,
+                hwidth,
+            )
             hcuts, vcuts = self._cut_shape_for_rect(access)
             if branch_band_y is None:
-                access_cut = self._instantiate_cut(self.horizontalLayer, access.layer, hcuts, vcuts, access.centerX(), access.centerY())
-                access_route_pads = self._translated_cut_rects(access_cut, self.horizontalLayer)
-                access_access_pads = self._translated_cut_rects(access_cut, access.layer)
-                if not access_route_pads:
-                    continue
-                access_route_pad = access_route_pads[0]
+                access_cut = None
+                access_access_pads = []
+                if access.layer == self.horizontalLayer:
+                    access_route_pad = access.getCopy()
+                    access_route_pads = [access_route_pad]
+                else:
+                    access_cut = self._instantiate_cut(self.horizontalLayer, access.layer, hcuts, vcuts, access.centerX(), access.centerY())
+                    access_route_pads = self._translated_cut_rects(access_cut, self.horizontalLayer)
+                    access_access_pads = self._translated_cut_rects(access_cut, access.layer)
+                    if not access_route_pads:
+                        continue
+                    access_route_pad = access_route_pads[0]
 
-                trunk_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, trunk, 1, 2, access_route_pad.centerY(), True)
+                trunk_hcuts, trunk_vcuts = self._cut_shape_for_rect(trunk)
+                trunk_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, trunk, trunk_hcuts, trunk_vcuts, access_route_pad.centerY(), True)
                 trunk_route_pads = self._translated_cut_rects(trunk_cut, self.horizontalLayer)
                 trunk_vertical_pads = self._translated_cut_rects(trunk_cut, self.verticalLayer)
                 if not trunk_route_pads:
@@ -1129,9 +1086,11 @@ class OrthogonalLayerRoute(Route):
                     self.add(branch)
                     access_branches.append(branch)
 
-                self.add(access_cut)
-                self.add(trunk_cut)
-                trunk_cuts.append(trunk_cut)
+                if access_cut is not None:
+                    self.add(access_cut)
+                if trunk_cut is not None:
+                    self.add(trunk_cut)
+                    trunk_cuts.append(trunk_cut)
                 continue
 
             access_cut = None
@@ -1148,7 +1107,8 @@ class OrthogonalLayerRoute(Route):
                     continue
                 access_vertical_pad = access_vertical_pads[0]
 
-            branch_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, access_vertical_pad, 1, 2, branch_band_y, True)
+            branch_hcuts, branch_vcuts = self._cut_shape_for_rect(access_vertical_pad)
+            branch_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, access_vertical_pad, branch_hcuts, branch_vcuts, branch_band_y, True)
             branch_route_pads = self._translated_cut_rects(branch_cut, self.horizontalLayer)
             branch_vertical_pads = self._translated_cut_rects(branch_cut, self.verticalLayer)
             if not branch_route_pads or not branch_vertical_pads:
@@ -1156,7 +1116,8 @@ class OrthogonalLayerRoute(Route):
             branch_route_pad = branch_route_pads[0]
             branch_vertical_pad = branch_vertical_pads[0]
 
-            trunk_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, trunk, 1, 2, branch_route_pad.centerY(), True)
+            trunk_hcuts, trunk_vcuts = self._cut_shape_for_rect(trunk)
+            trunk_cut = self._instantiate_cut_on_rect_x(self.horizontalLayer, trunk, trunk_hcuts, trunk_vcuts, branch_route_pad.centerY(), True)
             trunk_route_pads = self._translated_cut_rects(trunk_cut, self.horizontalLayer)
             trunk_vertical_pads = self._translated_cut_rects(trunk_cut, self.verticalLayer)
             if not trunk_route_pads or not trunk_vertical_pads:

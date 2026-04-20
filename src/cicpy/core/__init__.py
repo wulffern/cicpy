@@ -19,4 +19,3 @@ from .cut import *
 from .guard import *
 from .routering import *
 from .graph import *
-from .tilemap import *

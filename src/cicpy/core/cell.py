@@ -371,18 +371,25 @@ class Cell(Rect):
         else:
             return False
 
-    def updatePort(self,name:str,r:Rect):
+    def updatePort(self,name:str,r:Rect, routeLayer:str=None, pinLayer:str=None):
         p = None
         if(name in self.ports):
             p = self.ports[name]
             p.spicePort = self.isASpicePort(name)
-            p.setRect(r)
+            rr = r.getCopy(routeLayer) if (r is not None and routeLayer) else r
+            p.set(rr)
+            if routeLayer:
+                p.routeLayer = routeLayer
+            if pinLayer:
+                p.pinLayer = pinLayer
         else:
             if(self.subckt):
                 if(name in self.subckt.nodes):
-                    p = Port(name)
+                    rr = r.getCopy(routeLayer) if (r is not None and routeLayer) else r
+                    p = Port(name, routeLayer=routeLayer, rect=rr)
                     p.spicePort = self.isASpicePort(name)
-                    p.setRect(r)
+                    if pinLayer:
+                        p.pinLayer = pinLayer
                     self.add(p)
         return p
 

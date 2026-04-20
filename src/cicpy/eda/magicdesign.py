@@ -44,6 +44,7 @@ class MagicDesign(cic.Design):
         self.rules = rules
         self.techlib = techlib
         self.log = logging.getLogger("MagicDesign")
+        self.primitive_cache_dir = ""
 
     def scanLibraryPath(self,libdir):
         files = glob.glob(libdir + "**/*mag")

@@ -36,6 +36,25 @@ import logging
 
 class MagicPrinter(DesignPrinter):
 
+    def _bbox_with_margin(self, cell):
+        x1 = cell.x1
+        y1 = cell.y1
+        x2 = cell.x2
+        y2 = cell.y2
+        margin = getattr(cell, "fixed_bbox_margin", None)
+        if margin is None:
+            return (x1, y1, x2, y2)
+        if isinstance(margin, (int, float)):
+            margin = [margin, margin, margin, margin]
+        if len(margin) != 4:
+            return (x1, y1, x2, y2)
+        return (
+            x1 - margin[0],
+            y1 - margin[1],
+            x2 + margin[2],
+            y2 + margin[3],
+        )
+
 
     def toMicron(self,angstrom):
         #- Snap to 5 nm grid
@@ -129,15 +148,17 @@ class MagicPrinter(DesignPrinter):
 
         self.fcell.write("timestamp %d\n" % time.mktime(currentDate.timetuple()))
 
-        self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(cell.x1),self.toMicron(cell.y1),self.toMicron(cell.x2),self.toMicron(cell.y2)))
+        x1, y1, x2, y2 = self._bbox_with_margin(cell)
+        self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(x1),self.toMicron(y1),self.toMicron(x2),self.toMicron(y2)))
 
     def endCell(self,cell):
 
         #- Print additional properties
-        xu1 = self.toMicron(cell.x1)
-        xu2 = self.toMicron(cell.x2)
-        yu1 = self.toMicron(cell.y1)
-        yu2 = self.toMicron(cell.y2)
+        x1, y1, x2, y2 = self._bbox_with_margin(cell)
+        xu1 = self.toMicron(x1)
+        xu2 = self.toMicron(x2)
+        yu1 = self.toMicron(y1)
+        yu2 = self.toMicron(y2)
         if(xu1 != xu2 and yu1 != yu2):
             self.properties.append("FIXED_BBOX %d %d %d %d" %( xu1,
                                                             yu1,

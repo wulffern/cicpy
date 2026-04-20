@@ -302,6 +302,12 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     log.info(f"Finding Magic cells in {libdir}")
     design = cic.MagicDesign(techlib,rules)
     design.scanLibraryPath(libdir)
+    design.primitive_cache_dir = os.path.join(libdir, lib, "_cicpy_primitives")
+    try:
+        from cicpy.pdk import register_default_providers
+        register_default_providers(design)
+    except Exception as ex:
+        log.warning(f"Could not register primitive providers: {ex}")
 
     log.info(f"Reading {spi}")
     lcell = design.readFromSpice(spi,cell)

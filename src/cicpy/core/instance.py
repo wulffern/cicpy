@@ -108,6 +108,20 @@ class Instance(Cell):
 
         ckt = spi.Subckt.getSubckt(self.name)
         if(ckt is None):
+            primitive_ports = []
+            if self.layoutcell is not None and hasattr(self.layoutcell, "parent") and hasattr(self.layoutcell.parent, "getPrimitivePortOrder"):
+                primitive_ports = self.layoutcell.parent.getPrimitivePortOrder(inst.subcktName)
+            if primitive_ports and len(inst.nodes) == len(primitive_ports):
+                for idx, port_name in enumerate(primitive_ports):
+                    instNode = inst.nodes[idx]
+                    cellPort = self.layoutcell.getPort(port_name)
+                    if cellPort is None:
+                        continue
+                    instPort = InstancePort(instNode,cellPort,self)
+                    self.instancePorts[instNode] = instPort
+                    self.instancePortsList.append(instNode)
+                    self.add(instPort)
+                return
             log.warning("Could not find subckt" + inst.subcktName)
             return
 

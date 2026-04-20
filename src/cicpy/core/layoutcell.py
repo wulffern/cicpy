@@ -60,6 +60,7 @@ class LayoutCell(Cell):
         self.um = 10000
         self.log = logging.getLogger("LayoutCell")
         self.dummyCounter = 0
+        self.routeKeepouts = defaultdict(list)
         rules = Rules.getInstance()
         if(rules is not None and rules.hasRules()):
             space =rules.get("CELL","space")
@@ -77,6 +78,10 @@ class LayoutCell(Cell):
 
         i = Instance()
         layoutCell = self.parent.getLayoutCell(cktInst.subcktName)
+        if layoutCell is None and hasattr(self.parent, "generatePrimitiveLayout"):
+            layoutCell = self.parent.generatePrimitiveLayout(cktInst.subcktName, cktInst)
+        if layoutCell is None:
+            raise ValueError(f"Could not find layout cell for {cktInst.subcktName}")
         i.cell = layoutCell.name
         i.layoutcell = layoutCell
         i.libpath = layoutCell.libpath
@@ -157,7 +162,7 @@ class LayoutCell(Cell):
 
         return data
 
-    def getOccupiedRectangles(self, layer: str, excludeInstances: str = "", ignoreNet: str = ""):
+    def getOccupiedRectangles(self, layer: str, excludeInstances: str = "", ignoreNet: str = "", includeBoundaries: bool = False):
         rects = []
         for child in self.children:
             if child is None:
@@ -167,6 +172,10 @@ class LayoutCell(Cell):
                 instanceName = getattr(child, "instanceName", "")
                 if excludeInstances != "" and (re.search(excludeInstances, instanceName) or re.search(excludeInstances, getattr(child, "name", ""))):
                     continue
+                if includeBoundaries:
+                    rr = child.calcBoundingRect().getCopy(layer)
+                    rr.parent = child
+                    rects.append(rr)
                 rects.extend(child.getOccupiedRectangles(layer))
                 continue
 
@@ -190,6 +199,28 @@ class LayoutCell(Cell):
                         continue
                     rects.append(grandchild.getCopy())
 
+        return rects
+
+    def addRouteKeepoutRect(self, layer, rect, margin=0, name=""):
+        self.log.info(
+            f"addRouteKeepoutRect(layer={layer}, margin={margin}, name={name}, rect={None if rect is None else rect.layer})"
+        )
+        if rect is None:
+            return None
+        rr = rect.getCopy(layer) if layer else rect.getCopy()
+        if margin:
+            rr.adjust(-margin, -margin, margin, margin)
+        rr.keepoutName = name or f"keepout_{layer}_{len(self.routeKeepouts[layer])}"
+        rr.keepoutLayer = layer or rr.layer
+        self.routeKeepouts[rr.keepoutLayer].append(rr)
+        return rr
+
+    def getRouteKeepouts(self, layer, keepoutFilter=""):
+        rects = []
+        for rr in self.routeKeepouts.get(layer, []):
+            if keepoutFilter and not re.search(keepoutFilter, getattr(rr, "keepoutName", "")):
+                continue
+            rects.append(rr.getCopy())
         return rects
 
     def getInstancesByCellname(self,regex):
@@ -789,9 +820,78 @@ class LayoutCell(Cell):
         elif angle == "R270":
             r.rotate(90); r.rotate(90); r.rotate(90)
         p = Port(portname)
-        p.setRect(r)
+        p.set(r)
         self.add(r)
         self.add(p)
+
+    def addPortFromRect(self, node, rect, routeLayer=None, pinLayer=None):
+        self.log.info(
+            f"addPortFromRect(node={node}, routeLayer={routeLayer}, pinLayer={pinLayer}, rect={None if rect is None else rect.layer})"
+        )
+        if rect is None:
+            self.log.error(f"addPortFromRect: no rectangle for node {node}")
+            return None
+        rr = rect.getCopy(routeLayer) if routeLayer else rect.getCopy()
+        port = self.updatePort(node, rr, routeLayer=routeLayer, pinLayer=pinLayer)
+        return port
+
+    def addRouteFromRects(self, net, layer, startRects, stopRects, routeType, options=""):
+        self.log.info(
+            f"addRouteFromRects(net={net}, layer={layer}, routeType={routeType}, options={options}, start={len(startRects or [])}, stop={len(stopRects or [])})"
+        )
+        if not startRects or not stopRects:
+            self.log.error(f"addRouteFromRects: missing rectangles for net {net}")
+            return None
+        from .route import Route
+        route = Route(net, layer, startRects, stopRects, options, routeType)
+        self._annotateRoute(route, "addRouteFromRects", {
+            "net": net,
+            "layer": layer,
+            "routeType": routeType,
+            "options": options,
+            "start_count": len(startRects or []),
+            "stop_count": len(stopRects or []),
+        })
+        self.add(route)
+        route.route()
+        return route
+
+    def collectPhysicalRects(self, net="", layer="", root=None):
+        rects = self._collectPhysicalRects(root) if root is not None else self._collectPhysicalRects()
+        out = []
+        for rect in rects:
+            if layer and rect.layer != layer:
+                continue
+            if net and getattr(rect, "net", "") != net:
+                continue
+            out.append(rect)
+        return out
+
+    def addRouteRingOnRect(self, layer:str, name:str, rect:Rect, location:str="rtbl", widthmult:int=1, spacemult:int=2, useGridForSpace:bool=True, exportPort:bool=False):
+        self.log.info(
+            f"addRouteRingOnRect(layer={layer}, name={name}, location={location}, widthmult={widthmult}, spacemult={spacemult}, useGridForSpace={useGridForSpace}, exportPort={exportPort})"
+        )
+        if rect is None:
+            self.log.error(f"addRouteRingOnRect: no rectangle for {name}")
+            return None
+        mw = Rules.getInstance().get(layer, "width")*widthmult
+        if useGridForSpace:
+            xgrid = Rules.getInstance().get("ROUTE","horizontalgrid")*spacemult + mw
+            ygrid = Rules.getInstance().get("ROUTE","horizontalgrid")*spacemult + mw
+        else:
+            xgrid = Rules.getInstance().get(layer, "space")*spacemult + mw
+            ygrid = Rules.getInstance().get(layer, "space")*spacemult + mw
+        rr = RouteRing(layer, name, rect.getCopy(), location, ygrid, xgrid, mw)
+        if rr:
+            self.named_rects[f"ring_{name}"] = rr
+            self.named_rects[f"ring_b_{name}"] = rr.getPointer("bottom")
+            self.named_rects[f"ring_t_{name}"] = rr.getPointer("top")
+            self.named_rects[f"ring_l_{name}"] = rr.getPointer("left")
+            self.named_rects[f"ring_r_{name}"] = rr.getPointer("right")
+            self.add(rr)
+            if exportPort:
+                self.addPortFromRect(name, rr.getDefault())
+        return rr
 
     def addDirectedRoute(self, layer:str, net:str, route:str, options:str=""):
         self.log.info(f"addDirectedRoute(layer={layer}, net={net}, route={route}, options={options})")
@@ -1104,7 +1204,7 @@ class LayoutCell(Cell):
                 self.add(rp)
                 if net in self.ports:
                     p = self.ports[net]
-                    p.setRect(rp)
+                    p.set(rp)
 
     def findRectanglesByNode(self,node:str,filterChild:str=None,matchInstance:str=None):
         rects = list()

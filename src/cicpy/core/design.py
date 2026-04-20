@@ -46,6 +46,7 @@ class Design():
         self.jcells = dict()
         self.log = logging.getLogger("DesignPrinter")
         self.prefix = ""
+        self.primitiveProviders = []
 
 
     def addCuts(self):
@@ -140,6 +141,27 @@ class Design():
     
     def getCell(self,name):
         return self.cells[name]
+
+    def registerPrimitiveProvider(self, provider):
+        if provider is None:
+            return
+        self.primitiveProviders.append(provider)
+
+    def generatePrimitiveLayout(self, subckt_name, instance):
+        for provider in self.primitiveProviders:
+            if not provider.supports(self, subckt_name):
+                continue
+            cell = provider.generate(self, subckt_name, instance)
+            if cell is not None:
+                return cell
+        return None
+
+    def getPrimitivePortOrder(self, subckt_name):
+        for provider in self.primitiveProviders:
+            ports = provider.canonical_port_order(subckt_name)
+            if ports:
+                return ports
+        return []
 
 
     def read(self,filename):

@@ -1,6 +1,6 @@
 # cicpy GUI — Port of `cic-gui` to Python with side-by-side schematic view
 
-Status: **Phase 1 shipped** — layout-only viewer (`cicpy gui CELL.cic`). See [`gui`](/cicpy/gui) for usage. Phase 2 (schematic pane + cross-probing) is next.
+Status: **Phase 1 + Phase 2 shipped** — layout viewer with side-by-side schematic pane, cross-probing, and `E` / `Ctrl+E` hierarchy navigation. See [`gui`](/cicpy/gui) for usage. Phase 3 (placer integration via `cicpy.groups`) is next.
 
 ## Goal
 
@@ -93,7 +93,7 @@ Mirrors `DesignPrinter.printChildren`: instances → translated/rotated `QGraphi
 
 Files shipped: `src/cicpy/gui/{app,mainwindow,layout_scene,layout_view,style}.py`. Edited `src/cicpy/cic.py` (added `gui` Click subcommand) and `pyproject.toml` (`[gui]` extra → PySide6).
 
-### Phase 2 — Schematic pane + cross-probing
+### Phase 2 — Schematic pane + cross-probing — DONE
 
 1. **Extend `src/cicpy/eda/xschem.py`** — implement `parse()` for the geometry stubs:
    - `L color x1 y1 x2 y2 {props}`

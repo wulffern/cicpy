@@ -48,6 +48,8 @@ cicpy gui CELL.cic --tech path/to/sky130A.tech \
 | Toggle all layers | `T` |
 | Toggle one layer | checkbox in layer list |
 | Reload `.cic` | `Shift+R` (auto-reload also fires when the file changes on disk) |
+| Descend hierarchy | click a schematic component, then `E` |
+| Ascend hierarchy | `Ctrl+E` (Cmd+E on macOS) |
 
 `Ctrl`/`Cmd` + wheel also zooms; `Shift` + wheel pans horizontally.
 
@@ -56,8 +58,15 @@ cicpy gui CELL.cic --tech path/to/sky130A.tech \
 - **Cell list** (top-left) — every cell in the loaded design + dependency libraries. Row change loads that cell into the layout pane.
 - **Layer list** (middle-left) — every layer from the tech file. Pin layers and `TXT` are visible by default; non-pin implant layers default off. Each row has a color swatch icon and a checkbox for visibility. State persists across sessions per tech via `QSettings`.
 - **Route list** (bottom-left) — routes in the selected cell. Each row is checkable, and entries prefixed with `*` touch or overlap another differently named route on the same layer. Same-name route contacts are not marked.
-- **Layout pane** (right) — the cell rendered into a `QGraphicsScene`. Y-flipped to match conventional layout view (Y grows up).
-- **Status bar** — cursor coordinates in technology units (Ångström) and µm.
+- **Layout pane** (middle) — the cell rendered into a `QGraphicsScene`. Y-flipped to match conventional layout view (Y grows up).
+- **Schematic pane** (right) — the matching XSchem `.sch` for the selected cell, if one is found next to the `.cic` or in the IP / dependency design directories. Hidden when no schematic exists.
+- **Status bar** — cursor coordinates (Ångström + µm for layout, raw grid units for schematic).
+
+## Cross-probing
+
+Click a component in the schematic pane. The GUI parses the instance name (e.g. `xn_mirr_load2` → group `xn_mirr_load`) and outlines every peer in both panes. The naming convention is `x<kind>[_<gid>]_<role>` — the `cIcSpice::Component.group()` regex captures the longest non-digit prefix.
+
+`E` descends into the clicked component's underlying cell (`<symbol-basename>` looked up in `Design.cells`). `Ctrl+E` pops the history stack to ascend.
 
 Route labels and top-cell port labels are rendered as `TXT` text. Sub-circuit port labels are suppressed to avoid clutter; use the route list and top-level port labels for the first-level view.
 

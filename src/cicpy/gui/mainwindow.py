@@ -4,6 +4,7 @@
 ##  The MIT License (MIT)
 ######################################################################
 
+import glob
 import os
 
 from PySide6.QtCore import QFileSystemWatcher, QSettings, Qt, QTimer
@@ -19,9 +20,13 @@ from PySide6.QtWidgets import (
 )
 
 import cicpy as cic
+from cicpy.eda.xschem import Schematic
 from .layout_scene import LayoutScene
 from .layout_view import LayoutView
+from .schem_scene import SchemScene
+from .schem_view import SchemView
 from .style import LayerStyle
+from .sym_loader import SymbolLoader, discover_symbol_paths
 
 
 SETTINGS_ORG = "cicpy"
@@ -65,6 +70,11 @@ class MainWindow(QMainWindow):
         self.scene = LayoutScene(self.design, self.style)
         self.view = LayoutView(self.scene)
 
+        self.sym_loader = SymbolLoader(discover_symbol_paths(cicfile=self.cicfile))
+        self.schem_scene = SchemScene(self.sym_loader)
+        self.schem_view = SchemView(self.schem_scene)
+        self._sch_search_paths = self._build_sch_search_paths()
+
         self.cell_list = QListWidget()
         self.layer_list = QListWidget()
         self.route_list = QListWidget()
@@ -81,25 +91,34 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(left)
         self.splitter.addWidget(self.view)
+        self.splitter.addWidget(self.schem_view)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 1)
         self.setCentralWidget(self.splitter)
 
         self.setStatusBar(QStatusBar())
 
         self.setWindowTitle(
             f"cicpy gui — {os.path.basename(self.cicfile)} "
-            f"[{self.tech_key}] (F=fit, Z=zoom-in, Ctrl+Z=zoom-out, right-drag=zoom-area, "
-            f"Shift+R reload, T toggle layers)"
+            f"[{self.tech_key}] (F=fit, Z=zoom, right-drag=zoom-area, "
+            f"E=descend, Ctrl+E=ascend, Shift+R=reload, T=toggle layers)"
         )
 
         self.cell_list.currentRowChanged.connect(self._on_cell_changed)
         self.layer_list.itemChanged.connect(self._on_layer_item_changed)
         self.route_list.itemChanged.connect(self._on_route_item_changed)
         self.view.cursorMoved.connect(self._on_cursor_moved)
+        self.schem_view.cursorMoved.connect(self._on_cursor_moved_schem)
+        self.schem_scene.componentClicked.connect(self._on_schem_component_clicked)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
+        QShortcut(QKeySequence("E"), self, activated=self._descend)
+        QShortcut(QKeySequence("Ctrl+E"), self, activated=self._ascend)
+        QShortcut(QKeySequence("Meta+E"), self, activated=self._ascend)
+        self._cell_history = []
+        self._last_clicked_comp = None
 
         self.watcher = QFileSystemWatcher(self)
         self._watch_files()
@@ -174,6 +193,7 @@ class MainWindow(QMainWindow):
         self._populate_routes()
         self.scene.apply_visibility()
         self.view.fit()
+        self._load_schematic_for(name)
         self.settings.setValue("last_cell", name)
 
     def _on_layer_item_changed(self, item):
@@ -196,11 +216,141 @@ class MainWindow(QMainWindow):
         self.scene.apply_visibility()
 
     def _on_cursor_moved(self, x, y):
-        # Coordinates are in technology units (Ångström). 10 Å = 1 nm.
-        self.statusBar().showMessage(f"x={x:.0f} y={y:.0f}  ({x/10000:.3f},{y/10000:.3f}) µm")
+        # Layout coords are in technology units (Ångström). 10 Å = 1 nm.
+        self.statusBar().showMessage(
+            f"layout: x={x:.0f} y={y:.0f}  ({x/10000:.3f},{y/10000:.3f}) µm"
+        )
+
+    def _on_cursor_moved_schem(self, x, y):
+        # Schematic coords are xschem grid units; just show raw values.
+        self.statusBar().showMessage(f"schem: x={x:.0f} y={y:.0f}")
+
+    def _on_schem_component_clicked(self, comp):
+        self._last_clicked_comp = comp
+        name = (comp.name() or "").strip()
+        prefix = comp.group()
+        members = self.schem_scene.highlight_group_by_prefix(prefix) if prefix else []
+        # Mirror highlight in layout: match by instanceName prefix.
+        layout_matched = []
+        if prefix:
+            layout_matched = self.scene.highlight_instance_prefix(prefix)
+        elif name:
+            layout_matched = self.scene.highlight_instances([name])
+        if not name:
+            return
+        bits = [f"selected {name}"]
+        if prefix:
+            bits.append(f"schem group '{prefix}': {len(members)}")
+        if layout_matched:
+            bits.append(f"layout: {len(layout_matched)}")
+        self.statusBar().showMessage(" — ".join(bits), 4000)
 
     def _on_file_changed(self, path):
         self._reload_timer.start()
+
+    # -- hierarchy navigation ------------------------------------------
+
+    def _descend(self):
+        comp = self._last_clicked_comp
+        if comp is None:
+            self.statusBar().showMessage(
+                "press 'e' after clicking a schematic component to descend", 3000)
+            return
+        sym = comp.symbol or ""
+        if not sym:
+            return
+        cell_name = os.path.splitext(os.path.basename(sym))[0]
+        if cell_name not in self.design.cells:
+            self.statusBar().showMessage(
+                f"no cell named '{cell_name}' in design", 3000)
+            return
+        current_row = self.cell_list.currentRow()
+        current_name = (
+            self.cell_list.item(current_row).text() if current_row >= 0 else None
+        )
+        if current_name == cell_name:
+            return
+        if current_name:
+            self._cell_history.append(current_name)
+        row = self.design.cellnames.index(cell_name)
+        self.cell_list.setCurrentRow(row)
+        self._last_clicked_comp = None
+
+    def _ascend(self):
+        if not self._cell_history:
+            self.statusBar().showMessage("hierarchy stack is empty", 2000)
+            return
+        name = self._cell_history.pop()
+        if name in self.design.cells:
+            row = self.design.cellnames.index(name)
+            self.cell_list.setCurrentRow(row)
+
+    # -- schematic discovery -------------------------------------------
+
+    def _build_sch_search_paths(self):
+        """Directories to scan for matching <CELL>.sch files."""
+        paths = []
+        cic_dir = os.path.dirname(os.path.abspath(self.cicfile))
+        paths.append(cic_dir)
+
+        # Walk up to the IP root (dir with config.yaml) and from its parent
+        # (workspace root), include each <dep>/design/ tree.
+        d = cic_dir
+        ip_root = None
+        for _ in range(8):
+            if os.path.isfile(os.path.join(d, "config.yaml")):
+                ip_root = d
+                break
+            new_d = os.path.dirname(d)
+            if new_d == d:
+                break
+            d = new_d
+        if ip_root:
+            workspace = os.path.dirname(ip_root)
+            for entry in sorted(os.listdir(workspace)):
+                dep_design = os.path.join(workspace, entry, "design")
+                if os.path.isdir(dep_design):
+                    paths.append(dep_design)
+        # Dedup, preserve order
+        seen = set()
+        out = []
+        for p in paths:
+            ap = os.path.abspath(p)
+            if ap in seen:
+                continue
+            seen.add(ap)
+            out.append(ap)
+        return out
+
+    def _find_sch(self, cell_name):
+        if not cell_name:
+            return None
+        for d in self._sch_search_paths:
+            # First try a sibling match (cheap)
+            cand = os.path.join(d, cell_name + ".sch")
+            if os.path.isfile(cand):
+                return cand
+            # Then try a recursive match (one level deep)
+            for hit in glob.glob(os.path.join(d, "**", cell_name + ".sch"), recursive=True):
+                return hit
+        return None
+
+    def _load_schematic_for(self, cell_name):
+        sch_path = self._find_sch(cell_name)
+        if sch_path is None:
+            self.schem_scene.set_schematic(None)
+            self.schem_view.setVisible(False)
+            return
+        try:
+            sch = Schematic.fromFile(sch_path)
+        except Exception as exc:
+            self.statusBar().showMessage(f"schematic parse failed: {exc}", 4000)
+            self.schem_scene.set_schematic(None)
+            self.schem_view.setVisible(False)
+            return
+        self.schem_scene.set_schematic(sch)
+        self.schem_view.setVisible(True)
+        self.schem_view.fit()
 
     # -- actions --------------------------------------------------------
 
@@ -268,7 +418,7 @@ class MainWindow(QMainWindow):
         if splitter is not None:
             self.splitter.restoreState(splitter)
         else:
-            self.splitter.setSizes([220, 980])
+            self.splitter.setSizes([220, 600, 600])
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())

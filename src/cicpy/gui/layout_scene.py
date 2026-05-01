@@ -23,6 +23,7 @@ SKIP_MATERIAL_NAMES = {"metalres", "marker", "implant"}
 LAYER_KEY = 0
 KIND_KEY = 1
 ROUTE_KEY = 2
+INSTANCE_NAME_KEY = 4
 ROUTE_CLASSES = {
     "Route",
     "OrthogonalLayerRoute",
@@ -45,6 +46,8 @@ class LayoutScene(QGraphicsScene):
         self._route_labels = {}
         self._route_order = []
         self._port_label_names = set()
+        self._groups_by_instance = {}
+        self._highlight_overlays = []
         self.cell = None
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
 
@@ -56,6 +59,8 @@ class LayoutScene(QGraphicsScene):
         self._route_labels.clear()
         self._route_order.clear()
         self._port_label_names.clear()
+        self._groups_by_instance.clear()
+        self._highlight_overlays = []
         self.cell = cell
         if cell is None:
             self.setSceneRect(QRectF())
@@ -209,6 +214,13 @@ class LayoutScene(QGraphicsScene):
         group.setTransform(self._instance_transform(inst))
         group.setData(KIND_KEY, "instance")
         group.setData(LAYER_KEY, "_instance")
+        # Tag top-level instances by their SPICE instanceName for cross-probing.
+        # Nested instances (parent != None) aren't indexed — they're physical
+        # primitives below the user-meaningful hierarchy boundary.
+        inst_name = getattr(inst, "instanceName", "") or ""
+        if parent is None and inst_name:
+            group.setData(INSTANCE_NAME_KEY, inst_name)
+            self._groups_by_instance[inst_name] = group
         self._walk(cell.children, parent=group, route_key=route_key, show_port_labels=False)
         if parent is None:
             self.addItem(group)
@@ -315,3 +327,59 @@ class LayoutScene(QGraphicsScene):
             return
         layer = t.layer or "TXT"
         self._make_text_item(t.name, t.x1, t.y1, layer, parent, route_key, TEXT_FONT_SIZE)
+
+    # -- selection / cross-probing -----------------------------------
+
+    def instance_names(self):
+        return list(self._groups_by_instance.keys())
+
+    def clear_highlight(self):
+        for it in self._highlight_overlays:
+            try:
+                self.removeItem(it)
+            except Exception:
+                pass
+        self._highlight_overlays = []
+
+    def highlight_instances(self, names):
+        """Outline matching top-level instances. Returns the list of names that
+        actually matched a tagged instance group."""
+        self.clear_highlight()
+        matched = []
+        pen = QPen(QColor("#FFD000"))
+        pen.setCosmetic(True)
+        pen.setWidth(3)
+        for name in names:
+            grp = self._groups_by_instance.get(name)
+            if grp is None:
+                continue
+            matched.append(name)
+            bb = grp.sceneBoundingRect().adjusted(-20, -20, 20, 20)
+            overlay = self.addRect(bb, pen, QBrush(Qt.NoBrush))
+            overlay.setZValue(TEXT_Z_VALUE + 10)
+            self._highlight_overlays.append(overlay)
+        return matched
+
+    def highlight_instance_prefix(self, prefix):
+        """Highlight every instance whose name starts with `prefix`. Useful when
+        the schematic component group key is the longest non-digit prefix."""
+        if not prefix:
+            self.clear_highlight()
+            return []
+        matches = [n for n in self._groups_by_instance if n.startswith(prefix)]
+        return self.highlight_instances(matches)
+
+    def fit_highlighted(self, view):
+        if not self._highlight_overlays:
+            return
+        rect = QRectF()
+        for it in self._highlight_overlays:
+            r = it.sceneBoundingRect()
+            if rect.isEmpty():
+                rect = QRectF(r)
+            else:
+                rect = rect.united(r)
+        if not rect.isEmpty():
+            margin = max(rect.width(), rect.height()) * 0.5
+            rect.adjust(-margin, -margin, margin, margin)
+            view.fitInView(rect, Qt.KeepAspectRatio)

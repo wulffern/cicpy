@@ -46,12 +46,51 @@ class Object():
         else:
             return None
 
+    def parseProperties(self,ss):
+        if(ss is None or re.search(r"^\s*$",ss)):
+            return
+        ss = re.sub(r"\n"," ",ss).strip()
+        key_value_pairs = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+',ss)
+        for s in key_value_pairs:
+            if(re.search(r"^\s*$",s)):
+                continue
+            ar = s.split("=",1)
+            if(len(ar) != 2):
+                # Bare flag (no =) — keep as boolean true
+                self.properties[s] = True
+                continue
+            (key,val) = ar
+            self.properties[key] = val
+
     def isType(self,typename):
         if(self.__class__.__name__ == typename):
             return True
         elif(super() and (super().__class__.__name__ == typename)):
             return True
         return False
+
+
+# Generic regex helpers for lines like "<C> f1 f2 ... fN [{props}]" where the
+# first character has already been consumed and only the body of the line is
+# matched. Property block may span multiple lines (re.S).
+def _shape_pattern(n_fields):
+    return re.compile(
+        r"^\s+" + r"\s+".join([r"(\S+)"] * n_fields) + r"(?:\s+\{(.*)\})?\s*$",
+        re.S,
+    )
+
+
+_LINE_RE = _shape_pattern(5)   # color x1 y1 x2 y2
+_RECT_RE = _shape_pattern(5)   # color x1 y1 x2 y2  (used for B too)
+_ARC_RE  = _shape_pattern(6)   # color x y r start sweep
+_WIRE_RE = _shape_pattern(4)   # x1 y1 x2 y2 (no color)
+# Text: T {text body} x y rot flip xscale yscale [{props}]
+_TEXT_RE = re.compile(
+    r"^\s*T\s+\{(.*?)\}\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)"
+    r"(?:\s+\{(.*)\})?\s*$",
+    re.S,
+)
+_POLY_PREFIX_RE = re.compile(r"^\s+(\S+)\s+(\d+)\s+(.*)$", re.S)
 
 
 
@@ -73,23 +112,106 @@ class GlobalTEDA(Object):
 class GlobalProperties(Object):
     pass
 
-class Line(Object):
+class GlobalFormat(Object):
     pass
+
+class Line(Object):
+    def parse(self, ss):
+        super().parse(ss)
+        body = ss[1:]  # drop leading 'L'
+        m = _LINE_RE.match(body)
+        if not m:
+            raise Exception(f"Could not parse Line: {ss!r}")
+        self.color = int(m.group(1))
+        self.x1 = float(m.group(2))
+        self.y1 = float(m.group(3))
+        self.x2 = float(m.group(4))
+        self.y2 = float(m.group(5))
+        self.parseProperties(m.group(6))
+
 
 class Rect(Object):
-    pass
+    def parse(self, ss):
+        super().parse(ss)
+        body = ss[1:]  # drop leading 'B'
+        m = _RECT_RE.match(body)
+        if not m:
+            raise Exception(f"Could not parse Rect: {ss!r}")
+        self.color = int(m.group(1))
+        self.x1 = float(m.group(2))
+        self.y1 = float(m.group(3))
+        self.x2 = float(m.group(4))
+        self.y2 = float(m.group(5))
+        self.parseProperties(m.group(6))
+
 
 class Polygon(Object):
-    pass
+    def parse(self, ss):
+        super().parse(ss)
+        body = ss[1:]  # drop leading 'P'
+        m = _POLY_PREFIX_RE.match(body)
+        if not m:
+            raise Exception(f"Could not parse Polygon: {ss!r}")
+        self.color = int(m.group(1))
+        n = int(m.group(2))
+        rest = m.group(3).strip()
+        # Split off optional trailing {props}
+        props = None
+        if rest.endswith("}"):
+            brace = rest.rfind("{")
+            if brace >= 0:
+                props = rest[brace + 1:-1]
+                rest = rest[:brace].strip()
+        tokens = rest.split()
+        coords = [float(t) for t in tokens[: 2 * n]]
+        self.points = list(zip(coords[0::2], coords[1::2]))
+        self.parseProperties(props)
+
 
 class Arc(Object):
-    pass
+    def parse(self, ss):
+        super().parse(ss)
+        body = ss[1:]  # drop leading 'A'
+        m = _ARC_RE.match(body)
+        if not m:
+            raise Exception(f"Could not parse Arc: {ss!r}")
+        self.color = int(m.group(1))
+        self.x = float(m.group(2))
+        self.y = float(m.group(3))
+        self.r = float(m.group(4))
+        self.start_angle = float(m.group(5))
+        self.sweep_angle = float(m.group(6))
+        self.parseProperties(m.group(7))
+
 
 class Text(Object):
-    pass
+    def parse(self, ss):
+        super().parse(ss)
+        m = _TEXT_RE.match(ss)
+        if not m:
+            raise Exception(f"Could not parse Text: {ss!r}")
+        self.text = m.group(1)
+        self.x = float(m.group(2))
+        self.y = float(m.group(3))
+        self.rotation = int(m.group(4))
+        self.flip = int(m.group(5))
+        self.xscale = float(m.group(6))
+        self.yscale = float(m.group(7))
+        self.parseProperties(m.group(8))
+
 
 class Wire(Object):
-    pass
+    def parse(self, ss):
+        super().parse(ss)
+        body = ss[1:]  # drop leading 'N'
+        m = _WIRE_RE.match(body)
+        if not m:
+            raise Exception(f"Could not parse Wire: {ss!r}")
+        self.x1 = float(m.group(1))
+        self.y1 = float(m.group(2))
+        self.x2 = float(m.group(3))
+        self.y2 = float(m.group(4))
+        self.parseProperties(m.group(5))
 
 class Component(Object):
 
@@ -219,6 +341,8 @@ class XSchem():
             o = GlobalTEDA()
         elif(c == "K"):
             o = GlobalProperties()
+        elif(c == "F"):
+            o = GlobalFormat()
         elif(c == "L"):
             o = Line()
         elif(c == "B"):

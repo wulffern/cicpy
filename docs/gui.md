@@ -22,6 +22,7 @@ The tech file and dependency libraries are auto-discovered from the IP layout �
 
 - **Tech file** — walks up from `CELL.cic` looking for `tech/cic/*.tech`. Picks the first match.
 - **Dependency libraries** — walks up to find the IP's `config.yaml`, treats top-level keys with `remote:`/`revision:` entries as cicconf dependencies, and globs `<workspace>/<dep>/design/*.cic` for each. All discovered files are logged at INFO level on launch.
+- **Sibling cells** — the selected `.cic` file's directory is indexed for `.cic`/`.cic.gz` files. Sibling files are loaded only when the currently loaded design references a missing instance cell, so opening `LELOTEMP_CCMP.cic` can pull in `LELOTEMP_CMP.cic` without loading every sibling.
 
 ### Overrides
 
@@ -53,8 +54,11 @@ cicpy gui CELL.cic --tech path/to/sky130A.tech \
 ## What's in the window
 
 - **Cell list** (top-left) — every cell in the loaded design + dependency libraries. Row change loads that cell into the layout pane.
-- **Layer list** (bottom-left) — every layer that has a usable color in the tech file (skipping `metalres`/`marker`/`implant` materials). Each row has a color swatch icon and a checkbox for visibility. State persists across sessions per tech via `QSettings`.
+- **Layer list** (middle-left) — every layer from the tech file. Pin layers and `TXT` are visible by default; non-pin implant layers default off. Each row has a color swatch icon and a checkbox for visibility. State persists across sessions per tech via `QSettings`.
+- **Route list** (bottom-left) — routes in the selected cell. Each row is checkable, and entries prefixed with `*` touch or overlap another differently named route on the same layer. Same-name route contacts are not marked.
 - **Layout pane** (right) — the cell rendered into a `QGraphicsScene`. Y-flipped to match conventional layout view (Y grows up).
 - **Status bar** — cursor coordinates in technology units (Ångström) and µm.
+
+Route labels and top-cell port labels are rendered as `TXT` text. Sub-circuit port labels are suppressed to avoid clutter; use the route list and top-level port labels for the first-level view.
 
 Window geometry, splitter sizes, last-opened cell, and per-layer visibility are all persisted.

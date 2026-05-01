@@ -218,7 +218,11 @@ The demo uses shared net `D` and collects `M1` device access before routing on `
 - `offsethighend`, `offsetlowend`
   Offsets the stop-side horizontal stub by one route width.
 - `trackN`
-  Moves the left/right trunk by `N * ROUTE.horizontalgrid`.
+  Moves the left/right trunk by `N * ROUTE.horizontalgrid`. Signed values are
+  supported, for example `track-1`, `track-8`, and `track+3`.
+- `branchtrackN`
+  Moves orthogonal route branches to an alternate branch track. Signed values
+  are supported, for example `branchtrack-2`.
 - `routeWidth=<rule>`
   Uses another width rule from the technology file instead of `width`.
 - `startLayer=<layer>`, `stopLayer=<layer>`

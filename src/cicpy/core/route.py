@@ -7,6 +7,12 @@ from .cut import Cut
 import re
 import logging
 
+
+def _option_int(options, name):
+    m = re.search(rf"(^|[,\s]){re.escape(name)}([+-]?\d+)(?=,|\s|$)", options or "")
+    return int(m.group(2)) if m else None
+
+
 class Route(Cell):
 
     def __init__(self, net, layer, start, stop, options, routeType):
@@ -101,10 +107,10 @@ class Route(Cell):
         elif re.search(r"offsetlowend", self.options):
             self.stopOffset = "LOW"
 
-        m = re.search(r"track(\\d+)", self.options)
-        if m:
+        track = _option_int(self.options, "track")
+        if track is not None:
             self.hasTrack = True
-            self.track = int(m.group(1))
+            self.track = track
 
         def get_int(regex, default):
             m = re.search(regex, self.options)
@@ -803,14 +809,14 @@ class OrthogonalLayerRoute(Route):
             self.anchorMode = "top"
         elif re.search(r"onTopBottom(,|\s+|$)", self.options):
             self.anchorMode = "bottom"
-        m = re.search(r"track(\d+)", self.options)
-        if m:
+        track = _option_int(self.options, "track")
+        if track is not None:
             self.hasTrack = True
-            self.track = int(m.group(1))
-        m = re.search(r"branchtrack(\d+)", self.options)
-        if m:
+            self.track = track
+        branch_track = _option_int(self.options, "branchtrack")
+        if branch_track is not None:
             self.hasBranchTrack = True
-            self.branchTrack = int(m.group(1))
+            self.branchTrack = branch_track
         m = re.search(r"routeWidth=([^,\s+,$]+)", self.options)
         self.routeWidthRule = m.group(1) if m else "width"
 

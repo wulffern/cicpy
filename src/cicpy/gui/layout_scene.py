@@ -7,7 +7,6 @@
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QTransform
 from PySide6.QtWidgets import (
-    QGraphicsItem,
     QGraphicsItemGroup,
     QGraphicsRectItem,
     QGraphicsScene,
@@ -23,6 +22,15 @@ SKIP_MATERIAL_NAMES = {"metalres", "marker", "implant"}
 
 LAYER_KEY = 0
 KIND_KEY = 1
+ROUTE_KEY = 2
+ROUTE_CLASSES = {
+    "Route",
+    "OrthogonalLayerRoute",
+    "cIcCore::Route",
+    "cIcCore::OrthogonalLayerRoute",
+}
+TEXT_FONT_SIZE = 18.0
+TEXT_Z_VALUE = 1000
 
 
 class LayoutScene(QGraphicsScene):
@@ -32,16 +40,27 @@ class LayoutScene(QGraphicsScene):
         self.design = design
         self.style = style
         self._items_by_layer = {}
+        self._items_by_route = {}
+        self._route_visible = {}
+        self._route_labels = {}
+        self._route_order = []
+        self._port_label_names = set()
         self.cell = None
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
 
     def set_cell(self, cell):
         self.clear()
         self._items_by_layer.clear()
+        self._items_by_route.clear()
+        self._route_visible.clear()
+        self._route_labels.clear()
+        self._route_order.clear()
+        self._port_label_names.clear()
         self.cell = cell
         if cell is None:
             self.setSceneRect(QRectF())
             return
+        self._port_label_names = self._collect_top_port_label_names(cell.children)
         self._walk(cell.children, parent=None)
         bb = cell.calcBoundingRect()
         if bb is not None and bb.width() > 0 and bb.height() > 0:
@@ -58,9 +77,69 @@ class LayoutScene(QGraphicsScene):
 
     def apply_visibility(self):
         for layer, items in self._items_by_layer.items():
-            visible = self.style.is_visible(layer)
             for it in items:
-                it.setVisible(visible)
+                route_key = it.data(ROUTE_KEY)
+                route_visible = (
+                    True if route_key is None else self.is_route_visible(route_key)
+                )
+                layer_visible = self.style.is_visible(layer)
+                it.setVisible(layer_visible and route_visible)
+
+    def route_names(self):
+        return list(self._route_order)
+
+    def route_label(self, key):
+        return self._route_labels.get(key, key)
+
+    def _route_base_name(self, key):
+        return self._route_labels.get(key, key).split(" (", 1)[0]
+
+    def connected_route_names(self):
+        connected = set()
+        items_by_layer = {}
+        for route_key, items in self._items_by_route.items():
+            for item in items:
+                layer = item.data(LAYER_KEY)
+                if not layer:
+                    continue
+                items_by_layer.setdefault(layer, []).append((route_key, item))
+
+        for items in items_by_layer.values():
+            for i, (route_a, item_a) in enumerate(items):
+                rect_a = item_a.sceneBoundingRect().adjusted(-0.1, -0.1, 0.1, 0.1)
+                for route_b, item_b in items[i + 1:]:
+                    if route_a == route_b:
+                        continue
+                    if self._route_base_name(route_a) == self._route_base_name(route_b):
+                        continue
+                    if rect_a.intersects(item_b.sceneBoundingRect()):
+                        connected.add(route_a)
+                        connected.add(route_b)
+        return connected
+
+    def is_route_visible(self, key):
+        return self._route_visible.get(key, True)
+
+    def set_route_visible(self, key, visible):
+        if key in self._items_by_route:
+            self._route_visible[key] = bool(visible)
+
+    def _is_route(self, obj):
+        return getattr(obj, "classname", obj.__class__.__name__) in ROUTE_CLASSES
+
+    def _route_key(self, route):
+        base = getattr(route, "name", "") or getattr(route, "net", "") or "route"
+        route_class = getattr(route, "classname", route.__class__.__name__)
+        label = f"{base} ({route_class})"
+        key = label
+        suffix = 2
+        while key in self._route_labels:
+            key = f"{label} #{suffix}"
+            suffix += 1
+        self._route_labels[key] = label if key == label else key
+        self._route_visible[key] = True
+        self._route_order.append(key)
+        return key
 
     def _resolve_inst_cell(self, inst):
         cell_obj = getattr(inst, "_cell_obj", None)
@@ -88,27 +167,39 @@ class LayoutScene(QGraphicsScene):
             t.scale(-1, 1)
         return t
 
-    def _walk(self, children, parent):
+    def _collect_top_port_label_names(self, children):
+        names = set()
         for child in children:
             if child is None:
                 continue
+            if child.isPort():
+                if getattr(child, "spicePort", False) and getattr(child, "name", ""):
+                    names.add(child.name)
+        return names
+
+    def _walk(self, children, parent, route_key=None, show_port_labels=True):
+        for child in children:
+            if child is None:
+                continue
+            child_route_key = route_key
+            if self._is_route(child):
+                child_route_key = self._route_key(child)
             if child.isInstance() or child.isCut():
-                self._add_instance(child, parent)
+                self._add_instance(child, parent, child_route_key)
             elif child.isPort():
                 if getattr(child, "spicePort", False):
-                    self._add_port(child, parent)
+                    self._add_port(child, parent, child_route_key, show_port_labels)
             elif child.isText():
-                # Text rendering is disabled in cic-gui; skip in v1.
-                continue
+                self._add_text(child, parent, child_route_key)
             elif child.isLayoutCell() or child.isCell():
-                self._walk(child.children, parent)
+                self._walk(child.children, parent, child_route_key, show_port_labels)
             elif child.isRect():
-                self._add_rect(child, parent)
+                self._add_rect(child, parent, child_route_key)
             else:
                 if hasattr(child, "children"):
-                    self._walk(child.children, parent)
+                    self._walk(child.children, parent, child_route_key, show_port_labels)
 
-    def _add_instance(self, inst, parent):
+    def _add_instance(self, inst, parent, route_key=None):
         cell = self._resolve_inst_cell(inst)
         if cell is None:
             return
@@ -118,11 +209,42 @@ class LayoutScene(QGraphicsScene):
         group.setTransform(self._instance_transform(inst))
         group.setData(KIND_KEY, "instance")
         group.setData(LAYER_KEY, "_instance")
-        self._walk(cell.children, parent=group)
+        self._walk(cell.children, parent=group, route_key=route_key, show_port_labels=False)
         if parent is None:
             self.addItem(group)
 
-    def _add_rect(self, r, parent):
+    def _register_item(self, item, layer, route_key, include_in_route=True):
+        item.setData(LAYER_KEY, layer)
+        item.setData(ROUTE_KEY, route_key)
+        self._items_by_layer.setdefault(layer, []).append(item)
+        if include_in_route and route_key is not None:
+            self._items_by_route.setdefault(route_key, []).append(item)
+
+    def _item_visible(self, layer, route_key, kind):
+        layer_visible = self.style.is_visible(layer)
+        route_visible = route_key is None or self.is_route_visible(route_key)
+        return layer_visible and route_visible
+
+    def _make_text_item(self, name, x, y, layer, parent, route_key, font_size=8.0):
+        if not name:
+            return None
+        item = QGraphicsSimpleTextItem(name, parent=parent)
+        item.setBrush(QBrush(QColor(255, 255, 255)))
+        font = QFont()
+        font.setPointSizeF(font_size)
+        font.setBold(True)
+        item.setFont(font)
+        item.setFlag(item.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        item.setZValue(TEXT_Z_VALUE)
+        item.setData(KIND_KEY, "text")
+        self._register_item(item, layer, route_key, include_in_route=False)
+        item.setPos(x, y)
+        item.setVisible(self._item_visible(layer, route_key, "text"))
+        if parent is None:
+            self.addItem(item)
+        return item
+
+    def _add_rect(self, r, parent, route_key=None):
         if r.x1 == r.x2 or r.y1 == r.y2:
             return
         layer = r.layer or ""
@@ -143,14 +265,13 @@ class LayoutScene(QGraphicsScene):
         item = QGraphicsRectItem(x1, y1, w, h, parent=parent)
         item.setPen(pen)
         item.setBrush(brush)
-        item.setData(LAYER_KEY, layer)
         item.setData(KIND_KEY, "rect")
-        item.setVisible(self.style.is_visible(layer))
-        self._items_by_layer.setdefault(layer, []).append(item)
+        self._register_item(item, layer, route_key)
+        item.setVisible(self._item_visible(layer, route_key, "rect"))
         if parent is None:
             self.addItem(item)
 
-    def _add_port(self, p, parent):
+    def _add_port(self, p, parent, route_key=None, show_label=True):
         layer = getattr(p, "pinLayer", None) or p.layer or ""
         if not layer:
             return
@@ -168,23 +289,29 @@ class LayoutScene(QGraphicsScene):
         rect_item = QGraphicsRectItem(x1, y1, w, h, parent=parent)
         rect_item.setPen(pen)
         rect_item.setBrush(brush)
-        rect_item.setData(LAYER_KEY, layer)
         rect_item.setData(KIND_KEY, "port")
-        rect_item.setVisible(self.style.is_visible(layer))
-        self._items_by_layer.setdefault(layer, []).append(rect_item)
+        self._register_item(rect_item, layer, route_key)
+        rect_item.setVisible(self._item_visible(layer, route_key, "port"))
         if parent is None:
             self.addItem(rect_item)
+        if not show_label:
+            return
         # Label
-        text_item = QGraphicsSimpleTextItem(p.name, parent=rect_item)
-        color = self.style.color(layer)
-        if color is not None:
-            text_item.setBrush(QBrush(color))
-        font = QFont()
-        font.setPointSizeF(max(4.0, min(w, h) * 0.3))
-        text_item.setFont(font)
-        text_item.setFlag(QGraphicsItem.ItemIgnoresTransformations, False)
-        # Counter the view's Y-flip so text reads upright.
-        text_item.setTransform(QTransform().scale(1, -1))
+        text_item = self._make_text_item(
+            p.name,
+            x1,
+            y1,
+            "TXT",
+            parent,
+            route_key,
+            TEXT_FONT_SIZE,
+        )
         tbb = text_item.boundingRect()
         text_item.setPos(x1 + w / 2 - tbb.width() / 2,
                          y1 + h / 2 + tbb.height() / 2)
+
+    def _add_text(self, t, parent, route_key=None):
+        if t.name in self._port_label_names:
+            return
+        layer = t.layer or "TXT"
+        self._make_text_item(t.name, t.x1, t.y1, layer, parent, route_key, TEXT_FONT_SIZE)

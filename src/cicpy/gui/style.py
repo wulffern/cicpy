@@ -10,7 +10,11 @@ from PySide6.QtCore import Qt
 from cicpy.core.layer import Material
 
 
-SKIP_MATERIALS = {Material.METALRES, Material.MARKER, Material.IMPLANT}
+DEFAULT_OFF_MATERIALS = {Material.IMPLANT}
+
+
+def _is_palette_marker_layer(name):
+    return name == "TXT" or name.endswith("_pin")
 
 
 def _qcolor(rgb_string):
@@ -35,19 +39,16 @@ class LayerStyle:
 
     def _init_visibility(self):
         for name, layer in self.rules.layers.items():
-            if layer.material in SKIP_MATERIALS:
+            if layer.material in DEFAULT_OFF_MATERIALS and not _is_palette_marker_layer(name):
                 self._visible[name] = False
             else:
                 self._visible[name] = bool(layer.visible)
+            if _is_palette_marker_layer(name):
+                self._visible[name] = True
 
     def layer_names(self):
         names = []
         for name, layer in self.rules.layers.items():
-            if layer.material in SKIP_MATERIALS:
-                continue
-            color = self._color(layer)
-            if color is None:
-                continue
             names.append(name)
         names.sort()
         return names

@@ -84,7 +84,9 @@ def run(cicfile, techfile=None, includes=(), auto_libs=True):
             )
 
     final_includes = list(includes or [])
-    auto = discover_libraries(cicfile) if auto_libs else []
+    auto = []
+    if auto_libs:
+        auto.extend(discover_libraries(cicfile))
     if auto:
         existing = {os.path.abspath(p) for p in final_includes}
         for path in auto:

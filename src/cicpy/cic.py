@@ -55,9 +55,7 @@ log = logging.getLogger("spi2mag")
 
 def load_design(cicfile, includes=()):
     design = cic.Design()
-    files = list(includes or [])
-    files.append(cicfile)
-    design.fromJsonFiles(*files)
+    design.fromJsonFilesWithDependencies(cicfile, includes)
     return design
 
 @click.group()

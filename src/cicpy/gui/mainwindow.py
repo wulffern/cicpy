@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
 
         self.cell_list = QListWidget()
         self.layer_list = QListWidget()
+        self.route_list = QListWidget()
         self._populate_cells()
         self._populate_layers()
 
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(2, 2, 2, 2)
         left_layout.addWidget(self.cell_list, 1)
         left_layout.addWidget(self.layer_list, 1)
+        left_layout.addWidget(self.route_list, 1)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(left)
@@ -93,6 +95,7 @@ class MainWindow(QMainWindow):
 
         self.cell_list.currentRowChanged.connect(self._on_cell_changed)
         self.layer_list.itemChanged.connect(self._on_layer_item_changed)
+        self.route_list.itemChanged.connect(self._on_route_item_changed)
         self.view.cursorMoved.connect(self._on_cursor_moved)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
@@ -119,9 +122,7 @@ class MainWindow(QMainWindow):
 
     def _load_design(self):
         d = cic.Design()
-        files = list(self.includes)
-        files.append(self.cicfile)
-        d.fromJsonFiles(*files)
+        d.fromJsonFilesWithDependencies(self.cicfile, self.includes)
         return d
 
     def _populate_cells(self):
@@ -142,6 +143,26 @@ class MainWindow(QMainWindow):
             self.layer_list.addItem(item)
         self.layer_list.blockSignals(False)
 
+    def _populate_routes(self):
+        self.route_list.blockSignals(True)
+        self.route_list.clear()
+        connected_routes = self.scene.connected_route_names()
+        for key in self.scene.route_names():
+            label = self.scene.route_label(key)
+            if key in connected_routes:
+                label = f"* {label}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, key)
+            if key in connected_routes:
+                item.setToolTip("Touches or overlaps another route on the same layer")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.Checked if self.scene.is_route_visible(key) else Qt.Unchecked
+            )
+            self.route_list.addItem(item)
+        self.route_list.setVisible(self.route_list.count() > 0)
+        self.route_list.blockSignals(False)
+
     # -- callbacks ------------------------------------------------------
 
     def _on_cell_changed(self, row):
@@ -150,6 +171,7 @@ class MainWindow(QMainWindow):
         name = self.cell_list.item(row).text()
         cell = self.design.getCell(name)
         self.scene.set_cell(cell)
+        self._populate_routes()
         self.scene.apply_visibility()
         self.view.fit()
         self.settings.setValue("last_cell", name)
@@ -162,6 +184,16 @@ class MainWindow(QMainWindow):
         self.style.set_visible(name, new_vis)
         self.scene.apply_visibility()
         self.settings.setValue(f"layers/{self.tech_key}/{name}", new_vis)
+
+    def _on_route_item_changed(self, item):
+        key = item.data(Qt.UserRole)
+        if not key:
+            return
+        new_vis = item.checkState() == Qt.Checked
+        if self.scene.is_route_visible(key) == new_vis:
+            return
+        self.scene.set_route_visible(key, new_vis)
+        self.scene.apply_visibility()
 
     def _on_cursor_moved(self, x, y):
         # Coordinates are in technology units (Ångström). 10 Å = 1 nm.

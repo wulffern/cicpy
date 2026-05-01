@@ -115,6 +115,63 @@ class Design():
                     self.jcells[c.name] = o
                     if c.name not in self.cellnames:
                         self.cellnames.append(c.name)
+
+    def fromJsonFilesWithDependencies(self, cicfile, includes=()):
+        """Load cicfile plus explicit includes, then same-folder cells as needed.
+
+        Sibling .cic/.cic.gz files are indexed by cell name and loaded only when
+        an instance in the current design references a missing cell.
+        """
+        self.fromJsonFiles(*(includes or ()), cicfile)
+        siblings = self._indexSiblingCicFiles(cicfile)
+        loaded = {os.path.abspath(cicfile)}
+        for include in includes or ():
+            for expanded in sorted(glob.glob(include)) or [include]:
+                loaded.add(os.path.abspath(expanded))
+
+        while True:
+            missing = sorted(self._missingInstanceCells())
+            pending = [
+                siblings[name]
+                for name in missing
+                if name in siblings and os.path.abspath(siblings[name]) not in loaded
+            ]
+            if not pending:
+                break
+            for fname in sorted(set(pending)):
+                self.fromJsonFiles(fname)
+                loaded.add(os.path.abspath(fname))
+
+    def _indexSiblingCicFiles(self, cicfile):
+        cicfile = os.path.abspath(cicfile)
+        root = os.path.dirname(cicfile)
+        index = {}
+        for pattern in ("*.cic", "*.cic.gz"):
+            for fname in sorted(glob.glob(os.path.join(root, pattern))):
+                if os.path.abspath(fname) == cicfile:
+                    continue
+                jobj = self._readJsonFile(fname)
+                for cell in jobj.get("cells", []):
+                    name = cell.get("name")
+                    if name and name not in index:
+                        index[name] = fname
+        return index
+
+    def _missingInstanceCells(self):
+        refs = set()
+        for cell in self.cells.values():
+            self._collectInstanceCells(cell, refs)
+        return refs - set(self.cells.keys())
+
+    def _collectInstanceCells(self, obj, refs):
+        if obj is None:
+            return
+        if obj.isInstance() or obj.isCut():
+            name = getattr(obj, "cell", "")
+            if name:
+                refs.add(name)
+        for child in getattr(obj, "children", []):
+            self._collectInstanceCells(child, refs)
         
 
 

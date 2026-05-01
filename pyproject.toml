@@ -26,6 +26,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.optional-dependencies]
+gui = ["PySide6"]
+
 [project.scripts]
 cicpy = "cicpy.cic:cli"
 

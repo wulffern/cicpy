@@ -434,6 +434,18 @@ def _report_connectivity(lcell):
 
 
 
+@cli.command("gui")
+@click.pass_context
+@click.argument("cicfile")
+@click.option("--tech","techfile",default=None,help="Tech file (.tech). Auto-discovered from <ipdir>/tech/cic/*.tech if omitted.")
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+@click.option("--no-auto-libs",is_flag=True,help="Disable auto-discovery of dependency libraries via the IP's config.yaml.")
+def gui(ctx,cicfile,techfile,includes,no_auto_libs):
+    """Open a Qt viewer on a .cic file (PySide6 required: pip install 'cicpy[gui]')."""
+    from cicpy.gui.app import run
+    run(cicfile, techfile=techfile, includes=includes, auto_libs=not no_auto_libs)
+
+
 @cli.command("orc")
 @click.pass_context
 @click.argument("orcfile")

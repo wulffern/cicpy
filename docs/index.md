@@ -34,6 +34,7 @@ make build
 - [transpile test](/cicpy/transpile)
 - [minecraft test](/cicpy/minecraft)
 - [sch2mag test](/cicpy/sch2mag)
+- [gui](/cicpy/gui) — Qt viewer for `.cic` files
 
 ## Commands
 
@@ -98,6 +99,7 @@ cicpy [OPTIONS] COMMAND [ARGS]...
 | `spi2mag` | Place and route a SPICE subcircuit to Magic |
 | `svg` | Generate SVG views from a `.cic` library |
 | `minecraft` | Emit a Minecraft build script from a layout cell |
+| `gui` | Open a Qt layout viewer (requires `pip install -e '.[gui]'`) |
 | `place` | *(Deprecated)* Place transistors by pattern |
 | `orc` | *(Deprecated)* Orchestration runner |
 | `filter` | *(Deprecated)* Parse-only placeholder |

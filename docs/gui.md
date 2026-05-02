@@ -96,6 +96,36 @@ groups:
 
 Phases 4b–4f layer route/placement intent into the same YAML, where it'll be consumed by a `cicpy.groups.apply()` helper inside the pycell.
 
+### Pycell consumption (Phase 4d)
+
+The pycell opts into the YAML-driven flow with one call:
+
+```python
+import cicpy.groups as gp
+
+def beforePlace(layout):
+    # honours <CellName>.groups.yaml next to this .py file
+    gp.apply(layout)
+```
+
+Each visible group with a `placement.stack: true` entry becomes a
+`makeCellGroup(parent).addStack(name, ...)` call. Members are taken from
+`placement.instances_regex` if set, otherwise from `member_regex`, otherwise
+from `members` (joined as an exact-match regex). Returns
+`{group_name: stack_object}` so the pycell can plug the result into
+`addRouteConnection`, etc.
+
+```yaml
+cell: LELOTEMP_CMP
+groups:
+  - name: n_mirr_load
+    visible: true
+    members: [xn_mirr_load1, xn_mirr_load2, xn_mirr_load3]
+    placement:
+      stack: true
+      parent: nmos        # CellGroup name; created on first reference
+```
+
 ## Cross-probing
 
 Click a component in the schematic pane. The GUI parses the instance name (e.g. `xn_mirr_load2` → group `xn_mirr_load`) and outlines every peer in both panes. The naming convention is `x<kind>[_<gid>]_<role>` — the `cIcSpice::Component.group()` regex captures the longest non-digit prefix.

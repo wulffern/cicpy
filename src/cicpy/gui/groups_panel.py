@@ -10,6 +10,10 @@ import re
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QInputDialog,
     QLineEdit,
@@ -194,6 +198,7 @@ class GroupsPanel(QWidget):
         a_desc = menu.addAction("Edit description…")
         a_regex = menu.addAction("Edit member regex…")
         a_members = menu.addAction("Edit members…")
+        a_place = menu.addAction("Edit placement…")
         menu.addSeparator()
         a_remove = menu.addAction("Remove")
         chosen = menu.exec(self.list.mapToGlobal(pos))
@@ -242,5 +247,45 @@ class GroupsPanel(QWidget):
                 g.members = [m.strip() for m in new.splitlines() if m.strip()]
                 self._populate()
                 self.filterChanged.emit()
+        elif chosen is a_place:
+            self._edit_placement(g)
         elif chosen is a_remove:
             self._on_remove()
+
+    def _edit_placement(self, g):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Placement — {g.name}")
+        form = QFormLayout(dlg)
+        cb_stack = QCheckBox("Emit addStack() for this group")
+        cb_stack.setChecked(bool(g.placement.get("stack", False)))
+        ed_parent = QLineEdit(g.placement.get("parent", "") or "")
+        ed_parent.setPlaceholderText("CellGroup name (e.g. nmos)")
+        ed_regex = QLineEdit(g.placement.get("instances_regex", "") or "")
+        ed_regex.setPlaceholderText("regex on instanceName (overrides members)")
+        form.addRow("", cb_stack)
+        form.addRow("Parent CellGroup:", ed_parent)
+        form.addRow("Instance regex:", ed_regex)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        place = dict(g.placement or {})
+        if cb_stack.isChecked():
+            place["stack"] = True
+        else:
+            place.pop("stack", None)
+        parent = ed_parent.text().strip()
+        if parent:
+            place["parent"] = parent
+        else:
+            place.pop("parent", None)
+        regex = ed_regex.text().strip()
+        if regex:
+            place["instances_regex"] = regex
+        else:
+            place.pop("instances_regex", None)
+        g.placement = place
+        self._populate()
+        self.filterChanged.emit()  # triggers save

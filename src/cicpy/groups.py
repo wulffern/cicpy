@@ -242,6 +242,107 @@ def collect_top_instance_names(cell) -> List[str]:
     return names
 
 
+def apply(layout, cell_name=None, yaml_path=None, search_dirs=None):
+    """Read the sidecar groups YAML for ``cell_name`` and apply each visible
+    group's intent to the LayoutCell ``layout``.
+
+    Pycells opt in with one call::
+
+        import cicpy.groups as gp
+        gp.apply(layout)                         # uses layout.name
+        gp.apply(layout, "LELOTEMP_OTAN")        # explicit cell name
+        gp.apply(layout, yaml_path="path/to.yaml")
+
+    Returns ``{group_name: created_object}`` so the caller can wire the
+    returned CellGroup / Stack into routing decisions afterwards.
+
+    Honoured schema (Phase 4d minimum):
+
+    .. code-block:: yaml
+
+        groups:
+          - name: n_mirr_load
+            visible: true
+            members: [xn_mirr_load1, xn_mirr_load2]
+            placement:
+              stack: true
+              parent: nmos              # optional CellGroup wrapper
+              instances_regex: "^xn_mirr_load"  # overrides members
+              order: instanceName       # default; future: 'as_listed'
+    """
+    if yaml_path is None:
+        if cell_name is None:
+            cell_name = getattr(layout, "name", "") or ""
+        if not cell_name:
+            log.warning("apply(): no cell name and no yaml_path; nothing to do")
+            return {}
+        candidates = []
+        layout_dir = getattr(layout, "dirname", None)
+        if layout_dir:
+            candidates.append(os.path.join(layout_dir, f"{cell_name}.groups.yaml"))
+        for d in (search_dirs or []):
+            candidates.append(os.path.join(d, f"{cell_name}.groups.yaml"))
+        candidates.append(os.path.join(os.getcwd(), f"{cell_name}.groups.yaml"))
+        yaml_path = next((p for p in candidates if os.path.isfile(p)), None)
+        if yaml_path is None:
+            log.info(
+                f"apply({cell_name}): no sidecar YAML found "
+                f"(looked at {len(candidates)} locations)"
+            )
+            return {}
+
+    gs = GroupSet.from_yaml(yaml_path)
+    out: dict = {}
+    cellgroups: dict = {}
+
+    for g in gs.groups:
+        if not g.visible:
+            continue
+        place = g.placement or {}
+        if not place.get("stack"):
+            continue
+
+        parent_name = place.get("parent", "") or g.name
+        cg = cellgroups.get(parent_name)
+        if cg is None:
+            try:
+                cg = layout.makeCellGroup(parent_name)
+            except Exception as exc:
+                log.warning(f"apply: makeCellGroup({parent_name!r}) failed: {exc}")
+                continue
+            cellgroups[parent_name] = cg
+
+        regex = place.get("instances_regex")
+        if not regex:
+            if g.member_regex:
+                regex = "|".join(g.member_regex)
+            elif g.members:
+                regex = "^(" + "|".join(re.escape(m) for m in g.members) + ")$"
+
+        if not regex:
+            log.info(f"apply: group {g.name!r} has no resolvable members; skipping")
+            continue
+
+        try:
+            instances = layout.getSortedInstancesByInstanceName(regex)
+        except Exception as exc:
+            log.warning(f"apply: regex {regex!r} matched no instances: {exc}")
+            continue
+
+        try:
+            stack = cg.addStack(g.name, instances)
+        except Exception as exc:
+            log.warning(f"apply: addStack({g.name!r}) failed: {exc}")
+            continue
+        out[g.name] = stack
+        log.info(
+            f"apply: group {g.name!r} → stack of {len(instances)} instances "
+            f"in CellGroup {parent_name!r}"
+        )
+
+    return out
+
+
 def collect_instance_nets(cell) -> dict:
     """Return {instance_name: set(net_names)} from the cell's SPICE subckt.
 

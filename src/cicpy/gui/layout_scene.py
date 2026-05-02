@@ -8,6 +8,7 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsItemGroup,
+    QGraphicsLineItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
@@ -66,6 +67,7 @@ class LayoutScene(QGraphicsScene):
         self._port_label_names.clear()
         self._groups_by_instance.clear()
         self._highlight_overlays = []
+        self._flight_items = []
         self._member_filter = None
         self.cell = cell
         if cell is None:
@@ -420,6 +422,48 @@ class LayoutScene(QGraphicsScene):
                 return n
             item = item.parentItem()
         return None
+
+    # -- flight lines / problem markers (Phase 4b) -------------------
+
+    def clear_flight_lines(self):
+        for it in getattr(self, "_flight_items", []):
+            try:
+                self.removeItem(it)
+            except Exception:
+                pass
+        self._flight_items = []
+
+    def set_flight_lines(self, segments, color="#FFD000", width=4):
+        """Draw straight flight lines on top of the layout. ``segments`` is
+        a list of ((x1,y1),(x2,y2)) pairs. Replaces any prior flight lines."""
+        self.clear_flight_lines()
+        if not segments:
+            return
+        c = QColor(color)
+        pen = QPen(c)
+        pen.setCosmetic(True)
+        pen.setWidth(width)
+        pen.setStyle(Qt.DashLine)
+        items = []
+        for (x1, y1), (x2, y2) in segments:
+            line = QGraphicsLineItem(x1, y1, x2, y2)
+            line.setPen(pen)
+            line.setZValue(TEXT_Z_VALUE + 20)
+            self.addItem(line)
+            items.append(line)
+        self._flight_items = items
+
+    def set_short_marker(self, rect, color="#FF4040"):
+        """Highlight the bbox of a short."""
+        self.clear_flight_lines()
+        c = QColor(color)
+        pen = QPen(c)
+        pen.setCosmetic(True)
+        pen.setWidth(4)
+        item = self.addRect(rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1,
+                            pen, QBrush(QColor(c.red(), c.green(), c.blue(), 40)))
+        item.setZValue(TEXT_Z_VALUE + 20)
+        self._flight_items = [item]
 
     def fit_highlighted(self, view):
         if not self._highlight_overlays:

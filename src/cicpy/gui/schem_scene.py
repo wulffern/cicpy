@@ -73,6 +73,8 @@ class SchemScene(QGraphicsScene):
         self._highlight_pen.setWidth(3)
         self._member_filter = None  # None = no filter; otherwise allowed names
         self._dim_opacity = 0.18
+        self._wires_by_net = {}      # net_name -> list[QGraphicsLineItem]
+        self._net_highlight_items = []
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
 
     def set_schematic(self, sch):
@@ -80,6 +82,8 @@ class SchemScene(QGraphicsScene):
         self.schematic = sch
         self._components_by_name.clear()
         self._highlight_groups = []
+        self._wires_by_net = {}
+        self._net_highlight_items = []
         self._member_filter = None
         if sch is None:
             self.setSceneRect(QRectF())
@@ -119,6 +123,10 @@ class SchemScene(QGraphicsScene):
         pen = QPen(QColor("#4080FF"), _WIRE_PEN_W)
         pen.setCosmetic(True)
         item.setPen(pen)
+        net = (w.properties or {}).get("lab")
+        if net:
+            item.setData(3, net)
+            self._wires_by_net.setdefault(net, []).append(item)
         if parent is None:
             self.addItem(item)
 
@@ -250,6 +258,36 @@ class SchemScene(QGraphicsScene):
             if old is not None and hasattr(child, "setPen"):
                 child.setPen(old)
                 child.setData(2, None)
+
+    # -- net highlight (Phase 4b) -------------------------------------
+
+    def clear_net_highlight(self):
+        for it in getattr(self, "_net_highlight_items", []):
+            try:
+                old = it.data(2)
+                if old is not None and hasattr(it, "setPen"):
+                    it.setPen(old)
+                    it.setData(2, None)
+            except Exception:
+                pass
+        self._net_highlight_items = []
+
+    def highlight_net(self, net_name, color="#FFD000", width=4):
+        """Highlight every wire whose ``lab=`` property matches ``net_name``."""
+        self.clear_net_highlight()
+        if not net_name:
+            return 0
+        wires = self._wires_by_net.get(net_name, [])
+        pen = QPen(QColor(color))
+        pen.setCosmetic(True)
+        pen.setWidth(width)
+        items = []
+        for it in wires:
+            it.setData(2, it.pen())
+            it.setPen(pen)
+            items.append(it)
+        self._net_highlight_items = items
+        return len(items)
 
     # -- planning-group filter ----------------------------------------
 

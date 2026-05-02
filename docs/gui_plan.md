@@ -1,4 +1,4 @@
-# cicpy GUI — Port of `cic-gui` to Python with side-by-side schematic view
+# gui plan
 
 Status: **Phase 1 + Phase 2 shipped** — layout viewer with side-by-side schematic pane, cross-probing, and `E` / `Ctrl+E` hierarchy navigation. See [`gui`](/cicpy/gui) for usage. Phase 3 (placer integration via `cicpy.groups`) is next.
 

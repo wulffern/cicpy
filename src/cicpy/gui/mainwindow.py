@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 import cicpy as cic
 from cicpy import groups as cicgroups
 from cicpy.eda.xschem import Schematic
+from .connectivity_panel import ConnectivityPanel
 from .groups_panel import GroupsPanel
 from .layout_scene import LayoutScene
 from .layout_view import LayoutView
@@ -89,9 +90,11 @@ class MainWindow(QMainWindow):
         self.layer_list = QListWidget()
         self.route_list = QListWidget()
         self.groups_panel = GroupsPanel()
+        self.connectivity_panel = ConnectivityPanel()
         self._populate_cells()
         self._populate_layers()
         self._current_groupset = None
+        self._connectivity_result = None
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
@@ -100,6 +103,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.layer_list, 1)
         left_layout.addWidget(self.route_list, 1)
         left_layout.addWidget(self.groups_panel, 1)
+        left_layout.addWidget(self.connectivity_panel, 1)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(left)
@@ -127,6 +131,8 @@ class MainWindow(QMainWindow):
         self.scene.instanceClicked.connect(self._on_layout_instance_clicked)
         self.groups_panel.filterChanged.connect(self._on_groups_changed)
         self.groups_panel.addSelectionRequested.connect(self._on_add_selection_to_group)
+        self.connectivity_panel.runRequested.connect(self.run_connectivity_check)
+        self.connectivity_panel.rowActivated.connect(self._on_connectivity_row)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
@@ -410,6 +416,89 @@ class MainWindow(QMainWindow):
         msg = f"rerun {'OK' if ok else f'failed (exit {code})'}"
         self.statusBar().showMessage(msg, 5000)
         self._rerun_proc = None
+
+    # -- connectivity (Phase 4b) ---------------------------------------
+
+    def run_connectivity_check(self):
+        cell = getattr(self, "_current_cell", None)
+        if cell is None or not hasattr(cell, "checkConnectivity"):
+            self.statusBar().showMessage(
+                "no LayoutCell loaded for connectivity check", 3000)
+            return
+        self.statusBar().showMessage("running connectivity check…")
+        try:
+            result = cell.checkConnectivity()
+        except Exception as exc:
+            self.statusBar().showMessage(f"check failed: {exc}", 4000)
+            return
+        self._connectivity_result = result
+        # Determine group filter (active group's nets) if requested
+        group_filter = None
+        if self.connectivity_panel.filter_to_active_group():
+            gs = self._current_groupset
+            if gs is not None and gs.any_visible():
+                all_inst = cicgroups.collect_top_instance_names(cell)
+                nets_for_inst = cicgroups.collect_instance_nets(cell)
+                members = gs.visible_members(all_inst, nets_for_inst)
+                allowed_nets = set()
+                for m in members:
+                    allowed_nets.update(nets_for_inst.get(m, set()))
+                group_filter = allowed_nets
+        # Pre-filter the result if needed (panel placeholder otherwise)
+        if group_filter is not None:
+            opens = result.get("opens", [])
+            filtered_opens = [o for o in opens if o.get("net") in group_filter]
+            result_view = dict(result)
+            result_view["opens"] = filtered_opens
+            self.connectivity_panel.populate(result_view)
+        else:
+            self.connectivity_panel.populate(result)
+        self.statusBar().showMessage(
+            f"connectivity check: "
+            f"{len(result.get('shorts', []))} shorts, "
+            f"{len(result.get('opens', []))} opens",
+            5000,
+        )
+
+    def _on_connectivity_row(self, payload):
+        if not payload:
+            return
+        t = payload.get("type")
+        result = self._connectivity_result or {}
+        if t == "short":
+            bounds = payload.get("bounds")
+            if bounds is not None:
+                self.scene.set_short_marker(bounds)
+            net_names = payload.get("nets", [])
+            # Highlight the first net for context
+            if net_names:
+                self.schem_scene.highlight_net(net_names[0])
+            return
+        if t == "unmatched":
+            net = payload.get("net")
+            anchors = result.get("unmatched", {}).get(net, [])
+            segments = self._segments_chain(anchors)
+            self.scene.set_flight_lines(segments, color="#FFD000")
+            self.schem_scene.highlight_net(net)
+            return
+        if t == "split":
+            net = payload.get("net")
+            comp_ids = payload.get("components", [])
+            cb = result.get("components_bbox", {})
+            anchors = [cb[c] for c in comp_ids if c in cb]
+            segments = self._segments_chain(anchors)
+            self.scene.set_flight_lines(segments, color="#FFA050")
+            self.schem_scene.highlight_net(net)
+            return
+
+    def _segments_chain(self, rects):
+        if not rects or len(rects) < 2:
+            return []
+        centers = [(r.centerX(), r.centerY()) for r in rects]
+        segs = []
+        for a, b in zip(centers, centers[1:]):
+            segs.append((a, b))
+        return segs
 
     # -- planning groups (Phase 4a) ------------------------------------
 

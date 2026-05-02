@@ -559,12 +559,18 @@ class LayoutCell(Cell):
                     "components": comp_ids,
                 })
 
+        components_bbox = {
+            cid: Cell.calcBoundingRectFromList(rs, False)
+            for cid, rs in components.items()
+        }
+
         return {
             "shorts": shorts,
             "opens": opens,
             "component_nets": component_nets,
             "net_components": net_components,
             "unmatched": unmatched,
+            "components_bbox": components_bbox,
             "component_count": len(components),
             "shape_count": len(shapes),
         }

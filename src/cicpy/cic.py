@@ -438,10 +438,13 @@ def _report_connectivity(lcell):
 @click.option("--tech","techfile",default=None,help="Tech file (.tech). Auto-discovered from <ipdir>/tech/cic/*.tech if omitted.")
 @click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
 @click.option("--no-auto-libs",is_flag=True,help="Disable auto-discovery of dependency libraries via the IP's config.yaml.")
-def gui(ctx,cicfile,techfile,includes,no_auto_libs):
+@click.option("--rerun-cmd",default=None,help="Shell command to rerun spi2mag (Ctrl+R / auto on .py change). Default: 'make' in IP root.")
+@click.option("--rerun-cwd",default=None,help="Working directory for --rerun-cmd. Default: IP root (dir with config.yaml).")
+def gui(ctx,cicfile,techfile,includes,no_auto_libs,rerun_cmd,rerun_cwd):
     """Open a Qt viewer on a .cic file (PySide6 required: pip install 'cicpy[gui]')."""
     from cicpy.gui.app import run
-    run(cicfile, techfile=techfile, includes=includes, auto_libs=not no_auto_libs)
+    run(cicfile, techfile=techfile, includes=includes, auto_libs=not no_auto_libs,
+        rerun_cmd=rerun_cmd, rerun_cwd=rerun_cwd)
 
 
 @cli.command("orc")

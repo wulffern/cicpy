@@ -7,12 +7,13 @@
 import glob
 import os
 
-from PySide6.QtCore import QFileSystemWatcher, QSettings, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtCore import QFileSystemWatcher, QProcess, QSettings, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QSplitter,
     QStatusBar,
     QVBoxLayout,
@@ -54,14 +55,21 @@ def _layer_icon(color, size=14):
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, cicfile, techfile, includes=()):
+    def __init__(self, cicfile, techfile, includes=(), rerun_cmd=None, rerun_cwd=None):
         super().__init__()
         self.cicfile = os.path.abspath(cicfile)
         self.techfile = os.path.abspath(techfile) if techfile else None
         self.includes = list(includes or [])
         self.tech_key = _tech_name(self.techfile)
-
         self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        # CLI > env > QSettings > default
+        self.rerun_cmd = (
+            rerun_cmd
+            or os.environ.get("CICPY_GUI_RERUN_CMD")
+            or self.settings.value("rerun_cmd", None, str)
+            or "make"
+        )
+        self.rerun_cwd = rerun_cwd or self._discover_ip_root()
 
         self.rules = cic.Rules(self.techfile) if self.techfile else cic.Rules()
         self.style = LayerStyle(self.rules)
@@ -125,8 +133,22 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("E"), self, activated=self._descend)
         QShortcut(QKeySequence("Ctrl+E"), self, activated=self._ascend)
         QShortcut(QKeySequence("Meta+E"), self, activated=self._ascend)
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self.rerun_spi2mag)
+        QShortcut(QKeySequence("Meta+R"), self, activated=self.rerun_spi2mag)
         self._cell_history = []
         self._last_clicked_comp = None
+        # spi2mag rerun infrastructure
+        self._rerun_proc = None
+        self._py_watcher = QFileSystemWatcher(self)
+        self._py_watcher.fileChanged.connect(self._on_py_changed)
+        self._current_py = None
+        self._auto_rerun = self.settings.value("auto_rerun", False, bool)
+        self._rerun_debounce = QTimer(self)
+        self._rerun_debounce.setSingleShot(True)
+        self._rerun_debounce.setInterval(500)
+        self._rerun_debounce.timeout.connect(self.rerun_spi2mag)
+        # menu
+        self._build_menu()
 
         self.watcher = QFileSystemWatcher(self)
         self._watch_files()
@@ -206,6 +228,7 @@ class MainWindow(QMainWindow):
         self._load_schematic_for(name)
         self._load_groupset_for(name, cell)
         self._apply_group_filter()
+        self._watch_py_for(name)
         self.settings.setValue("last_cell", name)
 
     def _on_layer_item_changed(self, item):
@@ -285,6 +308,108 @@ class MainWindow(QMainWindow):
 
     def _on_file_changed(self, path):
         self._reload_timer.start()
+
+    # -- spi2mag rerun -------------------------------------------------
+
+    def _discover_ip_root(self):
+        d = os.path.dirname(os.path.abspath(self.cicfile))
+        for _ in range(8):
+            if os.path.isfile(os.path.join(d, "config.yaml")) and \
+               (os.path.islink(os.path.join(d, "tech")) or os.path.isdir(os.path.join(d, "design"))):
+                return d
+            new_d = os.path.dirname(d)
+            if new_d == d:
+                break
+            d = new_d
+        return os.path.dirname(os.path.abspath(self.cicfile))
+
+    def _build_menu(self):
+        menu_bar = self.menuBar()
+        run_menu = menu_bar.addMenu("&Run")
+        a_rerun = QAction("Rerun spi2mag", self)
+        a_rerun.setShortcut(QKeySequence("Ctrl+R"))
+        a_rerun.triggered.connect(self.rerun_spi2mag)
+        run_menu.addAction(a_rerun)
+        a_auto = QAction("Auto-rerun on .py change", self, checkable=True)
+        a_auto.setChecked(bool(self._auto_rerun))
+        a_auto.toggled.connect(self._set_auto_rerun)
+        run_menu.addAction(a_auto)
+        a_cmd = QAction("Set rerun command…", self)
+        a_cmd.triggered.connect(self._edit_rerun_cmd)
+        run_menu.addAction(a_cmd)
+
+    def _set_auto_rerun(self, on):
+        self._auto_rerun = bool(on)
+        self.settings.setValue("auto_rerun", self._auto_rerun)
+        state = "on" if self._auto_rerun else "off"
+        self.statusBar().showMessage(f"auto-rerun {state}", 2000)
+
+    def _edit_rerun_cmd(self):
+        from PySide6.QtWidgets import QInputDialog
+        cur = self.rerun_cmd
+        new, ok = QInputDialog.getText(
+            self, "Rerun command", "Shell command:", text=cur)
+        if ok and new.strip():
+            self.rerun_cmd = new.strip()
+            self.settings.setValue("rerun_cmd", self.rerun_cmd)
+            self.statusBar().showMessage(f"rerun command: {self.rerun_cmd}", 3000)
+
+    def _watch_py_for(self, cell_name):
+        # Stop watching the previous .py
+        files = self._py_watcher.files()
+        if files:
+            self._py_watcher.removePaths(files)
+        # The pycell sits next to the .cic in IP convention.
+        py_path = os.path.join(
+            os.path.dirname(self.cicfile), f"{cell_name}.py")
+        if os.path.isfile(py_path):
+            self._py_watcher.addPath(py_path)
+            self._current_py = py_path
+        else:
+            self._current_py = None
+
+    def _on_py_changed(self, path):
+        # Some editors replace-on-save; re-add to keep watching.
+        if os.path.exists(path):
+            self._py_watcher.addPath(path)
+        self.statusBar().showMessage(
+            f"{os.path.basename(path)} changed"
+            + (" — rerunning…" if self._auto_rerun else " — Ctrl+R to rerun"),
+            3000,
+        )
+        if self._auto_rerun:
+            self._rerun_debounce.start()
+
+    def rerun_spi2mag(self):
+        if self._rerun_proc is not None and \
+                self._rerun_proc.state() != QProcess.NotRunning:
+            self.statusBar().showMessage("rerun already in progress", 2000)
+            return
+        proc = QProcess(self)
+        proc.setWorkingDirectory(self.rerun_cwd)
+        proc.setProgram("/bin/sh")
+        proc.setArguments(["-c", self.rerun_cmd])
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+        proc.readyReadStandardOutput.connect(
+            lambda p=proc: self._on_rerun_output(p))
+        proc.finished.connect(
+            lambda code, st, p=proc: self._on_rerun_finished(p, code, st))
+        self._rerun_proc = proc
+        self.statusBar().showMessage(
+            f"rerun: {self.rerun_cmd} (cwd={self.rerun_cwd})")
+        proc.start()
+
+    def _on_rerun_output(self, proc):
+        data = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+        last = data.rstrip().splitlines()[-1] if data.strip() else ""
+        if last:
+            self.statusBar().showMessage(f"rerun: {last}", 0)
+
+    def _on_rerun_finished(self, proc, code, status):
+        ok = code == 0
+        msg = f"rerun {'OK' if ok else f'failed (exit {code})'}"
+        self.statusBar().showMessage(msg, 5000)
+        self._rerun_proc = None
 
     # -- planning groups (Phase 4a) ------------------------------------
 

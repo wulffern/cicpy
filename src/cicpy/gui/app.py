@@ -74,7 +74,8 @@ def discover_tech(cicfile):
     return None
 
 
-def run(cicfile, techfile=None, includes=(), auto_libs=True):
+def run(cicfile, techfile=None, includes=(), auto_libs=True,
+        rerun_cmd=None, rerun_cwd=None):
     if techfile is None:
         techfile = discover_tech(cicfile)
         if techfile is None:
@@ -112,7 +113,10 @@ def run(cicfile, techfile=None, includes=(), auto_libs=True):
         app.setOrganizationName("cicpy")
         app.setApplicationName("gui")
 
-    win = MainWindow(cicfile, techfile, includes=final_includes)
+    win = MainWindow(
+        cicfile, techfile, includes=final_includes,
+        rerun_cmd=rerun_cmd, rerun_cwd=rerun_cwd,
+    )
     win.show()
 
     if owns_app:

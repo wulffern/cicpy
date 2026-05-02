@@ -50,6 +50,7 @@ cicpy gui CELL.cic --tech path/to/sky130A.tech \
 | Reload `.cic` | `Shift+R` (auto-reload also fires when the file changes on disk) |
 | Descend hierarchy | click a schematic component, then `E` |
 | Ascend hierarchy | `Ctrl+E` (Cmd+E on macOS) |
+| Rerun spi2mag | `Ctrl+R` (Cmd+R on macOS) — runs `make` in the IP root by default |
 
 `Ctrl`/`Cmd` + wheel also zooms; `Shift` + wheel pans horizontally.
 
@@ -61,6 +62,39 @@ cicpy gui CELL.cic --tech path/to/sky130A.tech \
 - **Layout pane** (middle) — the cell rendered into a `QGraphicsScene`. Y-flipped to match conventional layout view (Y grows up).
 - **Schematic pane** (right) — the matching XSchem `.sch` for the selected cell, if one is found next to the `.cic` or in the IP / dependency design directories. Hidden when no schematic exists.
 - **Status bar** — cursor coordinates (Ångström + µm for layout, raw grid units for schematic).
+
+## Rerunning spi2mag
+
+`Ctrl+R` (or `Run → Rerun spi2mag`) shells out to `make` in the IP root (the directory containing `config.yaml`). Override either with `--rerun-cmd` and `--rerun-cwd` on the command line, or via `Run → Set rerun command…`. The `CICPY_GUI_RERUN_CMD` env var is also honoured.
+
+`Run → Auto-rerun on .py change` (persistent in `QSettings`) watches the active cell's pycell `<CellName>.py` and triggers a debounced rerun whenever it changes on disk. The new `.cic` is then auto-reloaded by the existing `QFileSystemWatcher`. The intended loop is:
+
+1. Edit `<CellName>.py` (or the sidecar `<CellName>.groups.yaml`)
+2. Save
+3. GUI reruns spi2mag
+4. GUI reloads the freshly-written `.cic`
+
+## Planning groups (Phase 4a)
+
+Each cell can have a sidecar `<CellName>.groups.yaml` next to its `.py` describing **planning groups** — named subsets of instances. Membership can be enumerated explicitly (`members:`), pattern-matched (`member_regex:`), or net-driven (`member_nets:`); the resolver unions all three.
+
+When any group is checked visible, both panes filter:
+- Layout pane hides non-member top-level instances
+- Schematic pane dims non-members to ~18% opacity (still legible context)
+
+The bottom-left **Groups** panel manages them: `New` to create, right-click to rename / edit description / regex / members, `Add selection` to push the last-clicked schematic component (and its naming-convention peers) into the active group. The YAML is rewritten on every change.
+
+```yaml
+cell: LELOTEMP_OTAN
+groups:
+  - name: bias_chain
+    description: Output stage bias mirror
+    visible: true
+    members: [xn_mirr_bias1, xn_mirr_bias2]
+    member_regex: ['^xn_mirr_bias\d+']
+```
+
+Phases 4b–4f layer route/placement intent into the same YAML, where it'll be consumed by a `cicpy.groups.apply()` helper inside the pycell.
 
 ## Cross-probing
 

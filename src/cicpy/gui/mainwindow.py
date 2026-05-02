@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         self.groups_panel.renameSchemSelectionRequested.connect(self._rename_schem_selection)
         self.connectivity_panel.runRequested.connect(self.run_connectivity_check)
         self.connectivity_panel.rowActivated.connect(self._on_connectivity_row)
+        self.connectivity_panel.planRouteRequested.connect(self._plan_route_dialog)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
@@ -591,6 +592,97 @@ class MainWindow(QMainWindow):
             self.scene.set_flight_lines(segments, color="#FFA050")
             self.schem_scene.highlight_net(net)
             return
+
+    def _plan_route_dialog(self, payload):
+        """Open a small dialog to author a route entry for the selected open
+        net; appends the entry to the chosen planning group's ``routes`` list
+        and saves the YAML."""
+        from PySide6.QtWidgets import (
+            QComboBox, QDialog, QDialogButtonBox,
+            QFormLayout, QLineEdit, QMessageBox,
+        )
+        gs = self._current_groupset
+        if gs is None or not gs.groups:
+            QMessageBox.information(
+                self, "Plan route",
+                "Create at least one planning group first.")
+            return
+        net = payload.get("net", "")
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Plan route — {net}")
+        form = QFormLayout(dlg)
+
+        cb_group = QComboBox()
+        for g in gs.groups:
+            cb_group.addItem(g.name)
+        # Default to the panel's selected group
+        sel = self.groups_panel.selected_group_name()
+        if sel:
+            i = cb_group.findText(sel)
+            if i >= 0:
+                cb_group.setCurrentIndex(i)
+
+        cb_kind = QComboBox()
+        cb_kind.addItems(["connection", "orthogonal"])
+
+        ed_layer = QLineEdit("M3")
+        ed_layer.setToolTip("connection: target layer; orthogonal: ignored "
+                            "(use layer1 / layer2)")
+        ed_layer1 = QLineEdit("M2")
+        ed_layer2 = QLineEdit("M3")
+        ed_options = QLineEdit("")
+        ed_options.setPlaceholderText("e.g. onTopLeft,track-2 or top")
+        ed_access = QLineEdit("")
+        ed_access.setPlaceholderText("orthogonal access layer (optional)")
+        ed_parent = QLineEdit("")
+        ed_parent.setPlaceholderText("CellGroup name (orthogonal only; blank = layout)")
+        ed_location = QLineEdit("")
+        ed_location.setPlaceholderText("connection: top|bottom|left|right")
+
+        form.addRow("Planning group:", cb_group)
+        form.addRow("Kind:", cb_kind)
+        form.addRow("Layer (connection):", ed_layer)
+        form.addRow("Layer1 (orthogonal):", ed_layer1)
+        form.addRow("Layer2 (orthogonal):", ed_layer2)
+        form.addRow("Options:", ed_options)
+        form.addRow("Access layer:", ed_access)
+        form.addRow("Parent CellGroup:", ed_parent)
+        form.addRow("Location (connection):", ed_location)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        target_group = gs.by_name(cb_group.currentText())
+        if target_group is None:
+            return
+        kind = cb_kind.currentText()
+        entry = {"kind": kind, "net": net}
+        if kind == "connection":
+            entry["layer"] = ed_layer.text().strip() or "M1"
+            if ed_location.text().strip():
+                entry["location"] = ed_location.text().strip()
+        else:
+            entry["layer1"] = ed_layer1.text().strip() or "M2"
+            entry["layer2"] = ed_layer2.text().strip() or "M3"
+            if ed_access.text().strip():
+                entry["access_layer"] = ed_access.text().strip()
+            if ed_parent.text().strip():
+                entry["parent"] = ed_parent.text().strip()
+        if ed_options.text().strip():
+            entry["options"] = ed_options.text().strip()
+
+        target_group.routes = list(target_group.routes or []) + [entry]
+        self._save_groupset_if_dirty()
+        self.statusBar().showMessage(
+            f"route added to '{target_group.name}': {kind} {net} "
+            f"({len(target_group.routes)} total) — Ctrl+R to rerun spi2mag",
+            5000,
+        )
 
     def _segments_chain(self, rects):
         if not rects or len(rects) < 2:

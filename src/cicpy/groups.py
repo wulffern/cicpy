@@ -340,7 +340,75 @@ def apply(layout, cell_name=None, yaml_path=None, search_dirs=None):
             f"in CellGroup {parent_name!r}"
         )
 
+    # ---- routes ----
+    for g in gs.groups:
+        if not g.visible:
+            continue
+        for r in (g.routes or []):
+            try:
+                _apply_route(layout, cellgroups, r)
+            except Exception as exc:
+                log.warning(f"apply route {r!r} failed: {exc}")
+
     return out
+
+
+def _apply_route(layout, cellgroups, r):
+    """Emit one route. Honoured kinds: ``connection`` (LayoutCell.addRouteConnection)
+    and ``orthogonal`` (addOrthogonalConnectivityRoute on a CellGroup or the layout)."""
+    kind = (r.get("kind") or "connection").lower()
+    net = r.get("net", "")
+    if not net:
+        return
+    pattern = r.get("net_regex") or f"^{re.escape(net)}$"
+
+    if kind == "connection":
+        layout.addRouteConnection(
+            pattern,
+            r.get("include_instances", "") or "",
+            r.get("layer", "M1") or "M1",
+            r.get("location", "") or "",
+            r.get("options", "") or "",
+            r.get("route_type", "") or "",
+        )
+        log.info(f"apply: connection route net={net} layer={r.get('layer')}")
+        return
+
+    if kind == "orthogonal":
+        parent = r.get("parent", "") or ""
+        target = None
+        if parent:
+            target = cellgroups.get(parent)
+            if target is None:
+                target = layout.makeCellGroup(parent)
+                cellgroups[parent] = target
+        if target is not None:
+            # CellGroup variant — no includeInstances arg
+            target.addOrthogonalConnectivityRoute(
+                r.get("layer1", "M2") or "M2",
+                r.get("layer2", "M3") or "M3",
+                pattern,
+                r.get("options", "") or "",
+                int(r.get("cuts", 1) or 1),
+                r.get("exclude_instances", "") or "",
+                accessLayer=r.get("access_layer") or None,
+            )
+        else:
+            # Layout-level variant
+            layout.addOrthogonalConnectivityRoute(
+                r.get("layer1", "M2") or "M2",
+                r.get("layer2", "M3") or "M3",
+                pattern,
+                r.get("options", "") or "",
+                int(r.get("cuts", 1) or 1),
+                r.get("exclude_instances", "") or "",
+                r.get("include_instances", "") or "",
+                accessLayer=r.get("access_layer") or None,
+            )
+        log.info(f"apply: orthogonal route net={net} {r.get('layer1')}/{r.get('layer2')}")
+        return
+
+    log.warning(f"apply: unknown route kind {kind!r} for net {net!r}")
 
 
 def collect_instance_nets(cell) -> dict:

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -30,6 +31,7 @@ class ConnectivityPanel(QWidget):
 
     runRequested = Signal()
     rowActivated = Signal(dict)  # the entry payload (with type key)
+    planRouteRequested = Signal(dict)  # context-menu "Plan route…"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,6 +57,8 @@ class ConnectivityPanel(QWidget):
 
         self.btn_run.clicked.connect(self.runRequested.emit)
         self.list.itemClicked.connect(self._on_row)
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._on_context_menu)
 
     # public
 
@@ -133,3 +137,19 @@ class ConnectivityPanel(QWidget):
         payload = item.data(Qt.UserRole)
         if isinstance(payload, dict):
             self.rowActivated.emit(payload)
+
+    def _on_context_menu(self, pos):
+        item = self.list.itemAt(pos)
+        if item is None:
+            return
+        payload = item.data(Qt.UserRole)
+        if not isinstance(payload, dict):
+            return
+        # Only opens are routable; shorts are diagnostic.
+        if payload.get("type") == "short":
+            return
+        menu = QMenu(self)
+        a_plan = menu.addAction("Plan route…")
+        chosen = menu.exec(self.list.mapToGlobal(pos))
+        if chosen is a_plan:
+            self.planRouteRequested.emit(payload)

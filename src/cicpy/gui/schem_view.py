@@ -4,13 +4,14 @@
 ##  The MIT License (MIT)
 ######################################################################
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QPainter
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QPainter, QTransform
 from PySide6.QtWidgets import QGraphicsView, QRubberBand
 
 
 PAN_STEP = 50
 ZOOM_FACTOR = 1.2
+_LASSO_MIN_DRAG = 5  # pixels before treating left-press+move as a lasso
 
 
 class SchemView(QGraphicsView):
@@ -29,6 +30,11 @@ class SchemView(QGraphicsView):
         self._fitted = False
         self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
         self._rubber_origin = None
+        # Lasso (left-button drag in empty space) state
+        self._lasso_origin = None
+        self._lasso_active = False
+        self._lasso_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
+        self._lasso_additive = False
 
     def set_scene(self, scene):
         self.setScene(scene)
@@ -98,12 +104,43 @@ class SchemView(QGraphicsView):
             self._rubber_band.show()
             event.accept()
             return
+        if event.button() == Qt.LeftButton:
+            # Track origin so we can decide click vs lasso on move.
+            scene = self.scene()
+            if scene is not None:
+                sp = self.mapToScene(event.position().toPoint())
+                hit = scene.itemAt(sp, QTransform())
+                # Walk up to a tagged component group; if we hit one, this is
+                # a click — let the scene handle it normally.
+                comp = None
+                cur = hit
+                while cur is not None:
+                    if cur.data(1) is not None and cur.data(0):
+                        comp = cur
+                        break
+                    cur = cur.parentItem()
+                if comp is None:
+                    self._lasso_origin = event.position().toPoint()
+                    self._lasso_active = False
+                    self._lasso_additive = bool(event.modifiers() & Qt.ShiftModifier)
+                    # Don't accept yet — if it's a click (no drag), the scene
+                    # still gets the press for clear-selection semantics.
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         pos = event.position().toPoint()
         if self._rubber_origin is not None:
             self._rubber_band.setGeometry(QRect(self._rubber_origin, pos).normalized())
+        if self._lasso_origin is not None and event.buttons() & Qt.LeftButton:
+            dx = pos.x() - self._lasso_origin.x()
+            dy = pos.y() - self._lasso_origin.y()
+            if not self._lasso_active and (abs(dx) + abs(dy)) > _LASSO_MIN_DRAG:
+                self._lasso_active = True
+                self._lasso_band.setGeometry(QRect(self._lasso_origin, QSize()))
+                self._lasso_band.show()
+            if self._lasso_active:
+                self._lasso_band.setGeometry(
+                    QRect(self._lasso_origin, pos).normalized())
         sp = self.mapToScene(pos)
         self.cursorMoved.emit(sp.x(), sp.y())
         super().mouseMoveEvent(event)
@@ -118,6 +155,20 @@ class SchemView(QGraphicsView):
                 self.fitInView(scene_rect, Qt.KeepAspectRatio)
             event.accept()
             return
+        if event.button() == Qt.LeftButton and self._lasso_origin is not None:
+            if self._lasso_active:
+                rect = QRect(self._lasso_origin, event.position().toPoint()).normalized()
+                self._lasso_band.hide()
+                scene_rect = self.mapToScene(rect).boundingRect()
+                scene = self.scene()
+                if scene is not None and hasattr(scene, "components_in_rect"):
+                    comps = scene.components_in_rect(scene_rect)
+                    scene.select_components(comps, additive=self._lasso_additive)
+                self._lasso_active = False
+                self._lasso_origin = None
+                event.accept()
+                return
+            self._lasso_origin = None
         super().mouseReleaseEvent(event)
 
     def _zoom(self, factor):

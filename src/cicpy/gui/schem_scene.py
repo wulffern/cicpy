@@ -390,6 +390,34 @@ class SchemScene(QGraphicsScene):
     def clear_selection(self):
         self._set_selection([])
 
+    def select_components(self, comps, additive=False):
+        """Public setter — used by the view's lasso. ``additive`` keeps the
+        current selection and unions with ``comps``."""
+        if additive:
+            existing = list(self._selected_components)
+            for c in comps:
+                if c not in existing:
+                    existing.append(c)
+            self._set_selection(existing)
+        else:
+            self._set_selection(list(comps))
+
+    def components_in_rect(self, rect):
+        """Return the Component objects whose group bbox intersects ``rect``."""
+        out = []
+        seen = set()
+        for it in self.items(rect):
+            cur = it
+            while cur is not None:
+                comp = cur.data(1)
+                if comp is not None and cur.data(0):
+                    if id(comp) not in seen:
+                        seen.add(id(comp))
+                        out.append(comp)
+                    break
+                cur = cur.parentItem()
+        return out
+
     def _toggle_in_selection(self, comp):
         if comp in self._selected_components:
             self._selected_components.remove(comp)

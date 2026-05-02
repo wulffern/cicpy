@@ -350,7 +350,36 @@ def apply(layout, cell_name=None, yaml_path=None, search_dirs=None):
             except Exception as exc:
                 log.warning(f"apply route {r!r} failed: {exc}")
 
+    # ---- ports ----
+    for g in gs.groups:
+        if not g.visible:
+            continue
+        for p in (getattr(g, "ports", None) or []):
+            try:
+                _apply_port(layout, p)
+            except Exception as exc:
+                log.warning(f"apply port {p!r} failed: {exc}")
+
     return out
+
+
+def _apply_port(layout, p):
+    """Emit one ``layout.addPortOnEdge(layer, name, side, style, options)``
+    call from a port spec dict."""
+    name = p.get("net") or p.get("name") or ""
+    if not name:
+        return
+    layout.addPortOnEdge(
+        p.get("layer", "M1") or "M1",
+        name,
+        p.get("side", "top") or "top",
+        p.get("style", "||") or "||",
+        p.get("options", "") or "",
+    )
+    log.info(
+        f"apply: port {name} {p.get('layer')} on {p.get('side')} "
+        f"style={p.get('style')!r}"
+    )
 
 
 def _apply_route(layout, cellgroups, r):

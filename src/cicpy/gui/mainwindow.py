@@ -28,6 +28,7 @@ from cicpy.eda.xschem import Schematic
 from .connectivity_panel import ConnectivityPanel
 from .groups_panel import GroupsPanel
 from .layout_scene import LayoutScene
+from .nets_panel import NetsPanel
 from .layout_view import LayoutView
 from .schem_scene import SchemScene
 from .schem_view import SchemView
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         self.route_list = QListWidget()
         self.groups_panel = GroupsPanel()
         self.connectivity_panel = ConnectivityPanel()
+        self.nets_panel = NetsPanel()
         self._populate_cells()
         self._populate_layers()
         self._current_groupset = None
@@ -106,6 +108,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.route_list, 1)
         left_layout.addWidget(self.groups_panel, 1)
         left_layout.addWidget(self.connectivity_panel, 1)
+        left_layout.addWidget(self.nets_panel, 1)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(left)
@@ -138,6 +141,7 @@ class MainWindow(QMainWindow):
         self.connectivity_panel.runRequested.connect(self.run_connectivity_check)
         self.connectivity_panel.rowActivated.connect(self._on_connectivity_row)
         self.connectivity_panel.planRouteRequested.connect(self._plan_route_dialog)
+        self.nets_panel.netActivated.connect(self._on_net_activated)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
@@ -290,6 +294,12 @@ class MainWindow(QMainWindow):
         if layout_matched:
             bits.append(f"layout: {len(layout_matched)}")
         self.statusBar().showMessage(" — ".join(bits), 4000)
+
+    def _on_net_activated(self, net):
+        if not net:
+            return
+        n = self.schem_scene.highlight_net(net)
+        self.statusBar().showMessage(f"net '{net}': {n} wire segment{'s' if n!=1 else ''}", 4000)
 
     def _on_schem_selection_changed(self, comps):
         if not comps:
@@ -724,14 +734,21 @@ class MainWindow(QMainWindow):
         if gs is None or cell is None or not gs.any_visible():
             self.scene.set_member_filter(None)
             self.schem_scene.set_member_filter(None)
+            self.nets_panel.set_group_filter(None)
             return
         all_inst = cicgroups.collect_top_instance_names(cell)
         nets_for_inst = cicgroups.collect_instance_nets(cell)
         members = gs.visible_members(all_inst, nets_for_inst)
         self.scene.set_member_filter(members)
         self.schem_scene.set_member_filter(members)
+        # Nets reachable from the active members
+        net_filter = set()
+        for m in members:
+            net_filter.update(nets_for_inst.get(m, set()))
+        self.nets_panel.set_group_filter(net_filter)
         self.statusBar().showMessage(
-            f"group filter: {len(members)} member{'s' if len(members) != 1 else ''}",
+            f"group filter: {len(members)} member{'s' if len(members) != 1 else ''}, "
+            f"{len(net_filter)} nets",
             3000,
         )
 
@@ -872,6 +889,8 @@ class MainWindow(QMainWindow):
             return
         self.schem_scene.set_schematic(sch)
         self._current_sch_path = sch_path
+        # Refresh nets panel with the schematic's wire labels
+        self.nets_panel.set_nets(self.schem_scene._wires_by_net.keys())
         self.schem_view.setVisible(True)
         # If the splitter has collapsed the schem pane (e.g. saved state),
         # nudge sizes so it actually appears.

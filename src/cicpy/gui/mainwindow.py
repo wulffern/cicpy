@@ -340,6 +340,7 @@ class MainWindow(QMainWindow):
         if sch_path is None:
             self.schem_scene.set_schematic(None)
             self.schem_view.setVisible(False)
+            self.statusBar().showMessage(f"no .sch found for '{cell_name}'", 3000)
             return
         try:
             sch = Schematic.fromFile(sch_path)
@@ -350,7 +351,15 @@ class MainWindow(QMainWindow):
             return
         self.schem_scene.set_schematic(sch)
         self.schem_view.setVisible(True)
+        # If the splitter has collapsed the schem pane (e.g. saved state),
+        # nudge sizes so it actually appears.
+        sizes = self.splitter.sizes()
+        if len(sizes) == 3 and sizes[2] < 50:
+            total = sum(sizes) or self.width()
+            new = [220, max(300, (total - 220) // 2), max(300, (total - 220) // 2)]
+            self.splitter.setSizes(new)
         self.schem_view.fit()
+        self.statusBar().showMessage(f"loaded {os.path.basename(sch_path)}", 3000)
 
     # -- actions --------------------------------------------------------
 
@@ -413,12 +422,16 @@ class MainWindow(QMainWindow):
         if geom is not None:
             self.restoreGeometry(geom)
         else:
-            self.resize(1200, 800)
+            self.resize(1500, 900)
         splitter = self.settings.value("splitter")
+        applied = False
         if splitter is not None:
-            self.splitter.restoreState(splitter)
-        else:
-            self.splitter.setSizes([220, 600, 600])
+            applied = self.splitter.restoreState(splitter)
+        sizes = self.splitter.sizes()
+        # If the saved state predates the schem pane, the third slot may be
+        # 0px — fall back to a sensible default.
+        if (not applied) or len(sizes) != 3 or any(s < 50 for s in sizes):
+            self.splitter.setSizes([220, 700, 700])
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())

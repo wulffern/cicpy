@@ -5,11 +5,13 @@
 ######################################################################
 
 import os
+import re
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
+    QGraphicsItem,
     QGraphicsItemGroup,
     QGraphicsLineItem,
     QGraphicsPolygonItem,
@@ -46,15 +48,38 @@ def _color_for(n):
     return QColor("#A0A0A0")
 
 
+_AT_TOKEN_RE = re.compile(r"@([A-Za-z_]\w*)")
+
+
 def _expand_text(raw, parent_component):
-    if parent_component is None or "@" not in raw:
+    """Replace ``@<key>`` tokens in symbol-internal text with the parent
+    component's properties. Anything still unresolved is dropped so we
+    never render literal @foo on screen."""
+    if "@" not in raw:
         return raw
-    name = parent_component.name() or ""
+    if parent_component is None:
+        return _AT_TOKEN_RE.sub("", raw).strip()
     sym = parent_component.symbol or ""
     sym_basename = os.path.splitext(os.path.basename(sym))[0]
-    out = raw
-    out = out.replace("@symname", sym_basename)
-    out = out.replace("@name", name)
+    props = parent_component.properties or {}
+
+    def _sub(m):
+        key = m.group(1)
+        if key == "symname":
+            return sym_basename
+        if key == "name":
+            v = props.get("name")
+            if v is not None:
+                return str(v).strip('"')
+            return ""
+        v = props.get(key)
+        if v is None:
+            return ""
+        return str(v).strip('"')
+
+    out = _AT_TOKEN_RE.sub(_sub, raw)
+    # Collapse runs of whitespace left from dropped tokens
+    out = re.sub(r"\s{2,}", " ", out).strip()
     return out
 
 
@@ -126,6 +151,8 @@ class SchemScene(QGraphicsScene):
         net = (w.properties or {}).get("lab")
         if net:
             item.setData(3, net)
+            item.setToolTip(f"net: {net}")
+            item.setAcceptHoverEvents(True)
             self._wires_by_net.setdefault(net, []).append(item)
         if parent is None:
             self.addItem(item)
@@ -162,7 +189,7 @@ class SchemScene(QGraphicsScene):
 
     def _add_text(self, t, parent, parent_component):
         text = _expand_text(t.text, parent_component)
-        if not text.strip():
+        if not text:
             return
         item = QGraphicsSimpleTextItem(text, parent)
         font = QFont()
@@ -170,13 +197,20 @@ class SchemScene(QGraphicsScene):
         font.setPointSizeF(size)
         item.setFont(font)
         item.setBrush(QBrush(_TEXT_COLOR))
-        tr = QTransform()
-        if t.flip == 1:
-            tr.scale(-1, 1)
-        if t.rotation:
-            tr.rotate(90 * t.rotation)
-        item.setTransform(tr)
         item.setPos(t.x, t.y)
+        # Keep symbol-internal labels upright regardless of the parent
+        # component's rotation/flip; ItemIgnoresTransformations also pins the
+        # render size so labels stay legible at all zoom levels.
+        if parent_component is not None:
+            item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        else:
+            # Free-floating text in the schematic gets its own rot/flip.
+            tr = QTransform()
+            if t.flip == 1:
+                tr.scale(-1, 1)
+            if t.rotation:
+                tr.rotate(90 * t.rotation)
+            item.setTransform(tr)
         if parent is None:
             self.addItem(item)
 

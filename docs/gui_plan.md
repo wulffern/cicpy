@@ -123,6 +123,40 @@ Click a wire → highlight all wires on the same `lab=` net in schem, plus all `
 - Existing `addStack(...)` calls are introspected as implicit groups for back-compat.
 - Validate that ciccreator's instance names round-trip from `.sch` → `.cic` unchanged on real designs.
 
+### Phase 4-ext — Schematic rename for placement reordering (planned)
+
+The naming convention drives placement order, so renaming components on the
+schematic is a primary planning operation — not a "scary refactor". Workflow:
+
+1. User selects components in the schematic (multi-click / lasso).
+2. User picks **Rename group** in the Groups panel and provides a new prefix
+   (e.g. `xstack_diff_in`). The renamer assigns indices in selection order:
+   `xstack_diff_in1`, `xstack_diff_in2`, ….
+3. The GUI rewrites the `.sch` in place — only the `name=...` property of
+   each affected `C {…}` line. Everything else (formatting, comments, other
+   symbols, version banners, `K {}` properties) is preserved verbatim by
+   editing the cached raw `ss` of each `Component` and rewriting the file
+   from the parser's child list.
+4. Roundtrip safety: before write, parse-then-emit the original file and
+   diff against the on-disk content; abort with a clear error if the parser
+   is lossy on this file.
+5. Side effects: `.cic` is now stale until the user re-runs spi2mag. The
+   GUI status bar tells them so. Auto-rerun (already implemented) closes
+   the loop.
+
+Open issues:
+- xschem net labels (`@name`-style annotations on wires) referencing a
+  component name need to be updated too — easy if we touch only `name=`,
+  trickier if there are explicit `T {xfoo} ...` text labels referring to
+  the renamed components by literal text.
+- Conflict with bus suffixes (`x[3:0]`) — the renamer needs to preserve
+  them as decoration after the new prefix.
+- Versioned undo: write a `.sch.bak` before each rename so the user can
+  recover if they botched the prefix.
+
+This is a single feature but it has the biggest direct payoff for the OTAN
+case, where the user's whole point is reorganising naming to drive layout.
+
 ## Confirmed UX/behaviour decisions
 
 - **Tech file** — auto-discovered from `<ipdir>/tech/tech.json`; `--tech` overrides.

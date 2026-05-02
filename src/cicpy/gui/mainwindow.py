@@ -313,6 +313,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(" — ".join(bits), 4000)
 
     def _on_file_changed(self, path):
+        # QFileSystemWatcher drops the path when an editor / spi2mag
+        # rewrites the file via replace-in-place; re-add defensively so
+        # subsequent rewrites still fire change events.
+        try:
+            if os.path.exists(path) and path not in self.watcher.files():
+                self.watcher.addPath(path)
+        except Exception:
+            pass
         self._reload_timer.start()
 
     # -- spi2mag rerun -------------------------------------------------

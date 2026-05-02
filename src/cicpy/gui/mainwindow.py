@@ -111,6 +111,7 @@ class MainWindow(QMainWindow):
         self.view.cursorMoved.connect(self._on_cursor_moved)
         self.schem_view.cursorMoved.connect(self._on_cursor_moved_schem)
         self.schem_scene.componentClicked.connect(self._on_schem_component_clicked)
+        self.scene.instanceClicked.connect(self._on_layout_instance_clicked)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
@@ -243,6 +244,32 @@ class MainWindow(QMainWindow):
             bits.append(f"schem group '{prefix}': {len(members)}")
         if layout_matched:
             bits.append(f"layout: {len(layout_matched)}")
+        self.statusBar().showMessage(" — ".join(bits), 4000)
+
+    def _on_layout_instance_clicked(self, instance_name):
+        import re
+        m = re.match(r"^(x\D+)", instance_name, re.I)
+        prefix = m.group(1) if m else instance_name
+        # Highlight in both panes
+        layout_matched = self.scene.highlight_instance_prefix(prefix)
+        schem_members = (
+            self.schem_scene.highlight_group_by_prefix(prefix) if prefix else []
+        )
+        # Track for hierarchy descend: prefer exact-name comp, else any peer
+        comp = None
+        grp = self.schem_scene._components_by_name.get(instance_name)
+        if grp is not None:
+            comp = grp.data(1)
+        if comp is None and schem_members:
+            grp = self.schem_scene._components_by_name.get(schem_members[0])
+            if grp is not None:
+                comp = grp.data(1)
+        self._last_clicked_comp = comp
+        bits = [f"layout: {instance_name}"]
+        if prefix:
+            bits.append(f"group '{prefix}'")
+        bits.append(f"layout peers: {len(layout_matched)}")
+        bits.append(f"schem peers: {len(schem_members)}")
         self.statusBar().showMessage(" — ".join(bits), 4000)
 
     def _on_file_changed(self, path):

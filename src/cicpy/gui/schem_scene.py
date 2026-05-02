@@ -113,7 +113,8 @@ class SchemScene(QGraphicsScene):
 
     def _add_wire(self, w, parent):
         item = QGraphicsLineItem(w.x1, w.y1, w.x2, w.y2, parent)
-        pen = self._pen(4, _WIRE_PEN_W)
+        pen = QPen(QColor("#4080FF"), _WIRE_PEN_W)
+        pen.setCosmetic(True)
         item.setPen(pen)
         if parent is None:
             self.addItem(item)
@@ -198,6 +199,16 @@ class SchemScene(QGraphicsScene):
             tr.rotate(90 * rot)
         group.setTransform(tr)
         self._render(sym.children, parent=group, parent_component=c)
+        # Invisible hit-test rect spanning the symbol bbox so clicks anywhere
+        # inside register, not just on the (thin) outline strokes.
+        bb = group.childrenBoundingRect()
+        if not bb.isEmpty():
+            hit = QGraphicsRectItem(bb.adjusted(-2, -2, 2, 2), group)
+            hit.setPen(QPen(Qt.NoPen))
+            hit.setBrush(QBrush(QColor(0, 0, 0, 1)))
+            hit.setZValue(-100)
+            hit.setData(0, name)
+            hit.setData(1, c)
         if parent is None:
             self.addItem(group)
 

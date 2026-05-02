@@ -4,7 +4,7 @@
 ##  The MIT License (MIT)
 ######################################################################
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsItemGroup,
@@ -35,6 +35,8 @@ TEXT_Z_VALUE = 1000
 
 
 class LayoutScene(QGraphicsScene):
+
+    instanceClicked = Signal(str)
 
     def __init__(self, design, style, parent=None):
         super().__init__(parent)
@@ -222,6 +224,16 @@ class LayoutScene(QGraphicsScene):
             group.setData(INSTANCE_NAME_KEY, inst_name)
             self._groups_by_instance[inst_name] = group
         self._walk(cell.children, parent=group, route_key=route_key, show_port_labels=False)
+        # Invisible hit-test rect over the whole instance bbox so clicks in
+        # gaps between rendered rects still register.
+        if parent is None and inst_name:
+            bb = group.childrenBoundingRect()
+            if not bb.isEmpty():
+                hit = QGraphicsRectItem(bb, group)
+                hit.setPen(QPen(Qt.NoPen))
+                hit.setBrush(QBrush(QColor(0, 0, 0, 1)))
+                hit.setZValue(-1000)
+                hit.setData(INSTANCE_NAME_KEY, inst_name)
         if parent is None:
             self.addItem(group)
 
@@ -368,6 +380,24 @@ class LayoutScene(QGraphicsScene):
             return []
         matches = [n for n in self._groups_by_instance if n.startswith(prefix)]
         return self.highlight_instances(matches)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            for it in self.items(event.scenePos()):
+                name = self._top_instance_name_for(it)
+                if name:
+                    self.instanceClicked.emit(name)
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
+
+    def _top_instance_name_for(self, item):
+        while item is not None:
+            n = item.data(INSTANCE_NAME_KEY)
+            if n:
+                return n
+            item = item.parentItem()
+        return None
 
     def fit_highlighted(self, view):
         if not self._highlight_overlays:

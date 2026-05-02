@@ -6,6 +6,8 @@
 
 import glob
 import os
+import re
+import shutil
 
 from PySide6.QtCore import QFileSystemWatcher, QProcess, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
@@ -128,9 +130,11 @@ class MainWindow(QMainWindow):
         self.view.cursorMoved.connect(self._on_cursor_moved)
         self.schem_view.cursorMoved.connect(self._on_cursor_moved_schem)
         self.schem_scene.componentClicked.connect(self._on_schem_component_clicked)
+        self.schem_scene.selectionChanged.connect(self._on_schem_selection_changed)
         self.scene.instanceClicked.connect(self._on_layout_instance_clicked)
         self.groups_panel.filterChanged.connect(self._on_groups_changed)
         self.groups_panel.addSelectionRequested.connect(self._on_add_selection_to_group)
+        self.groups_panel.renameSchemSelectionRequested.connect(self._rename_schem_selection)
         self.connectivity_panel.runRequested.connect(self.run_connectivity_check)
         self.connectivity_panel.rowActivated.connect(self._on_connectivity_row)
 
@@ -286,6 +290,15 @@ class MainWindow(QMainWindow):
             bits.append(f"layout: {len(layout_matched)}")
         self.statusBar().showMessage(" — ".join(bits), 4000)
 
+    def _on_schem_selection_changed(self, comps):
+        if not comps:
+            return
+        names = [c.name() or "?" for c in comps]
+        head = ", ".join(names[:4])
+        if len(names) > 4:
+            head += f", … ({len(names)} total)"
+        self.statusBar().showMessage(f"selected: {head}", 3000)
+
     def _on_layout_instance_clicked(self, instance_name):
         import re
         m = re.match(r"^(x\D+)", instance_name, re.I)
@@ -424,6 +437,86 @@ class MainWindow(QMainWindow):
         msg = f"rerun {'OK' if ok else f'failed (exit {code})'}"
         self.statusBar().showMessage(msg, 5000)
         self._rerun_proc = None
+
+    # -- schematic rename (Phase 4-ext) --------------------------------
+
+    def _rename_schem_selection(self):
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        comps = self.schem_scene.selected_components()
+        if not comps:
+            QMessageBox.information(
+                self, "Rename", "Shift-click components in the schematic first.")
+            return
+        sch_path = getattr(self, "_current_sch_path", None)
+        if not sch_path:
+            QMessageBox.warning(self, "Rename", "No .sch file loaded.")
+            return
+        prefix, ok = QInputDialog.getText(
+            self, "Rename selection",
+            f"New prefix (will become <prefix>1..{len(comps)}):",
+        )
+        if not ok or not prefix.strip():
+            return
+        prefix = prefix.strip()
+        # Check for name collisions across the schematic.
+        existing = set(self.schem_scene._components_by_name.keys())
+        # Remove names of the selected comps from `existing` (they'll be replaced)
+        for c in comps:
+            existing.discard(c.name() or "")
+        new_names = []
+        for i, comp in enumerate(comps, start=1):
+            old = comp.name() or ""
+            m = re.match(r"^(.*?)(\[[^\]]+\])?$", old)
+            bus = m.group(2) or "" if m else ""
+            new_names.append(f"{prefix}{i}{bus}")
+        for n in new_names:
+            if n in existing:
+                QMessageBox.warning(
+                    self, "Rename",
+                    f"Name '{n}' already exists in the schematic.")
+                return
+        # Confirm
+        sample = ", ".join(f"{c.name() or '?'} → {n}"
+                           for c, n in list(zip(comps, new_names))[:4])
+        if len(comps) > 4:
+            sample += f", … ({len(comps)} total)"
+        if QMessageBox.question(
+            self, "Confirm rename",
+            f"Rename:\n  {sample}\n\nWrites {os.path.basename(sch_path)} "
+            f"(.bak saved). Re-run spi2mag afterwards.",
+        ) != QMessageBox.Yes:
+            return
+        # Backup
+        try:
+            shutil.copy2(sch_path, sch_path + ".bak")
+        except Exception as exc:
+            QMessageBox.warning(self, "Rename", f"Backup failed: {exc}")
+            return
+        # Apply rename in-memory and flag those components as modified so we
+        # only regenerate the lines we actually changed (preserves multi-line
+        # property formatting on untouched ones).
+        for comp, new in zip(comps, new_names):
+            comp.properties["name"] = new
+            comp._cicpy_modified = True
+        try:
+            with open(sch_path, "w") as f:
+                for child in self.schem_scene.schematic.children:
+                    if (child.__class__.__name__ == "Component"
+                            and getattr(child, "_cicpy_modified", False)):
+                        f.write(child.to_sch_line())
+                    else:
+                        f.write(child.ss)
+        except Exception as exc:
+            QMessageBox.critical(self, "Rename", f"Write failed: {exc}")
+            return
+        self.statusBar().showMessage(
+            f"renamed {len(comps)} components — re-run spi2mag (Ctrl+R)",
+            5000,
+        )
+        # Reload schematic so the new names show up.
+        cell_name = self.cell_list.currentItem().text() if self.cell_list.currentItem() else ""
+        if cell_name:
+            self._load_schematic_for(cell_name)
 
     # -- connectivity (Phase 4b) ---------------------------------------
 
@@ -672,6 +765,7 @@ class MainWindow(QMainWindow):
 
     def _load_schematic_for(self, cell_name):
         sch_path = self._find_sch(cell_name)
+        self._current_sch_path = None
         if sch_path is None:
             self.schem_scene.set_schematic(None)
             self.schem_view.setVisible(False)
@@ -685,6 +779,7 @@ class MainWindow(QMainWindow):
             self.schem_view.setVisible(False)
             return
         self.schem_scene.set_schematic(sch)
+        self._current_sch_path = sch_path
         self.schem_view.setVisible(True)
         # If the splitter has collapsed the schem pane (e.g. saved state),
         # nudge sizes so it actually appears.

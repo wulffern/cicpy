@@ -86,6 +86,7 @@ def _expand_text(raw, parent_component):
 class SchemScene(QGraphicsScene):
 
     componentClicked = Signal(object)  # emits the Component object
+    selectionChanged = Signal(list)    # list[Component] — multi-selection
 
     def __init__(self, sym_loader, parent=None):
         super().__init__(parent)
@@ -96,10 +97,17 @@ class SchemScene(QGraphicsScene):
         self._highlight_pen = QPen(QColor("#FFD000"), 0)
         self._highlight_pen.setCosmetic(True)
         self._highlight_pen.setWidth(3)
+        self._select_pen = QPen(QColor("#FF40FF"), 0)
+        self._select_pen.setCosmetic(True)
+        self._select_pen.setWidth(4)
         self._member_filter = None  # None = no filter; otherwise allowed names
         self._dim_opacity = 0.18
         self._wires_by_net = {}      # net_name -> list[QGraphicsLineItem]
         self._net_highlight_items = []
+        # Multi-selection (shift-click) — kept in user-click order so rename
+        # can assign indices in the order the user picked them.
+        self._selected_components = []     # list[Component]
+        self._selection_overlays = []      # list[QGraphicsRectItem]
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
 
     def set_schematic(self, sch):
@@ -109,6 +117,8 @@ class SchemScene(QGraphicsScene):
         self._highlight_groups = []
         self._wires_by_net = {}
         self._net_highlight_items = []
+        self._selected_components = []
+        self._selection_overlays = []
         self._member_filter = None
         if sch is None:
             self.setSceneRect(QRectF())
@@ -350,9 +360,17 @@ class SchemScene(QGraphicsScene):
             it = self.itemAt(event.scenePos(), QTransform())
             comp = self._component_for_item(it)
             if comp is not None:
+                if event.modifiers() & Qt.ShiftModifier:
+                    self._toggle_in_selection(comp)
+                else:
+                    self._set_selection([comp])
                 self.componentClicked.emit(comp)
                 event.accept()
                 return
+            # Empty space click without modifier → clear selection
+            if not (event.modifiers() & Qt.ShiftModifier):
+                if self._selected_components:
+                    self._set_selection([])
         super().mousePressEvent(event)
 
     def _component_for_item(self, item):
@@ -363,3 +381,40 @@ class SchemScene(QGraphicsScene):
                 return comp
             item = item.parentItem()
         return None
+
+    # -- multi-selection ----------------------------------------------
+
+    def selected_components(self):
+        return list(self._selected_components)
+
+    def clear_selection(self):
+        self._set_selection([])
+
+    def _toggle_in_selection(self, comp):
+        if comp in self._selected_components:
+            self._selected_components.remove(comp)
+        else:
+            self._selected_components.append(comp)
+        self._refresh_selection_overlays()
+        self.selectionChanged.emit(list(self._selected_components))
+
+    def _set_selection(self, comps):
+        self._selected_components = list(comps)
+        self._refresh_selection_overlays()
+        self.selectionChanged.emit(list(self._selected_components))
+
+    def _refresh_selection_overlays(self):
+        for it in self._selection_overlays:
+            try:
+                self.removeItem(it)
+            except Exception:
+                pass
+        self._selection_overlays = []
+        for comp in self._selected_components:
+            grp = self._components_by_name.get(comp.name() or "")
+            if grp is None:
+                continue
+            bb = grp.sceneBoundingRect().adjusted(-2, -2, 2, 2)
+            overlay = self.addRect(bb, self._select_pen, QBrush(Qt.NoBrush))
+            overlay.setZValue(2000)
+            self._selection_overlays.append(overlay)

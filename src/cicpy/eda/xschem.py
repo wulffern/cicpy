@@ -266,11 +266,59 @@ class Component(Object):
             self.y = ar[2]
             self.rotation = ar[3]
             self.flip = ar[4]
+            # Preserve original key insertion order so re-emitting a line
+            # without semantic edits is byte-identical (modulo whitespace).
+            self._prop_order = []
             self.parseProperties(ar[5])
         else:
             raise Exception("Could not parse Component %s "%ss)
-        #print(ss)
-    pass
+
+    # Override Object.parseProperties to track key order.
+    def parseProperties(self, ss):
+        if(ss is None or re.search(r"^\s*$", ss)):
+            return
+        ss = re.sub(r"\n", " ", ss).strip()
+        key_value_pairs = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+', ss)
+        for s in key_value_pairs:
+            if(re.search(r"^\s*$", s)):
+                continue
+            ar = s.split("=", 1)
+            if(len(ar) != 2):
+                self.properties[s] = True
+                if not hasattr(self, "_prop_order"):
+                    self._prop_order = []
+                if s not in self._prop_order:
+                    self._prop_order.append(s)
+                continue
+            (key, val) = ar
+            if not hasattr(self, "_prop_order"):
+                self._prop_order = []
+            if key not in self._prop_order:
+                self._prop_order.append(key)
+            self.properties[key] = val
+
+    def to_sch_line(self):
+        """Re-emit this Component as an xschem .sch line. Preserves the
+        property key order observed at parse time. Used by the GUI rename
+        feature to rewrite a .sch in place."""
+        order = getattr(self, "_prop_order", None) or list(self.properties.keys())
+        # Pick up any keys that were added after parse (e.g. a renamed name=).
+        for k in self.properties:
+            if k not in order:
+                order.append(k)
+        prop_parts = []
+        for k in order:
+            if k not in self.properties:
+                continue
+            v = self.properties[k]
+            if v is True:
+                prop_parts.append(k)
+            else:
+                prop_parts.append(f"{k}={v}")
+        return (
+            f"C {{{self.symbol}}} {self.x} {self.y} "
+            f"{self.rotation} {self.flip} {{{' '.join(prop_parts)}}}\n"
+        )
 
 class EmbedSymbol(Object):
     pass

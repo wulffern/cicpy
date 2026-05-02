@@ -47,12 +47,18 @@ class GroupsPanel(QWidget):
             "naming-convention group) to the currently selected planning group."
         )
         self.btn_remove = QPushButton("Remove")
+        self.btn_rename = QPushButton("Rename schem")
+        self.btn_rename.setToolTip(
+            "Rename the currently shift-selected schematic components under a\n"
+            "new prefix (writes the .sch in place; .sch.bak saved as backup)."
+        )
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.btn_new)
         row.addWidget(self.btn_add_sel)
         row.addWidget(self.btn_remove)
+        row.addWidget(self.btn_rename)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -64,9 +70,11 @@ class GroupsPanel(QWidget):
         self.btn_new.clicked.connect(self._on_new)
         self.btn_add_sel.clicked.connect(self._on_add_selection_clicked)
         self.btn_remove.clicked.connect(self._on_remove)
+        self.btn_rename.clicked.connect(self.renameSchemSelectionRequested.emit)
 
     # callable set by MainWindow when the user clicks "Add selection"
     addSelectionRequested = Signal(str)  # group name
+    renameSchemSelectionRequested = Signal()
 
     # ---- public API ---------------------------------------------------
 

@@ -40,6 +40,9 @@ class LayoutScene(QGraphicsScene):
 
     def __init__(self, design, style, parent=None):
         super().__init__(parent)
+        # Optional set of allowed top-level instance names; None disables
+        # filtering. Empty set hides everything.
+        self._member_filter = None
         self.design = design
         self.style = style
         self._items_by_layer = {}
@@ -63,6 +66,7 @@ class LayoutScene(QGraphicsScene):
         self._port_label_names.clear()
         self._groups_by_instance.clear()
         self._highlight_overlays = []
+        self._member_filter = None
         self.cell = cell
         if cell is None:
             self.setSceneRect(QRectF())
@@ -380,6 +384,24 @@ class LayoutScene(QGraphicsScene):
             return []
         matches = [n for n in self._groups_by_instance if n.startswith(prefix)]
         return self.highlight_instances(matches)
+
+    def set_member_filter(self, allowed_names):
+        """Restrict visible top-level instances to ``allowed_names``. Pass
+        None to disable filtering. Empty set hides every tagged instance."""
+        if allowed_names is None:
+            self._member_filter = None
+        else:
+            self._member_filter = set(allowed_names)
+        self._apply_member_filter()
+
+    def _apply_member_filter(self):
+        if self._member_filter is None:
+            for grp in self._groups_by_instance.values():
+                grp.setVisible(True)
+            return
+        allowed = self._member_filter
+        for name, grp in self._groups_by_instance.items():
+            grp.setVisible(name in allowed)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

@@ -71,6 +71,8 @@ class SchemScene(QGraphicsScene):
         self._highlight_pen = QPen(QColor("#FFD000"), 0)
         self._highlight_pen.setCosmetic(True)
         self._highlight_pen.setWidth(3)
+        self._member_filter = None  # None = no filter; otherwise allowed names
+        self._dim_opacity = 0.18
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
 
     def set_schematic(self, sch):
@@ -78,6 +80,7 @@ class SchemScene(QGraphicsScene):
         self.schematic = sch
         self._components_by_name.clear()
         self._highlight_groups = []
+        self._member_filter = None
         if sch is None:
             self.setSceneRect(QRectF())
             return
@@ -247,6 +250,26 @@ class SchemScene(QGraphicsScene):
             if old is not None and hasattr(child, "setPen"):
                 child.setPen(old)
                 child.setData(2, None)
+
+    # -- planning-group filter ----------------------------------------
+
+    def set_member_filter(self, allowed_names):
+        """Dim non-members to ``self._dim_opacity``; full opacity for members.
+        Pass None to clear the filter (full opacity for everything)."""
+        if allowed_names is None:
+            self._member_filter = None
+        else:
+            self._member_filter = set(allowed_names)
+        self._apply_member_filter()
+
+    def _apply_member_filter(self):
+        if self._member_filter is None:
+            for grp in self._components_by_name.values():
+                grp.setOpacity(1.0)
+            return
+        allowed = self._member_filter
+        for name, grp in self._components_by_name.items():
+            grp.setOpacity(1.0 if name in allowed else self._dim_opacity)
 
     # -- mouse --------------------------------------------------------
 

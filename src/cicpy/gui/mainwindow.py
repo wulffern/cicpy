@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 import cicpy as cic
+from cicpy import groups as cicgroups
 from cicpy.eda.xschem import Schematic
+from .groups_panel import GroupsPanel
 from .layout_scene import LayoutScene
 from .layout_view import LayoutView
 from .schem_scene import SchemScene
@@ -78,8 +80,10 @@ class MainWindow(QMainWindow):
         self.cell_list = QListWidget()
         self.layer_list = QListWidget()
         self.route_list = QListWidget()
+        self.groups_panel = GroupsPanel()
         self._populate_cells()
         self._populate_layers()
+        self._current_groupset = None
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
@@ -87,6 +91,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.cell_list, 1)
         left_layout.addWidget(self.layer_list, 1)
         left_layout.addWidget(self.route_list, 1)
+        left_layout.addWidget(self.groups_panel, 1)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(left)
@@ -112,6 +117,8 @@ class MainWindow(QMainWindow):
         self.schem_view.cursorMoved.connect(self._on_cursor_moved_schem)
         self.schem_scene.componentClicked.connect(self._on_schem_component_clicked)
         self.scene.instanceClicked.connect(self._on_layout_instance_clicked)
+        self.groups_panel.filterChanged.connect(self._on_groups_changed)
+        self.groups_panel.addSelectionRequested.connect(self._on_add_selection_to_group)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
@@ -190,11 +197,15 @@ class MainWindow(QMainWindow):
             return
         name = self.cell_list.item(row).text()
         cell = self.design.getCell(name)
+        # Persist any pending edits to the previous cell's groupset.
+        self._save_groupset_if_dirty()
         self.scene.set_cell(cell)
         self._populate_routes()
         self.scene.apply_visibility()
         self.view.fit()
         self._load_schematic_for(name)
+        self._load_groupset_for(name, cell)
+        self._apply_group_filter()
         self.settings.setValue("last_cell", name)
 
     def _on_layer_item_changed(self, item):
@@ -274,6 +285,81 @@ class MainWindow(QMainWindow):
 
     def _on_file_changed(self, path):
         self._reload_timer.start()
+
+    # -- planning groups (Phase 4a) ------------------------------------
+
+    def _groupset_path_for(self, cell_name):
+        cic_dir = os.path.dirname(os.path.abspath(self.cicfile))
+        return os.path.join(cic_dir, f"{cell_name}.groups.yaml")
+
+    def _load_groupset_for(self, cell_name, cell):
+        path = self._groupset_path_for(cell_name)
+        gs = cicgroups.load_or_empty(path, cell_name)
+        self._current_cell = cell
+        self._current_groupset = gs
+        self.groups_panel.set_groupset(gs)
+
+    def _save_groupset_if_dirty(self):
+        gs = self._current_groupset
+        if gs is None:
+            return
+        # Save unconditionally — changes are lightweight YAML; cheap to write.
+        if gs.path is None:
+            gs.path = self._groupset_path_for(gs.cell)
+        try:
+            gs.to_yaml()
+        except Exception as exc:
+            self.statusBar().showMessage(f"groupset save failed: {exc}", 4000)
+
+    def _apply_group_filter(self):
+        gs = self._current_groupset
+        cell = getattr(self, "_current_cell", None)
+        if gs is None or cell is None or not gs.any_visible():
+            self.scene.set_member_filter(None)
+            self.schem_scene.set_member_filter(None)
+            return
+        all_inst = cicgroups.collect_top_instance_names(cell)
+        nets_for_inst = cicgroups.collect_instance_nets(cell)
+        members = gs.visible_members(all_inst, nets_for_inst)
+        self.scene.set_member_filter(members)
+        self.schem_scene.set_member_filter(members)
+        self.statusBar().showMessage(
+            f"group filter: {len(members)} member{'s' if len(members) != 1 else ''}",
+            3000,
+        )
+
+    def _on_groups_changed(self):
+        self._save_groupset_if_dirty()
+        self._apply_group_filter()
+
+    def _on_add_selection_to_group(self, group_name):
+        """Add the currently selected schematic component (and its peers under
+        the same naming-convention group) to the named planning group."""
+        gs = self._current_groupset
+        if gs is None:
+            return
+        g = gs.by_name(group_name)
+        if g is None:
+            return
+        comp = self._last_clicked_comp
+        if comp is None:
+            self.statusBar().showMessage(
+                "click a schematic component first", 3000)
+            return
+        peers = list(self.schem_scene.highlight_group_by_prefix(comp.group())) \
+            if comp.group() else [comp.name()]
+        # Fall back to the single clicked name if no peers.
+        if not peers and comp.name():
+            peers = [comp.name()]
+        added = 0
+        for n in peers:
+            if n and n not in g.members:
+                g.members.append(n)
+                added += 1
+        self.statusBar().showMessage(
+            f"added {added} to '{group_name}' (now {len(g.members)})", 3000)
+        self.groups_panel.set_groupset(gs)  # refresh tooltips
+        self._on_groups_changed()
 
     # -- hierarchy navigation ------------------------------------------
 
@@ -461,6 +547,7 @@ class MainWindow(QMainWindow):
             self.splitter.setSizes([220, 700, 700])
 
     def closeEvent(self, event):
+        self._save_groupset_if_dirty()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("splitter", self.splitter.saveState())
         super().closeEvent(event)

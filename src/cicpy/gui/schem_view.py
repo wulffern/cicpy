@@ -76,10 +76,10 @@ class SchemView(QGraphicsView):
             self._pan(0, PAN_STEP)
             return
         if k == Qt.Key_Left:
-            self._pan(-PAN_STEP, 0)
+            self._pan(PAN_STEP, 0)
             return
         if k == Qt.Key_Right:
-            self._pan(PAN_STEP, 0)
+            self._pan(-PAN_STEP, 0)
             return
         super().keyPressEvent(event)
 
@@ -109,7 +109,14 @@ class SchemView(QGraphicsView):
             scene = self.scene()
             if scene is not None:
                 sp = self.mapToScene(event.position().toPoint())
-                hit = scene.itemAt(sp, QTransform())
+                # Skip text labels — they're click-through.
+                from PySide6.QtWidgets import QGraphicsSimpleTextItem
+                hit = None
+                for it in scene.items(sp):
+                    if isinstance(it, QGraphicsSimpleTextItem):
+                        continue
+                    hit = it
+                    break
                 # Walk up to a tagged component group; if we hit one, this is
                 # a click — let the scene handle it normally.
                 comp = None

@@ -36,6 +36,33 @@ import yaml
 log = logging.getLogger("cicpy.groups")
 
 
+_BUS_RE = re.compile(r"^(.*)\[(\d+):(\d+)\](.*)$")
+
+
+def is_physical_fill_name(name: str) -> bool:
+    return bool(name) and str(name).startswith("xfill_")
+
+
+def expand_bus(name: str) -> List[str]:
+    """Expand an instance name with a bus suffix (e.g. ``xbb1[7:0]``) into the
+    set of names that may exist in the layout: the literal (for the schematic
+    pane, where the bus instance is named verbatim), the bare base
+    (ciccreator emits a parent group instance with no index in some cases),
+    and each numbered child ``base<i>``. If ``name`` has no bus suffix the
+    list is just ``[name]``."""
+    m = _BUS_RE.match(name)
+    if not m:
+        return [name]
+    prefix, hi_s, lo_s, suffix = m.group(1), m.group(2), m.group(3), m.group(4)
+    hi, lo = int(hi_s), int(lo_s)
+    if hi < lo:
+        hi, lo = lo, hi
+    out = [name, prefix + suffix]
+    for i in range(lo, hi + 1):
+        out.append(f"{prefix}<{i}>{suffix}")
+    return out
+
+
 @dataclass
 class Group:
     name: str
@@ -47,6 +74,7 @@ class Group:
     # Phase 4c+ slots — placement and route intent live here. Empty for 4a.
     placement: dict = field(default_factory=dict)
     routes: List[dict] = field(default_factory=list)
+    ports: List[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = {
@@ -65,6 +93,8 @@ class Group:
             d["placement"] = dict(self.placement)
         if self.routes:
             d["routes"] = list(self.routes)
+        if self.ports:
+            d["ports"] = list(self.ports)
         return d
 
     @classmethod
@@ -78,6 +108,7 @@ class Group:
             member_nets=list(obj.get("member_nets", []) or []),
             placement=dict(obj.get("placement", {}) or {}),
             routes=list(obj.get("routes", []) or []),
+            ports=list(obj.get("ports", []) or []),
         )
 
     def add_member(self, name: str) -> None:
@@ -163,9 +194,13 @@ class GroupSet:
         # Pre-compile regexes
         for g in self.groups:
             members: Set[str] = set()
+            # Explicit members are kept verbatim AND bus-expanded — the
+            # schematic carries one bus instance ``xbb1[7:0]`` which becomes
+            # ``xbb1<0>..xbb1<7>`` (plus the bare ``xbb1`` parent) in the
+            # layout. Both panes need to recognise their version of the name.
             for n in g.members:
-                if n in all_names:
-                    members.add(n)
+                for v in expand_bus(n):
+                    members.add(v)
             for pat in g.member_regex:
                 try:
                     rx = re.compile(pat)
@@ -237,7 +272,7 @@ def collect_top_instance_names(cell) -> List[str]:
         if hasattr(ch, "isCut") and ch.isCut():
             continue
         n = getattr(ch, "instanceName", "") or ""
-        if n:
+        if n and not is_physical_fill_name(n):
             names.append(n)
     return names
 
@@ -317,7 +352,12 @@ def apply(layout, cell_name=None, yaml_path=None, search_dirs=None):
             if g.member_regex:
                 regex = "|".join(g.member_regex)
             elif g.members:
-                regex = "^(" + "|".join(re.escape(m) for m in g.members) + ")$"
+                # Bus members like ``xbb1[7:0]`` must match each ``xbb1<i>``
+                # in the layout; expand before building the alternation.
+                expanded = []
+                for m in g.members:
+                    expanded.extend(expand_bus(m))
+                regex = "^(" + "|".join(re.escape(m) for m in expanded) + ")$"
 
         if not regex:
             log.info(f"apply: group {g.name!r} has no resolvable members; skipping")
@@ -460,6 +500,8 @@ def collect_instance_nets(cell) -> dict:
         return out
     for inst in iterable:
         name = getattr(inst, "name", "") or ""
+        if is_physical_fill_name(name):
+            continue
         nodes = getattr(inst, "nodes", None) or []
         if name and nodes:
             out[name] = set(str(n) for n in nodes)

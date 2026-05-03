@@ -46,6 +46,55 @@ def _tech_name(techfile):
     return os.path.splitext(os.path.basename(techfile))[0]
 
 
+def _cicpy_version():
+    """Return a short ``tag@hash`` string for the running cicpy. Tries
+    ``git describe`` against the package's source dir first (works from a
+    checkout), falls back to the installed package version, and finally
+    returns ``unknown`` so the title bar still renders."""
+    import subprocess
+    try:
+        import cicpy as _c
+        pkg_dir = os.path.dirname(os.path.abspath(_c.__file__))
+        # Walk up to the repo root (closest .git dir).
+        d = pkg_dir
+        for _ in range(6):
+            if os.path.isdir(os.path.join(d, ".git")):
+                desc = subprocess.run(
+                    ["git", "-C", d, "describe", "--tags", "--always", "--dirty"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                sha = subprocess.run(
+                    ["git", "-C", d, "rev-parse", "--short", "HEAD"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                if desc.returncode == 0 and sha.returncode == 0:
+                    desc_str = desc.stdout.strip()
+                    short = sha.stdout.strip()
+                    # ``git describe`` gives ``tag-N-gHASH[-dirty]`` which
+                    # already carries both tag and hash. Reformat to
+                    # ``tag+N (hash[, dirty])`` so both are obvious without
+                    # the cryptic dashes.
+                    m = re.match(r"^(.*?)-(\d+)-g([0-9a-f]+)(-dirty)?$", desc_str)
+                    if m:
+                        tag, ahead, _, dirty = m.groups()
+                        suffix = ", dirty" if dirty else ""
+                        return f"{tag}+{ahead} ({short}{suffix})"
+                    # On a tagged commit, describe is just the tag.
+                    return f"{desc_str} ({short})"
+                break
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+        return f"v{version('cicpy')}"
+    except Exception:
+        return "unknown"
+
+
 def _layer_icon(color, size=14):
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
@@ -122,9 +171,11 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
 
         self.setWindowTitle(
-            f"cicpy gui — {os.path.basename(self.cicfile)} "
+            f"cicpy gui [{_cicpy_version()}] — "
+            f"{os.path.basename(self.cicfile)} "
             f"[{self.tech_key}] (F=fit, Z=zoom, right-drag=zoom-area, "
-            f"E=descend, Ctrl+E=ascend, Shift+R=reload, T=toggle layers)"
+            f"E=descend, Ctrl+E=ascend, G=group from selection, "
+            f"Shift+R=reload, T=toggle layers)"
         )
 
         self.cell_list.currentRowChanged.connect(self._on_cell_changed)
@@ -134,6 +185,7 @@ class MainWindow(QMainWindow):
         self.schem_view.cursorMoved.connect(self._on_cursor_moved_schem)
         self.schem_scene.componentClicked.connect(self._on_schem_component_clicked)
         self.schem_scene.selectionChanged.connect(self._on_schem_selection_changed)
+        self.schem_scene.wireClicked.connect(self._on_wire_clicked)
         self.scene.instanceClicked.connect(self._on_layout_instance_clicked)
         self.groups_panel.filterChanged.connect(self._on_groups_changed)
         self.groups_panel.addSelectionRequested.connect(self._on_add_selection_to_group)
@@ -142,6 +194,7 @@ class MainWindow(QMainWindow):
         self.connectivity_panel.rowActivated.connect(self._on_connectivity_row)
         self.connectivity_panel.planRouteRequested.connect(self._plan_route_dialog)
         self.nets_panel.netActivated.connect(self._on_net_activated)
+        self.nets_panel.planPortRequested.connect(self._plan_port_dialog)
 
         QShortcut(QKeySequence("Shift+R"), self, activated=self.reload)
         QShortcut(QKeySequence("T"), self, activated=self.toggle_all_layers)
@@ -150,6 +203,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Meta+E"), self, activated=self._ascend)
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self.rerun_spi2mag)
         QShortcut(QKeySequence("Meta+R"), self, activated=self.rerun_spi2mag)
+        QShortcut(QKeySequence("G"), self, activated=self._create_group_from_selection)
         self._cell_history = []
         self._last_clicked_comp = None
         # spi2mag rerun infrastructure
@@ -276,24 +330,27 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"schem: x={x:.0f} y={y:.0f}")
 
     def _on_schem_component_clicked(self, comp):
+        # Highlight + cross-probe is driven by selectionChanged so single-click
+        # and shift-click share one path. Just track last-clicked here for
+        # hierarchy descend (`E`) and Add-selection.
         self._last_clicked_comp = comp
-        name = (comp.name() or "").strip()
-        prefix = comp.group()
-        members = self.schem_scene.highlight_group_by_prefix(prefix) if prefix else []
-        # Mirror highlight in layout: match by instanceName prefix.
-        layout_matched = []
-        if prefix:
-            layout_matched = self.scene.highlight_instance_prefix(prefix)
-        elif name:
-            layout_matched = self.scene.highlight_instances([name])
-        if not name:
+
+    def _on_wire_clicked(self, net):
+        if not net:
             return
-        bits = [f"selected {name}"]
-        if prefix:
-            bits.append(f"schem group '{prefix}': {len(members)}")
-        if layout_matched:
-            bits.append(f"layout: {len(layout_matched)}")
-        self.statusBar().showMessage(" — ".join(bits), 4000)
+        n_schem = self.schem_scene.highlight_net(net)
+        n_layout = self.scene.highlight_net(net)
+        bb = self.scene.highlight_bbox()
+        if not bb.isEmpty():
+            pad = max(bb.width(), bb.height()) * 0.5 + 50
+            self.view.fitInView(
+                bb.adjusted(-pad, -pad, pad, pad),
+                Qt.KeepAspectRatio,
+            )
+        self.statusBar().showMessage(
+            f"net '{net}': {n_schem} wire(s) schem, {n_layout} item(s) layout",
+            4000,
+        )
 
     def _on_net_activated(self, net):
         if not net:
@@ -302,13 +359,32 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"net '{net}': {n} wire segment{'s' if n!=1 else ''}", 4000)
 
     def _on_schem_selection_changed(self, comps):
-        if not comps:
+        names = [(c.name() or "").strip() for c in comps]
+        names = [n for n in names if n]
+        # Yellow highlight follows the multi-selection — shift-click / lasso
+        # accumulates, single-click resets to one, empty selection clears.
+        self.schem_scene.highlight_components(names)
+        layout_matched = self.scene.highlight_instances(names) if names else []
+        if layout_matched:
+            bb = self.scene.highlight_bbox()
+            if not bb.isEmpty():
+                # Fit so the user actually sees the highlighted block. Pad
+                # generously so a single small device isn't blown up to fill
+                # the entire pane.
+                pad = max(bb.width(), bb.height()) * 0.5 + 50
+                self.view.fitInView(
+                    bb.adjusted(-pad, -pad, pad, pad),
+                    Qt.KeepAspectRatio,
+                )
+        if not names:
             return
-        names = [c.name() or "?" for c in comps]
         head = ", ".join(names[:4])
         if len(names) > 4:
             head += f", … ({len(names)} total)"
-        self.statusBar().showMessage(f"selected: {head}", 3000)
+        bits = [f"selected: {head}"]
+        if layout_matched:
+            bits.append(f"layout: {len(layout_matched)}")
+        self.statusBar().showMessage(" — ".join(bits), 3000)
 
     def _on_layout_instance_clicked(self, instance_name):
         import re
@@ -375,6 +451,50 @@ class MainWindow(QMainWindow):
         a_cmd = QAction("Set rerun command…", self)
         a_cmd.triggered.connect(self._edit_rerun_cmd)
         run_menu.addAction(a_cmd)
+
+        view_menu = menu_bar.addMenu("&View")
+        a_mute = QAction("Mute dummy fillers", self, checkable=True)
+        a_mute.setChecked(True)
+        a_mute.toggled.connect(self.scene.set_dummies_muted)
+        view_menu.addAction(a_mute)
+
+        help_menu = menu_bar.addMenu("&Help")
+        a_keys = QAction("Keyboard shortcuts", self)
+        a_keys.setShortcut(QKeySequence("F1"))
+        a_keys.triggered.connect(self._show_shortcuts)
+        help_menu.addAction(a_keys)
+
+    def _show_shortcuts(self):
+        from PySide6.QtWidgets import QMessageBox
+        html = """
+<h3>Keyboard shortcuts</h3>
+<table cellspacing="6">
+<tr><th align="left">Both panes</th><th></th></tr>
+<tr><td><b>F</b></td><td>Fit view</td></tr>
+<tr><td><b>Z</b> / <b>Ctrl+Z</b></td><td>Zoom in / zoom out</td></tr>
+<tr><td><b>Ctrl+wheel</b></td><td>Zoom</td></tr>
+<tr><td><b>Wheel / arrows</b></td><td>Pan</td></tr>
+<tr><td><b>Shift+wheel</b></td><td>Pan horizontally</td></tr>
+<tr><td><b>Right-drag</b></td><td>Zoom to area</td></tr>
+<tr><th align="left" colspan="2">Layout pane</th></tr>
+<tr><td><b>T</b></td><td>Toggle all layers</td></tr>
+<tr><td><b>Click instance</b></td><td>Cross-probe (highlights peers in both panes)</td></tr>
+<tr><th align="left" colspan="2">Schematic pane</th></tr>
+<tr><td><b>Click</b></td><td>Select component / cross-probe</td></tr>
+<tr><td><b>Shift+click</b></td><td>Add to multi-selection</td></tr>
+<tr><td><b>Left-drag</b> (empty space)</td><td>Lasso multi-select</td></tr>
+<tr><td><b>Shift+left-drag</b></td><td>Additive lasso</td></tr>
+<tr><th align="left" colspan="2">Groups & navigation</th></tr>
+<tr><td><b>G</b></td><td>Create planning group from current schematic selection</td></tr>
+<tr><td><b>E</b></td><td>Descend into clicked component</td></tr>
+<tr><td><b>Ctrl+E</b> / <b>Cmd+E</b></td><td>Ascend</td></tr>
+<tr><th align="left" colspan="2">File / run</th></tr>
+<tr><td><b>Shift+R</b></td><td>Reload .cic / .sch</td></tr>
+<tr><td><b>Ctrl+R</b> / <b>Cmd+R</b></td><td>Rerun spi2mag</td></tr>
+<tr><td><b>F1</b></td><td>This help</td></tr>
+</table>
+"""
+        QMessageBox.information(self, "Keyboard shortcuts", html)
 
     def _set_auto_rerun(self, on):
         self._auto_rerun = bool(on)
@@ -581,6 +701,7 @@ class MainWindow(QMainWindow):
             bounds = payload.get("bounds")
             if bounds is not None:
                 self.scene.set_short_marker(bounds)
+                self._fit_to_flight_or_marker()
             net_names = payload.get("nets", [])
             # Highlight the first net for context
             if net_names:
@@ -590,8 +711,22 @@ class MainWindow(QMainWindow):
             net = payload.get("net")
             anchors = result.get("unmatched", {}).get(net, [])
             segments = self._segments_chain(anchors)
-            self.scene.set_flight_lines(segments, color="#FFD000")
+            if segments:
+                self.scene.set_flight_lines(segments, color="#FFD000")
+            elif anchors:
+                # Single anchor — mark its bbox so the user can see where it is.
+                self.scene.set_short_marker(anchors[0], color="#FFD000")
+            else:
+                # No physical evidence of the net at all — clear any flight
+                # lines and tell the user explicitly.
+                self.scene.clear_flight_lines()
+                self.statusBar().showMessage(
+                    f"net '{net}': no anchors and no rects found in layout — "
+                    f"likely missing route or unrouted net",
+                    6000,
+                )
             self.schem_scene.highlight_net(net)
+            self._fit_to_flight_or_marker()
             return
         if t == "split":
             net = payload.get("net")
@@ -599,8 +734,14 @@ class MainWindow(QMainWindow):
             cb = result.get("components_bbox", {})
             anchors = [cb[c] for c in comp_ids if c in cb]
             segments = self._segments_chain(anchors)
-            self.scene.set_flight_lines(segments, color="#FFA050")
+            if segments:
+                self.scene.set_flight_lines(segments, color="#FFA050")
+            elif anchors:
+                self.scene.set_short_marker(anchors[0], color="#FFA050")
+            else:
+                self.scene.clear_flight_lines()
             self.schem_scene.highlight_net(net)
+            self._fit_to_flight_or_marker()
             return
 
     def _plan_route_dialog(self, payload):
@@ -641,7 +782,7 @@ class MainWindow(QMainWindow):
         ed_layer1 = QLineEdit("M2")
         ed_layer2 = QLineEdit("M3")
         ed_options = QLineEdit("")
-        ed_options.setPlaceholderText("e.g. onTopLeft,track-2 or top")
+        ed_options.setPlaceholderText("e.g. onTopLeft,verticaltrack-2 or top")
         ed_access = QLineEdit("")
         ed_access.setPlaceholderText("orthogonal access layer (optional)")
         ed_parent = QLineEdit("")
@@ -692,6 +833,97 @@ class MainWindow(QMainWindow):
             f"route added to '{target_group.name}': {kind} {net} "
             f"({len(target_group.routes)} total) — Ctrl+R to rerun spi2mag",
             5000,
+        )
+
+    def _plan_port_dialog(self, net):
+        """Append a port-on-edge entry to the active planning group's
+        ``ports`` list. ``apply()`` will emit ``layout.addPortOnEdge(layer,
+        net, side, style, options)`` from each entry."""
+        from PySide6.QtWidgets import (
+            QComboBox, QDialog, QDialogButtonBox,
+            QFormLayout, QLineEdit, QMessageBox,
+        )
+        gs = self._current_groupset
+        if gs is None or not gs.groups:
+            QMessageBox.information(
+                self, "Add port",
+                "Create at least one planning group first.")
+            return
+        if not net:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Add port on edge — {net}")
+        form = QFormLayout(dlg)
+
+        cb_group = QComboBox()
+        for g in gs.groups:
+            cb_group.addItem(g.name)
+        sel = self.groups_panel.selected_group_name()
+        if sel:
+            i = cb_group.findText(sel)
+            if i >= 0:
+                cb_group.setCurrentIndex(i)
+
+        ed_layer = QLineEdit("M1")
+        cb_side = QComboBox()
+        cb_side.addItems(["top", "bottom", "left", "right"])
+        ed_style = QLineEdit("||")
+        ed_style.setToolTip("port style — typically '||' (vertical) or '--' (horizontal)")
+        ed_options = QLineEdit("")
+        ed_options.setPlaceholderText("e.g. centered, edgeOffset=10 (optional)")
+
+        form.addRow("Planning group:", cb_group)
+        form.addRow("Layer:", ed_layer)
+        form.addRow("Side:", cb_side)
+        form.addRow("Style:", ed_style)
+        form.addRow("Options:", ed_options)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        target_group = gs.by_name(cb_group.currentText())
+        if target_group is None:
+            return
+        entry = {
+            "net": net,
+            "layer": ed_layer.text().strip() or "M1",
+            "side": cb_side.currentText(),
+            "style": ed_style.text().strip() or "||",
+        }
+        if ed_options.text().strip():
+            entry["options"] = ed_options.text().strip()
+
+        target_group.ports = list(target_group.ports or []) + [entry]
+        self._save_groupset_if_dirty()
+        self.statusBar().showMessage(
+            f"port added to '{target_group.name}': {net} {entry['layer']} on "
+            f"{entry['side']} ({len(target_group.ports)} total) — Ctrl+R to "
+            f"rerun spi2mag",
+            5000,
+        )
+
+    def _fit_to_flight_or_marker(self):
+        """Pan/zoom the layout view to show the just-drawn flight lines or
+        short marker. Without this the indicator can be off-screen and the
+        user concludes 'no flight lines'."""
+        items = getattr(self.scene, "_flight_items", []) or []
+        if not items:
+            return
+        bb = items[0].sceneBoundingRect()
+        for it in items[1:]:
+            r = it.sceneBoundingRect()
+            bb = r if bb.isEmpty() else bb.united(r)
+        if bb.isEmpty():
+            return
+        pad = max(bb.width(), bb.height()) * 0.5 + 50
+        self.view.fitInView(
+            bb.adjusted(-pad, -pad, pad, pad),
+            Qt.KeepAspectRatio,
         )
 
     def _segments_chain(self, rects):
@@ -783,6 +1015,63 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"added {added} to '{group_name}' (now {len(g.members)})", 3000)
         self.groups_panel.set_groupset(gs)  # refresh tooltips
+        self._on_groups_changed()
+
+    def _create_group_from_selection(self):
+        """`G` shortcut: turn the current schematic multi-selection into a new
+        planning group. Members are stored explicitly (no regex)."""
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+        gs = self._current_groupset
+        if gs is None:
+            self.statusBar().showMessage("no cell loaded", 3000)
+            return
+        comps = self.schem_scene.selected_components()
+        names = [c.name() for c in comps if c.name()]
+        if not names:
+            self.statusBar().showMessage(
+                "select schematic components first (shift-click or lasso), then press G",
+                3000,
+            )
+            return
+
+        # The point of `G` is to define a *new* grouping — pre-filling with
+        # the existing common prefix would suggest the wrong name. Leave blank.
+        name, ok = QInputDialog.getText(
+            self,
+            "New group",
+            f"Name for new planning group ({len(names)} member"
+            f"{'s' if len(names) != 1 else ''}):",
+        )
+        if not ok:
+            return
+        name = name.strip()
+        if not name:
+            return
+        if gs.by_name(name) is not None:
+            QMessageBox.warning(
+                self, "New group",
+                f"Group '{name}' already exists. Pick a different name."
+            )
+            return
+
+        g = cicgroups.Group(name=name, members=list(dict.fromkeys(names)),
+                            visible=True)
+        gs.groups.append(g)
+
+        self.groups_panel.set_groupset(gs)
+        # Select the new group in the panel so subsequent edits target it.
+        for i in range(self.groups_panel.list.count()):
+            it = self.groups_panel.list.item(i)
+            if it.text() == name:
+                self.groups_panel.list.setCurrentItem(it)
+                break
+        self.schem_scene.clear_selection()
+        self.statusBar().showMessage(
+            f"created group '{name}' with {len(g.members)} member"
+            f"{'s' if len(g.members) != 1 else ''}",
+            4000,
+        )
         self._on_groups_changed()
 
     # -- hierarchy navigation ------------------------------------------

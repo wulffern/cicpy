@@ -328,6 +328,8 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
     lcell.dirname = libdir + lib + os.path.sep
 
+    _ensure_default_pycell(lcell.dirname, lcell.name)
+
     pycell = None
     pycellData = None
     if(os.path.exists(lcell.dirname + lcell.name + ".py")):
@@ -353,6 +355,58 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     with open(libdir + lib + os.path.sep + lcell.name + ".cic","w") as fo:
         fo.write(json.dumps(design.toJson(),indent=4))
         #fo.write(json.dumps(design.maglib["JNWTR_RPPO2"]._lay.toJson(),indent=4))
+
+
+def _ensure_default_pycell(dirname, cell):
+    pycell_path = os.path.join(dirname, cell + ".py")
+    if os.path.exists(pycell_path):
+        return
+
+    os.makedirs(dirname, exist_ok=True)
+    with open(pycell_path, "w") as fo:
+        fo.write(_default_pycell_template(cell))
+    log.info(f"Created default pycell {pycell_path}")
+
+
+def _default_pycell_template(cell):
+    return f'''"""cicpy layout hooks for {cell}.
+
+Uncomment the hooks you need. Each hook receives the LayoutCell object
+as ``layout``.
+"""
+
+
+# def beforePlace(layout):
+#     pass
+
+
+# def afterPlace(layout):
+#     pass
+
+
+# def beforeRoute(layout):
+#     pass
+
+
+# def afterRoute(layout):
+#     pass
+
+
+# def beforePaint(layout):
+#     pass
+
+
+# def afterPaint(layout):
+#     pass
+
+
+# def beforePorts(layout):
+#     pass
+
+
+# def afterPorts(layout):
+#     pass
+'''
 
 
 def _format_route_desc(short):

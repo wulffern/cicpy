@@ -73,10 +73,10 @@ class LayoutView(QGraphicsView):
             self._pan(0, -PAN_STEP)
             return
         if k == Qt.Key_Left:
-            self._pan(-PAN_STEP, 0)
+            self._pan(PAN_STEP, 0)
             return
         if k == Qt.Key_Right:
-            self._pan(PAN_STEP, 0)
+            self._pan(-PAN_STEP, 0)
             return
         super().keyPressEvent(event)
 

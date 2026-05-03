@@ -178,6 +178,7 @@ class Route(Cell):
             "debug_api": getattr(self, "debug_api", ""),
             "debug_callsite": getattr(self, "debug_callsite", ""),
             "debug_command": getattr(self, "debug_command", ""),
+            "debug_internal": getattr(self, "debug_internal", False),
         }
 
     def add(self, child):
@@ -809,11 +810,15 @@ class OrthogonalLayerRoute(Route):
             self.anchorMode = "top"
         elif re.search(r"onTopBottom(,|\s+|$)", self.options):
             self.anchorMode = "bottom"
-        track = _option_int(self.options, "track")
+        track = _option_int(self.options, "verticaltrack")
+        if track is None:
+            track = _option_int(self.options, "track")
         if track is not None:
             self.hasTrack = True
             self.track = track
-        branch_track = _option_int(self.options, "branchtrack")
+        branch_track = _option_int(self.options, "horizontaltrack")
+        if branch_track is None:
+            branch_track = _option_int(self.options, "branchtrack")
         if branch_track is not None:
             self.hasBranchTrack = True
             self.branchTrack = branch_track
@@ -830,6 +835,7 @@ class OrthogonalLayerRoute(Route):
             "debug_api": getattr(self, "debug_api", ""),
             "debug_callsite": getattr(self, "debug_callsite", ""),
             "debug_command": getattr(self, "debug_command", ""),
+            "debug_internal": getattr(self, "debug_internal", False),
         }
 
     def _rects_touch_or_overlap(self, rect1, rect2):

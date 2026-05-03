@@ -2,6 +2,8 @@
 
 When `cicpy sch2mag` or `cicpy spi2mag` processes a cell, it looks for a Python file named `<CELL>.py` in the cell's library directory. If found, the file is imported and its hook functions are called at defined points in the layout pipeline.
 
+If the file does not exist, `spi2mag`/`sch2mag` creates a default commented template with the available hooks. Existing files are never overwritten.
+
 This page documents the hook protocol and every API that is safe to call from a pycell.
 
 ## File Location and Loading
@@ -224,8 +226,8 @@ Connect all instances whose net name matches `regex` on the given `layer`.
 | `left` | Track direction: left |
 | `right` | Track direction: right |
 | `center` | Track direction: centered |
-| `trackN` | Use routing track N |
-| `branchtrackN` | Use branch track N |
+| `verticaltrackN` | Use vertical trunk track N (`trackN` alias supported) |
+| `horizontaltrackN` | Use horizontal branch track N (`branchtrackN` alias supported) |
 
 #### `addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, accessLayer=None)`
 

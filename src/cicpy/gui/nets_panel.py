@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QVBoxLayout,
     QWidget,
 )
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 class NetsPanel(QWidget):
 
     netActivated = Signal(str)
+    planPortRequested = Signal(str)  # emits the net name
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +50,8 @@ class NetsPanel(QWidget):
         self.search.textChanged.connect(self._refresh)
         self.cb_filter.toggled.connect(self._refresh)
         self.list.itemClicked.connect(self._on_row)
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._on_context_menu)
 
     # public
 
@@ -86,3 +90,13 @@ class NetsPanel(QWidget):
     def _on_row(self, item):
         if item is not None:
             self.netActivated.emit(item.text())
+
+    def _on_context_menu(self, pos):
+        item = self.list.itemAt(pos)
+        if item is None:
+            return
+        net = item.text()
+        menu = QMenu(self)
+        act = menu.addAction(f"Add port on edge for '{net}'…")
+        act.triggered.connect(lambda: self.planPortRequested.emit(net))
+        menu.exec(self.list.mapToGlobal(pos))

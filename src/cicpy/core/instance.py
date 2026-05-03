@@ -155,6 +155,41 @@ class Instance(Cell):
             self.libpath = o["libpath"]
         self.xcell = o["xcell"]
         self.ycell = o["ycell"]
+        # Load Port / InstancePort / Rect children from JSON. Without this,
+        # ``self.allports`` stays empty, ``LayoutCell.addToNodeGraph`` adds
+        # nothing, and ``checkConnectivity`` reports no opens — the CLI
+        # works only because it builds instances live via setSubcktInstance.
+        from .port import Port
+        from .rect import Rect
+        for child in o.get("children", []):
+            cl = child.get("class")
+            c = None
+            if cl in ("Port", "InstancePort"):
+                # Reconstruct as Port — InstancePort needs constructor args
+                # we don't have, but for connectivity purposes Port suffices
+                # (the net name lives in ``name`` either way).
+                c = Port()
+            elif cl == "Rect":
+                c = Rect()
+            if c is None:
+                continue
+            c.design = self.design
+            try:
+                c.fromJson(child)
+            except Exception:
+                continue
+            self.add(c)
+        # Resolve the referenced layout cell. Without this,
+        # ``_collectPhysicalRects`` never descends into the instance's body,
+        # so metal/via rects inside primitive cells are invisible to the
+        # connectivity check — every route landing on the same transistor
+        # terminal looks like a separate component, producing aggressive
+        # split-net reports.
+        if self.cell and self.design is not None:
+            cell_obj = self.design.cells.get(self.cell)
+            if cell_obj is not None:
+                self.layoutcell = cell_obj
+                self._cell_obj = cell_obj
 
     def toJson(self):
         o = super().toJson()

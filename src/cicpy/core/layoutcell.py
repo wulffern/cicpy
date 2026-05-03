@@ -262,6 +262,27 @@ class LayoutCell(Cell):
         layer_obj_2 = rules.getLayer(l2)
         if layer_obj_1 is None or layer_obj_2 is None:
             return False
+        mat1 = getattr(layer_obj_1, "material", None)
+        mat2 = getattr(layer_obj_2, "material", None)
+        try:
+            from .layer import Material
+            cut_mat = Material.CUT
+        except Exception:
+            cut_mat = None
+        # Cut aliases sharing GDS number+datatype are the same physical via
+        # (e.g. ``CO`` / ``NDIFFC`` / ``PDIFFC`` / ``PCO`` all GDS 33). Only
+        # apply this to cuts — diffusion aliases (``OD`` / ``PDIFF`` /
+        # ``NDIFF`` / ``PTAP`` / ``NTAP``) also share GDS 22 but are isolated
+        # by transistor gates, so unifying them cascades nets into shorts.
+        if cut_mat is not None and mat1 == cut_mat and mat2 == cut_mat:
+            n1 = getattr(layer_obj_1, "number", None)
+            n2 = getattr(layer_obj_2, "number", None)
+            d1 = getattr(layer_obj_1, "datatype", None)
+            d2 = getattr(layer_obj_2, "datatype", None)
+            if n1 is not None and n1 == n2 and d1 == d2:
+                return True
+        # Stack-adjacency by name (each layer points at its immediate next /
+        # previous cut or metal). Bidirectional check.
         if getattr(layer_obj_1, "next", "") == l2:
             return True
         if getattr(layer_obj_1, "previous", "") == l2:
@@ -270,7 +291,50 @@ class LayoutCell(Cell):
             return True
         if getattr(layer_obj_2, "previous", "") == l1:
             return True
+        # Stack-adjacency by GDS *for cut endpoints only*: a layer's
+        # ``next`` / ``previous`` can name any cut alias; if the target cut
+        # shares its GDS pair with the other layer, treat as connected.
+        # This covers cases like ``PO`` whose ``next=CO`` should connect to
+        # ``NDIFFC``-named contacts that share GDS 33 with ``CO``.
+        def _gds(obj):
+            return (getattr(obj, "number", None), getattr(obj, "datatype", None))
+        gds1, gds2 = _gds(layer_obj_1), _gds(layer_obj_2)
+        for direction in ("next", "previous"):
+            tgt_name = getattr(layer_obj_1, direction, "")
+            tgt = rules.getLayer(tgt_name) if tgt_name else None
+            if (tgt is not None
+                    and getattr(tgt, "material", None) == cut_mat
+                    and _gds(tgt) == gds2 and mat2 == cut_mat):
+                return True
+            tgt_name = getattr(layer_obj_2, direction, "")
+            tgt = rules.getLayer(tgt_name) if tgt_name else None
+            if (tgt is not None
+                    and getattr(tgt, "material", None) == cut_mat
+                    and _gds(tgt) == gds1 and mat1 == cut_mat):
+                return True
         return False
+
+    def _isConnectivityPropagationLayer(self, layer_name):
+        """Connectivity checks only propagate through explicit conductors."""
+        rules = Rules.getInstance()
+        if rules is None:
+            return False
+        layer_obj = rules.getLayer(self._normalizeLayerName(layer_name))
+        if layer_obj is None:
+            return False
+        try:
+            from .layer import Material
+            allowed = {Material.METAL, Material.POLY, Material.CUT}
+        except Exception:
+            return False
+        return getattr(layer_obj, "material", None) in allowed
+
+    def _layersConnectForConnectivity(self, layer1, layer2):
+        if not self._isConnectivityPropagationLayer(layer1):
+            return False
+        if not self._isConnectivityPropagationLayer(layer2):
+            return False
+        return self._layersDirectlyConnect(layer1, layer2)
 
     def _connectedComponentsFromRects(self, rects):
         components = []
@@ -347,6 +411,20 @@ class LayoutCell(Cell):
                 child_cell = getattr(child, "layoutcell", None)
                 if child_cell is None:
                     child_cell = getattr(child, "_cell_obj", None)
+                # Lazy resolve from the design — instances loaded from JSON
+                # may reference cells that hadn't been loaded yet at
+                # ``fromJson`` time. Without this fallback the connectivity
+                # check misses every metal/via inside the instance body and
+                # nets fragment into separate components.
+                if child_cell is None:
+                    cell_name = getattr(child, "cell", "")
+                    design = getattr(self, "design", None)
+                    if cell_name and design is not None:
+                        resolved = design.cells.get(cell_name)
+                        if resolved is not None:
+                            child.layoutcell = resolved
+                            child._cell_obj = resolved
+                            child_cell = resolved
                 if child_cell is not None:
                     self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active)
                 continue
@@ -421,6 +499,8 @@ class LayoutCell(Cell):
         anchors = []
         seen = set()
         for node in self.nodeGraphList:
+            if self._ignoreConnectivityNet(node):
+                continue
             graph = self.nodeGraph.get(node)
             if graph is None:
                 continue
@@ -439,6 +519,8 @@ class LayoutCell(Cell):
                 seen.add(key)
                 anchors.append((node, rr))
         for node, port in self.ports.items():
+            if self._ignoreConnectivityNet(node):
+                continue
             if port is None:
                 continue
             rr = port.get(target_layer) if target_layer else port.get()
@@ -454,6 +536,9 @@ class LayoutCell(Cell):
             anchors.append((node, rr))
         return anchors
 
+    def _ignoreConnectivityNet(self, net_name):
+        return bool(net_name) and str(net_name).startswith("xfill_")
+
     def _findRoot(self, parent, idx):
         while parent[idx] != idx:
             parent[idx] = parent[parent[idx]]
@@ -467,14 +552,17 @@ class LayoutCell(Cell):
             parent[rb] = ra
 
     def checkConnectivity(self, target_layer=""):
-        shapes = self._collectPhysicalRects()
+        shapes = [
+            rect for rect in self._collectPhysicalRects()
+            if self._isConnectivityPropagationLayer(getattr(rect, "layer", ""))
+        ]
         parent = list(range(len(shapes)))
 
         for i in range(len(shapes)):
             for j in range(i + 1, len(shapes)):
                 if not self._rectsTouchOrOverlap(shapes[i], shapes[j]):
                     continue
-                if not self._layersDirectlyConnect(shapes[i].layer, shapes[j].layer):
+                if not self._layersConnectForConnectivity(shapes[i].layer, shapes[j].layer):
                     continue
                 self._unionRoots(parent, i, j)
 
@@ -490,14 +578,17 @@ class LayoutCell(Cell):
         for comp_id, rects in components.items():
             for rect in rects:
                 net_name = getattr(rect, "net", "")
-                if net_name:
+                if net_name and not self._ignoreConnectivityNet(net_name):
                     component_nets[comp_id].add(net_name)
 
         for net_name, anchor in anchors:
             matched = False
+            if not self._isConnectivityPropagationLayer(anchor.layer):
+                unmatched[net_name].append(anchor)
+                continue
             for comp_id, rects in components.items():
                 for rect in rects:
-                    if not self._layersDirectlyConnect(anchor.layer, rect.layer):
+                    if not self._layersConnectForConnectivity(anchor.layer, rect.layer):
                         continue
                     if not self._rectsTouchOrOverlap(anchor, rect):
                         continue
@@ -521,6 +612,9 @@ class LayoutCell(Cell):
                     source = self._getRouteSource(rect)
                     if source is None:
                         continue
+                    source_name = source.get("name", "") or source.get("net", "")
+                    if source.get("debug_internal", False) or self._ignoreConnectivityNet(source_name):
+                        continue
                     key = (
                         source["name"],
                         source["layer"],
@@ -543,6 +637,8 @@ class LayoutCell(Cell):
 
         opens = []
         for net_name in self.nodeGraphList:
+            if self._ignoreConnectivityNet(net_name):
+                continue
             comp_ids = sorted(
                 comp_id for comp_id, nets in component_nets.items() if net_name in nets
             )
@@ -571,6 +667,8 @@ class LayoutCell(Cell):
             "net_components": net_components,
             "unmatched": unmatched,
             "components_bbox": components_bbox,
+            "component_count": len(components),
+            "shape_count": len(shapes),
             "component_count": len(components),
             "shape_count": len(shapes),
         }

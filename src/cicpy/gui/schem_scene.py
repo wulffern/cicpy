@@ -87,6 +87,7 @@ class SchemScene(QGraphicsScene):
 
     componentClicked = Signal(object)  # emits the Component object
     selectionChanged = Signal(list)    # list[Component] — multi-selection
+    wireClicked = Signal(str)          # emits the net name (lab=)
 
     def __init__(self, sym_loader, parent=None):
         super().__init__(parent)
@@ -201,28 +202,37 @@ class SchemScene(QGraphicsScene):
         text = _expand_text(t.text, parent_component)
         if not text:
             return
-        item = QGraphicsSimpleTextItem(text, parent)
+        # Render text as a free-floating scene item rather than a child of the
+        # symbol's QGraphicsItemGroup. Position is mapped through the parent's
+        # transform (so the label stays glued to its symbol), but we apply
+        # only the text's own rotation/flip — parent rotation/mirror never
+        # leaks into the label, so it always reads upright and unmirrored.
+        item = QGraphicsSimpleTextItem(text)
+        # Labels are inert — clicks pass through to whatever is behind so
+        # users don't accidentally lose selection or hide the label by
+        # pressing on it.
+        item.setAcceptedMouseButtons(Qt.NoButton)
+        item.setAcceptHoverEvents(False)
         font = QFont()
-        size = max(2.0, float(t.xscale) * 16.0)
+        size = max(4.0, float(t.xscale) * 32.0)
         font.setPointSizeF(size)
         item.setFont(font)
         item.setBrush(QBrush(_TEXT_COLOR))
-        item.setPos(t.x, t.y)
-        # Keep symbol-internal labels upright regardless of the parent
-        # component's rotation/flip; ItemIgnoresTransformations also pins the
-        # render size so labels stay legible at all zoom levels.
-        if parent_component is not None:
-            item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        try:
+            tx = float(t.x); ty = float(t.y)
+        except Exception:
+            tx = ty = 0.0
+        if parent is not None:
+            scene_pt = parent.mapToScene(QPointF(tx, ty))
         else:
-            # Free-floating text in the schematic gets its own rot/flip.
-            tr = QTransform()
-            if t.flip == 1:
-                tr.scale(-1, 1)
-            if t.rotation:
-                tr.rotate(90 * t.rotation)
-            item.setTransform(tr)
-        if parent is None:
-            self.addItem(item)
+            scene_pt = QPointF(tx, ty)
+        item.setPos(scene_pt)
+        # Labels always render upright and unmirrored regardless of any
+        # rotation/flip on the text record or its parent symbol — readability
+        # over fidelity. xschem's symbol files often set ``flip=1`` on labels
+        # expecting composition with the parent's flip, which produced mirror
+        # text once we stopped inheriting parent transform.
+        self.addItem(item)
 
     def _add_component(self, c, parent):
         sym = self.sym_loader.load(c.symbol)
@@ -289,6 +299,20 @@ class SchemScene(QGraphicsScene):
                 self._apply_highlight(grp)
                 self._highlight_groups.append(grp)
         return members
+
+    def highlight_components(self, names):
+        """Highlight (yellow pen) exactly the named components — no peer
+        expansion. Replaces any prior peer/single highlight."""
+        self.clear_highlight()
+        out = []
+        for n in names or []:
+            grp = self._components_by_name.get(n)
+            if grp is None:
+                continue
+            self._apply_highlight(grp)
+            self._highlight_groups.append(grp)
+            out.append(n)
+        return out
 
     def _apply_highlight(self, group_item):
         for child in group_item.childItems():
@@ -357,7 +381,7 @@ class SchemScene(QGraphicsScene):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            it = self.itemAt(event.scenePos(), QTransform())
+            it = self._pick_at(event.scenePos())
             comp = self._component_for_item(it)
             if comp is not None:
                 if event.modifiers() & Qt.ShiftModifier:
@@ -367,11 +391,27 @@ class SchemScene(QGraphicsScene):
                 self.componentClicked.emit(comp)
                 event.accept()
                 return
+            # Wire click → cross-probe by net.
+            if it is not None:
+                net = it.data(3)
+                if net:
+                    self.wireClicked.emit(str(net))
+                    event.accept()
+                    return
             # Empty space click without modifier → clear selection
             if not (event.modifiers() & Qt.ShiftModifier):
                 if self._selected_components:
                     self._set_selection([])
         super().mousePressEvent(event)
+
+    def _pick_at(self, scene_pos):
+        """Return the topmost non-text item at ``scene_pos`` (text labels are
+        click-through). Falls back to ``itemAt`` if nothing else is found."""
+        for it in self.items(scene_pos):
+            if isinstance(it, QGraphicsSimpleTextItem):
+                continue
+            return it
+        return None
 
     def _component_for_item(self, item):
         # walk up parent chain looking for our component-tagged group

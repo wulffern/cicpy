@@ -35,6 +35,10 @@ TEXT_FONT_SIZE = 18.0
 TEXT_Z_VALUE = 1000
 
 
+def _is_xfill_name(name):
+    return bool(name) and str(name).startswith("xfill_")
+
+
 class LayoutScene(QGraphicsScene):
 
     instanceClicked = Signal(str)
@@ -51,8 +55,11 @@ class LayoutScene(QGraphicsScene):
         self._route_visible = {}
         self._route_labels = {}
         self._route_order = []
+        self._route_nets = {}  # route_key -> net name (for net cross-probing)
         self._port_label_names = set()
         self._groups_by_instance = {}
+        self._dummy_groups = []
+        self._dummies_muted = True
         self._highlight_overlays = []
         self.cell = None
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
@@ -64,8 +71,10 @@ class LayoutScene(QGraphicsScene):
         self._route_visible.clear()
         self._route_labels.clear()
         self._route_order.clear()
+        self._route_nets.clear()
         self._port_label_names.clear()
         self._groups_by_instance.clear()
+        self._dummy_groups = []
         self._highlight_overlays = []
         self._flight_items = []
         self._member_filter = None
@@ -142,6 +151,8 @@ class LayoutScene(QGraphicsScene):
 
     def _route_key(self, route):
         base = getattr(route, "name", "") or getattr(route, "net", "") or "route"
+        if _is_xfill_name(base):
+            return None
         route_class = getattr(route, "classname", route.__class__.__name__)
         label = f"{base} ({route_class})"
         key = label
@@ -152,6 +163,9 @@ class LayoutScene(QGraphicsScene):
         self._route_labels[key] = label if key == label else key
         self._route_visible[key] = True
         self._route_order.append(key)
+        net = getattr(route, "net", "") or getattr(route, "name", "") or ""
+        if net:
+            self._route_nets[key] = net
         return key
 
     def _resolve_inst_cell(self, inst):
@@ -226,13 +240,19 @@ class LayoutScene(QGraphicsScene):
         # Nested instances (parent != None) aren't indexed — they're physical
         # primitives below the user-meaningful hierarchy boundary.
         inst_name = getattr(inst, "instanceName", "") or ""
-        if parent is None and inst_name:
+        is_dummy = bool(inst_name) and _is_xfill_name(inst_name)
+        index_instance = parent is None and inst_name and not is_dummy
+        if index_instance:
             group.setData(INSTANCE_NAME_KEY, inst_name)
             self._groups_by_instance[inst_name] = group
+        if parent is None and is_dummy:
+            self._dummy_groups.append(group)
+            if self._dummies_muted:
+                group.setOpacity(0.25)
         self._walk(cell.children, parent=group, route_key=route_key, show_port_labels=False)
         # Invisible hit-test rect over the whole instance bbox so clicks in
         # gaps between rendered rects still register.
-        if parent is None and inst_name:
+        if index_instance:
             bb = group.childrenBoundingRect()
             if not bb.isEmpty():
                 hit = QGraphicsRectItem(bb, group)
@@ -341,6 +361,8 @@ class LayoutScene(QGraphicsScene):
                          y1 + h / 2 + tbb.height() / 2)
 
     def _add_text(self, t, parent, route_key=None):
+        if _is_xfill_name(getattr(t, "name", "")):
+            return
         if t.name in self._port_label_names:
             return
         layer = t.layer or "TXT"
@@ -360,23 +382,94 @@ class LayoutScene(QGraphicsScene):
         self._highlight_overlays = []
 
     def highlight_instances(self, names):
-        """Outline matching top-level instances. Returns the list of names that
-        actually matched a tagged instance group."""
+        """Outline the bounding box that encloses all matching top-level
+        instances with a single rect — not a rect per instance. Bus names
+        like ``xbb1[7:0]`` are expanded to ``xbb1<0>..xbb1<7>``."""
+        from cicpy.groups import expand_bus
         self.clear_highlight()
+        seen = set()
+        candidates = []
+        for n in names:
+            for v in expand_bus(n):
+                if v not in seen:
+                    seen.add(v)
+                    candidates.append(v)
         matched = []
-        pen = QPen(QColor("#FFD000"))
-        pen.setCosmetic(True)
-        pen.setWidth(3)
-        for name in names:
+        union = QRectF()
+        for name in candidates:
             grp = self._groups_by_instance.get(name)
             if grp is None:
                 continue
             matched.append(name)
-            bb = grp.sceneBoundingRect().adjusted(-20, -20, 20, 20)
-            overlay = self.addRect(bb, pen, QBrush(Qt.NoBrush))
-            overlay.setZValue(TEXT_Z_VALUE + 10)
+            r = grp.sceneBoundingRect()
+            if r.isEmpty():
+                continue
+            union = r if union.isEmpty() else union.united(r)
+        if not union.isEmpty():
+            # Pad outward proportionally so the outline sits clear of the
+            # geometry instead of hugging the layers.
+            pad = max(union.width(), union.height()) * 0.15 + 30
+            rect = union.adjusted(-pad, -pad, pad, pad)
+            # Black halo behind a bright yellow outline so the box is
+            # unmistakable on top of any layer color, but never fills the
+            # interior — keeps the underlying devices visible.
+            halo_pen = QPen(QColor("#000000"))
+            halo_pen.setCosmetic(True)
+            halo_pen.setWidth(12)
+            halo = self.addRect(rect, halo_pen, QBrush(Qt.NoBrush))
+            halo.setZValue(TEXT_Z_VALUE + 10)
+            self._highlight_overlays.append(halo)
+            pen = QPen(QColor("#FFD000"))
+            pen.setCosmetic(True)
+            pen.setWidth(6)
+            overlay = self.addRect(rect, pen, QBrush(Qt.NoBrush))
+            overlay.setZValue(TEXT_Z_VALUE + 11)
             self._highlight_overlays.append(overlay)
         return matched
+
+    def highlight_net(self, net_name):
+        """Highlight every Route item belonging to ``net_name`` with a yellow
+        outline. Replaces any prior cross-probe highlight. Returns the count
+        of highlighted items."""
+        self.clear_highlight()
+        if not net_name:
+            return 0
+        keys = [k for k, n in self._route_nets.items() if n == net_name]
+        pen = QPen(QColor("#FFD000"))
+        pen.setCosmetic(True)
+        pen.setWidth(3)
+        union = QRectF()
+        count = 0
+        for k in keys:
+            for it in self._items_by_route.get(k, []):
+                r = it.sceneBoundingRect()
+                if r.isEmpty():
+                    continue
+                overlay = self.addRect(r.adjusted(-2, -2, 2, 2),
+                                       pen, QBrush(Qt.NoBrush))
+                overlay.setZValue(TEXT_Z_VALUE + 10)
+                self._highlight_overlays.append(overlay)
+                union = r if union.isEmpty() else union.united(r)
+                count += 1
+        return count
+
+    def set_dummies_muted(self, muted):
+        """Dim ``xfill_*`` dummy fillers to 0.25 opacity (or restore to 1.0).
+        Improves the signal-to-noise ratio when the user is reading the
+        active devices."""
+        self._dummies_muted = bool(muted)
+        op = 0.25 if muted else 1.0
+        for grp in self._dummy_groups:
+            grp.setOpacity(op)
+
+    def highlight_bbox(self):
+        """Return the bounding rect of the current cross-probe highlight, or
+        an empty QRectF if nothing is highlighted."""
+        rect = QRectF()
+        for it in self._highlight_overlays:
+            r = it.sceneBoundingRect()
+            rect = r if rect.isEmpty() else rect.united(r)
+        return rect
 
     def highlight_instance_prefix(self, prefix):
         """Highlight every instance whose name starts with `prefix`. Useful when
@@ -397,13 +490,16 @@ class LayoutScene(QGraphicsScene):
         self._apply_member_filter()
 
     def _apply_member_filter(self):
+        # Dim with opacity instead of setVisible — hidden items have an empty
+        # sceneBoundingRect, which broke cross-probe highlighting to a
+        # non-member. Members render at full opacity, others fade.
         if self._member_filter is None:
             for grp in self._groups_by_instance.values():
-                grp.setVisible(True)
+                grp.setOpacity(1.0)
             return
         allowed = self._member_filter
         for name, grp in self._groups_by_instance.items():
-            grp.setVisible(name in allowed)
+            grp.setOpacity(1.0 if name in allowed else 0.2)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

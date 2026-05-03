@@ -8,6 +8,7 @@ TECHLIB = demo
 
 test:
 	cd work && cicpy spi2mag top.spice ${LIB} ${CELL} --libdir ../design/ --techlib ${TECHLIB}
+	@test -f design/${LIB}/${CELL}.py
 	@test -f design/${LIB}/${CELL}.cic
 	@test -f design/${LIB}/${CELL}.mag
 
@@ -15,7 +16,7 @@ svg:
 	cicpy svg design/${LIB}/${CELL}.cic tech/cic/${TECHLIB}.tech ${CELL}
 
 clean:
-	-rm -f design/${LIB}/${CELL}.cic design/${LIB}/${CELL}.mag
+	-rm -f design/${LIB}/${CELL}.cic design/${LIB}/${CELL}.mag design/${LIB}/${CELL}.py
 	-rm -rf ${CELL}_svg ${CELL}_svg.html
 
 docs:

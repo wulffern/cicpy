@@ -35,7 +35,40 @@ def _ip_config_root(start_dir):
     return None, None
 
 
-def discover_symbol_paths(schfile=None, cicfile=None):
+def _add_symbol_lib_paths(paths, symbol_libs=None, techfile=None, anchor=None):
+    if not symbol_libs:
+        return
+    if isinstance(symbol_libs, str):
+        symbol_libs = [symbol_libs]
+
+    bases = [os.getcwd()]
+    if anchor:
+        anchor_dir = os.path.dirname(os.path.abspath(anchor))
+        bases.append(anchor_dir)
+        ip_root, _ = _ip_config_root(anchor_dir)
+        if ip_root:
+            bases.append(ip_root)
+            bases.append(os.path.join(ip_root, "work"))
+    if techfile:
+        bases.append(os.path.dirname(os.path.abspath(techfile)))
+
+    for raw in symbol_libs:
+        if not raw:
+            continue
+        expanded = os.path.expanduser(os.path.expandvars(str(raw)))
+        candidates = [expanded] if os.path.isabs(expanded) else [
+            os.path.normpath(os.path.join(base, expanded)) for base in bases
+        ]
+        for cand in candidates:
+            if os.path.isdir(cand):
+                paths.append(cand)
+                parent = os.path.dirname(cand)
+                if parent and os.path.isdir(parent):
+                    paths.append(parent)
+                break
+
+
+def discover_symbol_paths(schfile=None, cicfile=None, techfile=None, symbol_libs=None):
     """Build an ordered, de-duplicated list of search directories for .sym files."""
     paths = []
 
@@ -57,6 +90,8 @@ def discover_symbol_paths(schfile=None, cicfile=None):
             if new_d == d:
                 break
             d = new_d
+
+    _add_symbol_lib_paths(paths, symbol_libs, techfile, anchor)
 
     # Workspace dependency design dirs, via the IP's config.yaml
     if anchor:

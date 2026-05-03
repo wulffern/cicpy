@@ -60,6 +60,7 @@ def sortOnTop(rects,left=False,right=False,top=False,bottom=False):
         count +=1
     a = rects[0]
     rects[0] = rects[index]
+    rects[index] = a
 
 def sortLeftOnTop(rects):
     sortOnTop(rects,left=True)

@@ -236,15 +236,15 @@ class LayoutScene(QGraphicsScene):
         group.setTransform(self._instance_transform(inst))
         group.setData(KIND_KEY, "instance")
         group.setData(LAYER_KEY, "_instance")
-        # Tag top-level instances by their SPICE instanceName for cross-probing.
-        # Nested instances (parent != None) aren't indexed — they're physical
-        # primitives below the user-meaningful hierarchy boundary.
+        # Tag instances by their SPICE instanceName for cross-probing. Placement
+        # helpers may wrap schematic devices in generated groups, so the
+        # user-visible device is not necessarily a direct top-level child.
         inst_name = getattr(inst, "instanceName", "") or ""
         is_dummy = bool(inst_name) and _is_xfill_name(inst_name)
-        index_instance = parent is None and inst_name and not is_dummy
+        index_instance = bool(inst_name) and not is_dummy
         if index_instance:
             group.setData(INSTANCE_NAME_KEY, inst_name)
-            self._groups_by_instance[inst_name] = group
+            self._groups_by_instance.setdefault(inst_name, group)
         if parent is None and is_dummy:
             self._dummy_groups.append(group)
             if self._dummies_muted:
@@ -381,8 +381,18 @@ class LayoutScene(QGraphicsScene):
                 pass
         self._highlight_overlays = []
 
+    def _instance_scene_rect(self, group):
+        rect = group.sceneBoundingRect()
+        if not rect.isEmpty():
+            return rect
+        if hasattr(group, "childrenBoundingRect"):
+            local_rect = group.childrenBoundingRect()
+            if not local_rect.isEmpty():
+                return group.mapRectToScene(local_rect)
+        return QRectF()
+
     def highlight_instances(self, names):
-        """Outline the bounding box that encloses all matching top-level
+        """Outline the bounding box that encloses all matching schematic
         instances with a single rect — not a rect per instance. Bus names
         like ``xbb1[7:0]`` are expanded to ``xbb1<0>..xbb1<7>``."""
         from cicpy.groups import expand_bus
@@ -401,15 +411,12 @@ class LayoutScene(QGraphicsScene):
             if grp is None:
                 continue
             matched.append(name)
-            r = grp.sceneBoundingRect()
+            r = self._instance_scene_rect(grp)
             if r.isEmpty():
                 continue
             union = r if union.isEmpty() else union.united(r)
         if not union.isEmpty():
-            # Pad outward proportionally so the outline sits clear of the
-            # geometry instead of hugging the layers.
-            pad = max(union.width(), union.height()) * 0.15 + 30
-            rect = union.adjusted(-pad, -pad, pad, pad)
+            rect = union
             # Black halo behind a bright yellow outline so the box is
             # unmistakable on top of any layer color, but never fills the
             # interior — keeps the underlying devices visible.
@@ -481,7 +488,7 @@ class LayoutScene(QGraphicsScene):
         return self.highlight_instances(matches)
 
     def set_member_filter(self, allowed_names):
-        """Restrict visible top-level instances to ``allowed_names``. Pass
+        """Restrict visible schematic instances to ``allowed_names``. Pass
         None to disable filtering. Empty set hides every tagged instance."""
         if allowed_names is None:
             self._member_filter = None

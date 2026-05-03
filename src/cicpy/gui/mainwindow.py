@@ -133,7 +133,16 @@ class MainWindow(QMainWindow):
         self.scene = LayoutScene(self.design, self.style)
         self.view = LayoutView(self.scene)
 
-        self.sym_loader = SymbolLoader(discover_symbol_paths(cicfile=self.cicfile))
+        symbol_libs = []
+        try:
+            symbol_libs = self.rules.symbol_libs
+        except Exception:
+            pass
+        self.sym_loader = SymbolLoader(discover_symbol_paths(
+            cicfile=self.cicfile,
+            techfile=self.techfile,
+            symbol_libs=symbol_libs,
+        ))
         self.schem_scene = SchemScene(self.sym_loader)
         self.schem_view = SchemView(self.schem_scene)
         self._sch_search_paths = self._build_sch_search_paths()
@@ -365,17 +374,6 @@ class MainWindow(QMainWindow):
         # accumulates, single-click resets to one, empty selection clears.
         self.schem_scene.highlight_components(names)
         layout_matched = self.scene.highlight_instances(names) if names else []
-        if layout_matched:
-            bb = self.scene.highlight_bbox()
-            if not bb.isEmpty():
-                # Fit so the user actually sees the highlighted block. Pad
-                # generously so a single small device isn't blown up to fill
-                # the entire pane.
-                pad = max(bb.width(), bb.height()) * 0.5 + 50
-                self.view.fitInView(
-                    bb.adjusted(-pad, -pad, pad, pad),
-                    Qt.KeepAspectRatio,
-                )
         if not names:
             return
         head = ", ".join(names[:4])

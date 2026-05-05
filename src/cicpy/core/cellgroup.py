@@ -3,6 +3,8 @@
 import re
 
 from .cell import Cell
+from .port import Port
+from .rect import Rect
 from .route import Route
 
 
@@ -12,6 +14,53 @@ class _PhysicalInst:
         self.subcktName = subckt_name
 
 
+class ParallelGroup(Cell):
+    def __init__(self, layout, name, instances):
+        super().__init__(name)
+        self.layout = layout
+        self.instances = list(instances or [])
+        self.route_rects = []
+        self.group_ports = {}
+
+    def _members(self):
+        return self.instances + self.route_rects + list(self.group_ports.values())
+
+    def calcBoundingRect(self):
+        members = self._members()
+        if not members:
+            return super().calcBoundingRect()
+        return Cell.calcBoundingRectFromList(members, False)
+
+    def translate(self, dx, dy):
+        for obj in self.route_rects + list(self.group_ports.values()):
+            obj.translate(dx, dy)
+        self.updateBoundingRect()
+        self.emit_updated()
+
+    def addRouteRect(self, rect):
+        self.route_rects.append(rect)
+        self.add(rect)
+        self.layout.add(rect)
+        self.updateBoundingRect()
+        return rect
+
+    def addGroupPort(self, net, rect, edge):
+        port = Port(net, routeLayer=rect.layer, rect=rect)
+        port.spicePort = False
+        port.side = edge
+        self.group_ports[net] = port
+        self.add(port)
+        self.updateBoundingRect()
+        return port
+
+    def representativeAccessRects(self, net, accessLayer=None):
+        port = self.group_ports.get(net)
+        if port is None:
+            return []
+        rect = port.get(accessLayer)
+        return [rect] if rect is not None else []
+
+
 class StackGroup(Cell):
     def __init__(self, layout, name):
         super().__init__(name)
@@ -19,12 +68,21 @@ class StackGroup(Cell):
         self.instances = []
         self.tap_instances = []
         self.dummy_routes = []
+        self.direct_routes = []
+        self.diode_routes = []
+        self.parallel_groups = []
         self.preserve_order = False
 
     def _members(self):
         members = []
         seen = set()
-        for obj in self.instances + self.tap_instances + self.dummy_routes:
+        for obj in (
+            self.instances
+            + self.tap_instances
+            + self.dummy_routes
+            + self.direct_routes
+            + self.parallel_groups
+        ):
             if obj is None:
                 continue
             oid = id(obj)
@@ -36,6 +94,17 @@ class StackGroup(Cell):
 
     def _route_instances(self):
         return [inst for inst in self.instances if inst is not None and getattr(inst, "instanceName", "")]
+
+    def _route_instances_excluding(self, excludeInstances=""):
+        instances = []
+        for inst in self._route_instances():
+            instance_name = getattr(inst, "instanceName", "")
+            if excludeInstances and (
+                re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(inst, "name", ""))
+            ):
+                continue
+            instances.append(inst)
+        return instances
 
     def instanceRegex(self):
         names = [re.escape(inst.instanceName) for inst in self._route_instances()]
@@ -54,6 +123,11 @@ class StackGroup(Cell):
         return self
 
     def representativeAccessRects(self, net, accessLayer, anymetal=False):
+        rects = []
+        for group in self.parallel_groups:
+            rects.extend(group.representativeAccessRects(net, accessLayer))
+        if rects:
+            return self.layout.collapseRepresentativeRects(net, rects)
         graph = getattr(self.layout, "nodeGraph", None)
         if graph is None or net not in graph:
             return []
@@ -83,6 +157,265 @@ class StackGroup(Cell):
         target_y = 0.5 * (self.bottom() + self.top())
         chosen = min(rects, key=lambda r: (abs(r.centerY() - target_y), abs(r.centerX() - self.left()), r.x1, r.y1))
         return [chosen]
+
+    def _bus_group_name(self, instance_name):
+        if not re.search(r"<[^>]+>$", instance_name or ""):
+            return ""
+        return re.sub(r"<[^>]+>$", "", instance_name)
+
+    def _parallel_instance_groups(self, excludeInstances=""):
+        groups = {}
+        for inst in self._route_instances():
+            instance_name = getattr(inst, "instanceName", "")
+            if excludeInstances and (
+                re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(inst, "name", ""))
+            ):
+                continue
+            group_name = self._bus_group_name(instance_name)
+            if not group_name:
+                continue
+            groups.setdefault(group_name, []).append(inst)
+        out = []
+        for name, instances in groups.items():
+            if len(instances) < 2:
+                continue
+            instances = sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", "")))
+            out.append(ParallelGroup(self.layout, f"{self.name}_{name}", instances))
+        return out
+
+    def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True):
+        terminal_set = set(terminals or [])
+        member_names = {getattr(i, "instanceName", "") for i in instances}
+        grouped = {}
+        graph = getattr(self.layout, "nodeGraph", None)
+        if graph is None:
+            return grouped
+        for net, node in graph.items():
+            if excludeNets and re.search(excludeNets, net):
+                continue
+            terminal_rects = {}
+            seen = {}
+            for port in getattr(node, "ports", []):
+                inst = getattr(port, "parent", None)
+                if inst is None or not inst.isInstance():
+                    continue
+                instance_name = getattr(inst, "instanceName", "")
+                if instance_name not in member_names:
+                    continue
+                if excludeInstances and (
+                    re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(inst, "name", ""))
+                ):
+                    continue
+                terminal_name = getattr(port, "childName", "")
+                if terminal_set and terminal_name not in terminal_set:
+                    continue
+                access = inst.getTerminalAccess(terminal_name, target_layer=layer)
+                if access is None:
+                    continue
+                rect = self._choose_access_rect(access, axis="x")
+                if rect is None:
+                    continue
+                if getattr(rect, "layer", "") != layer:
+                    continue
+                key_name = terminal_name if sameTerminal else ""
+                terminal_rects.setdefault(key_name, [])
+                seen.setdefault(key_name, set())
+                key = (rect.layer, rect.x1, rect.y1, rect.x2, rect.y2)
+                if key in seen[key_name]:
+                    continue
+                seen[key_name].add(key)
+                terminal_rects[key_name].append(rect)
+            terminal_rects = {term: rects for term, rects in terminal_rects.items() if rects}
+            if not terminal_rects:
+                continue
+            term, rects = max(terminal_rects.items(), key=lambda item: (len(item[1]), item[0]))
+            grouped[net] = (term, rects)
+        return grouped
+
+    def _vertical_parallel_rect(self, layer, rects):
+        if not rects:
+            return None
+        source = sorted(rects, key=lambda r: (r.y1, r.x1))[0]
+        y1 = min(r.y1 for r in rects)
+        y2 = max(r.y2 for r in rects)
+        rect = Rect(layer, source.x1, y1, source.width(), y2 - y1)
+        rect.net = getattr(source, "net", "")
+        return rect
+
+    def _terminal_net(self, inst, terminal):
+        graph = getattr(self.layout, "nodeGraph", None)
+        if graph is None:
+            return None
+        for net, node in graph.items():
+            for port in getattr(node, "ports", []):
+                if getattr(port, "parent", None) is not inst:
+                    continue
+                if getattr(port, "childName", "") == terminal:
+                    return net
+        return None
+
+    def _direct_tie_rect(self, layer, first, second, routeType=""):
+        if first is None or second is None:
+            return None
+        y1 = max(first.y1, second.y1)
+        y2 = min(first.y2, second.y2)
+        if y2 > y1 and routeType in ("", "-", "-|--", "--|-"):
+            x1 = min(first.x1, second.x1)
+            x2 = max(first.x2, second.x2)
+            return Rect(layer, x1, y1, x2 - x1, y2 - y1)
+        x1 = max(first.x1, second.x1)
+        x2 = min(first.x2, second.x2)
+        if x2 > x1 and routeType in ("", "||", "-|--", "--|-"):
+            y1 = min(first.y1, second.y1)
+            y2 = max(first.y2, second.y2)
+            return Rect(layer, x1, y1, x2 - x1, y2 - y1)
+        return None
+
+    def _add_direct_route_rect(self, rect, is_diode=False):
+        self.direct_routes.append(rect)
+        if is_diode:
+            self.diode_routes.append(rect)
+        self.add(rect)
+        self.layout.add(rect)
+        self.updateBoundingRect()
+        return rect
+
+    def _add_direct_route_between(self, layer, net, start_rect, stop_rect, routeType="", is_diode=False, route_desc=""):
+        route_rect = self._direct_tie_rect(layer, start_rect, stop_rect, routeType=routeType)
+        if route_rect is None:
+            return None
+        route_rect.net = net
+        if route_desc:
+            route_rect.route_owner_info = {
+                "name": net,
+                "net": net,
+                "layer": layer,
+                "route": route_desc,
+                "options": "",
+                "debug_api": "routeDiodeConnected" if is_diode else "directRouteRect",
+                "debug_internal": False,
+            }
+        return self._add_direct_route_rect(route_rect, is_diode=is_diode)
+
+    def _edge_port_rect(self, layer, route_rect, edge, port_height):
+        if route_rect is None:
+            return None
+        height = min(port_height, route_rect.height())
+        width = route_rect.width()
+        if edge == "top":
+            return Rect(layer, route_rect.x1, route_rect.y2 - height, width, height)
+        if edge == "bottom":
+            return Rect(layer, route_rect.x1, route_rect.y1, width, height)
+        if edge == "left":
+            return Rect(layer, route_rect.x1, route_rect.y1, width, height)
+        if edge == "right":
+            return Rect(layer, route_rect.x2 - width, route_rect.y1, width, height)
+        if edge in ("middle", "center"):
+            y = int(route_rect.centerY() - height / 2)
+            return Rect(layer, route_rect.x1, y, width, height)
+        raise ValueError(f"Unsupported parallel port edge '{edge}'")
+
+    def routeParallel(self, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True):
+        """Join repeated device terminals inside the stack and expose one group port per net.
+
+        The method prefers existing terminal access on ``layer``. For a vertical
+        transistor stack that normally means extending the device M2 access into a
+        single trunk and placing one access rectangle on a group edge.
+        """
+        for group in self._parallel_instance_groups(excludeInstances=excludeInstances):
+            nets = self._ports_by_net(group.instances, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
+            required_rects = minRects if minRects is not None else len(group.instances)
+            required_rects = max(2, required_rects)
+            for net, (terminal_name, rects) in nets.items():
+                if len(rects) < required_rects:
+                    continue
+                route_rect = self._vertical_parallel_rect(layer, rects)
+                if route_rect is None:
+                    continue
+                route_rect.net = net
+                group.addRouteRect(route_rect)
+
+                port_edge = edges.get(net, edge) if edges else edge
+                port_rect = self._edge_port_rect(layer, route_rect, port_edge, rects[0].height())
+                if port_rect is None:
+                    continue
+                port_rect.net = net
+                group.addGroupPort(net, port_rect, port_edge)
+
+            if group.route_rects:
+                self.parallel_groups.append(group)
+                self.add(group)
+        self.updateBoundingRect()
+        return self
+
+    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True):
+        """Route common mirror terminals inside the stack.
+
+        Current mirror stacks normally share gate and source nets while each
+        drain remains distinct. This helper routes only common terminals from
+        ``terminals`` across the whole stack and exposes one nested group port
+        per routed net.
+        """
+        instances = self._route_instances_excluding(excludeInstances=excludeInstances)
+        if len(instances) < 2:
+            return self
+        group = ParallelGroup(self.layout, f"{self.name}_mirror", sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", ""))))
+        nets = self._ports_by_net(group.instances, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
+        required_rects = minRects if minRects is not None else 2
+        required_rects = max(2, required_rects)
+        for net, (terminal_name, rects) in nets.items():
+            if len(rects) < required_rects:
+                continue
+            route_rect = self._vertical_parallel_rect(layer, rects)
+            if route_rect is None:
+                continue
+            route_rect.net = net
+            group.addRouteRect(route_rect)
+
+            port_edge = edges.get(net, edge) if edges else ("middle" if terminal_name == "S" else edge)
+            port_rect = self._edge_port_rect(layer, route_rect, port_edge, rects[0].height())
+            if port_rect is None:
+                continue
+            port_rect.net = net
+            group.addGroupPort(net, port_rect, port_edge)
+
+        if group.route_rects:
+            self.parallel_groups.append(group)
+            self.add(group)
+        self.updateBoundingRect()
+        return self
+
+    def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances=""):
+        """Tie diode-connected transistor drain and gate on the lowest local layer.
+
+        A transistor is treated as diode-connected when its drain and gate
+        terminals are on the same schematic net. Bulk is ignored.
+        """
+        for inst in self._route_instances():
+            instance_name = getattr(inst, "instanceName", "")
+            if excludeInstances and (
+                re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(inst, "name", ""))
+            ):
+                continue
+
+            drain_net = self._terminal_net(inst, drain)
+            gate_net = self._terminal_net(inst, gate)
+            if not drain_net or drain_net != gate_net:
+                continue
+
+            drain_access = inst.getTerminalAccess(drain, target_layer=layer)
+            gate_access = inst.getTerminalAccess(gate, target_layer=layer)
+            drain_rect = self._choose_access_rect(drain_access, axis="x")
+            gate_rect = self._choose_access_rect(gate_access, reference=drain_rect, axis="y")
+            if drain_rect is None or gate_rect is None:
+                continue
+            if getattr(drain_rect, "layer", "") != layer or getattr(gate_rect, "layer", "") != layer:
+                continue
+
+            route_desc = f"{instance_name}:{drain}-{instance_name}:{gate}"
+            self._add_direct_route_between(layer, drain_net, drain_rect, gate_rect, routeType="-", is_diode=True, route_desc=route_desc)
+        self.updateBoundingRect()
+        return self
 
     def translate(self, dx, dy):
         for obj in self._members():
@@ -400,6 +733,52 @@ class CellGroup(Cell):
         if fillGroup is not None:
             instances.extend(self.layout.getSortedInstancesByGroupName(fillGroup))
         return self.addStack(name or groupName, instances, preserveOrder=True)
+
+    def addParallelStack(self, name, instances, preserveOrder=False):
+        return self.addStack(name, instances, preserveOrder=preserveOrder)
+
+    def addParallelStackByGroup(self, groupName, name=None, fillGroup=None):
+        return self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+
+    def addTransistorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
+        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+        stack.stack().addTaps()
+        if routeDiodes:
+            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
+        stack.routeParallel(
+            layer=layer,
+            terminals=terminals,
+            edge=edge,
+            edges=edges,
+            excludeInstances=excludeInstances,
+            excludeNets=excludeNets,
+            minRects=minRects,
+            sameTerminal=sameTerminal,
+        )
+        return stack
+
+    def transistorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
+        return self.addTransistorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
+
+    def addCurrentMirrorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
+        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+        stack.stack().addTaps()
+        if routeDiodes:
+            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
+        stack.routeMirror(
+            layer=layer,
+            terminals=terminals,
+            edge=edge,
+            edges=edges,
+            excludeInstances=excludeInstances,
+            excludeNets=excludeNets,
+            minRects=minRects,
+            sameTerminal=sameTerminal,
+        )
+        return stack
+
+    def currentMirrorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
+        return self.addCurrentMirrorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
 
     def calcBoundingRect(self):
         if not self.stacks:

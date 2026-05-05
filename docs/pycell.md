@@ -175,6 +175,99 @@ Return the single instance with the given exact instance name.
 inst = layout.getInstanceFromInstanceName("xbias<0>")
 ```
 
+#### `CellGroup.transistorStack(groupName, name=None, fillGroup=None, **route_kwargs) → StackGroup`
+
+Create a transistor stack from a schematic-derived group name. This is the
+default convenience path for transistor stacks: it creates the stack, places the
+instances vertically, adds taps, connects diode-connected drain/gate terminals
+on M1/locali, and routes nested parallel bus groups.
+
+```python
+nmos = layout.makeCellGroup("nmos")
+n_cap = nmos.transistorStack("xn_cap")
+```
+
+`route_kwargs` are forwarded to the transistor stack helper. By default,
+parallel trunks use `layer="M2"`, while diode-connected drain/gate ties use
+`diodeLayer="M1"`. Set `routeDiodes=False` to disable automatic diode ties.
+
+#### `CellGroup.currentMirrorStack(groupName, name=None, fillGroup=None, **route_kwargs) → StackGroup`
+
+Create a transistor stack for current mirror devices. The helper places the
+stack, adds taps, connects diode-connected drain/gate terminals on M1/locali,
+and routes common gate/source mirror nets across the whole stack. Drains are not
+aggregated.
+
+```python
+pmos = layout.makeCellGroup("pmos")
+p_mirr = pmos.currentMirrorStack("xp_mirr")
+```
+
+The aggregated mirror nets are exposed as nested group ports. Gate ports use the
+default group edge, while source ports are placed in the middle of the vertical
+source trunk.
+
+#### `CellGroup.addParallelStackByGroup(groupName, name=None, fillGroup=None) → StackGroup`
+
+Create a stack from a schematic-derived group name, intended for stacks that may
+contain bus-expanded parallel devices. Use `routeParallel()` to create nested
+parallel groups for names such as `xn_cap1<0>`, `xn_cap1<1>`, and `xn_cap1<2>`.
+
+```python
+nmos = layout.makeCellGroup("nmos")
+n_cap = (
+    nmos.addParallelStackByGroup("xn_cap", name="n_cap")
+    .stack()
+    .addTaps()
+    .routeParallel()
+)
+```
+
+#### `StackGroup.routeParallel(layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True) → StackGroup`
+
+Route bus-expanded parallel devices inside a stack. The method groups instances
+by the base name before the bus suffix, discovers common terminal nets from the
+schematic net graph, and creates one nested `ParallelGroup` per routed bus group.
+
+The generated metal is a direct vertical rectangle on `layer`, with the same
+width as the terminal access rectangle. The route and group-edge access are part
+of the stack, so later stack/group moves include the parallel routing geometry.
+
+For vertical transistor stacks in Sky130, the default `layer="M2"` extends the
+existing M2 terminal access vertically.
+
+```python
+stack.routeParallel(
+    layer="M2",
+    edge="top",
+    edges={"VSS": "bottom"},
+)
+```
+
+`edges` may override the default edge per net. By default, transistor `D`, `G`,
+and `S` terminals are considered; bulk is ignored. Power and ground nets are
+included because repeated drain/source connections are still real parallel
+routes. A net must have matching access on the same terminal name for every
+instance in the bus group. Set `minRects` to a lower value when a partial bus
+group should be routed.
+
+#### `StackGroup.routeDiodeConnected(layer="M1", drain="D", gate="G", excludeInstances="") → StackGroup`
+
+Connect diode-connected transistors inside a stack by tying drain and gate on
+the lowest local layer. The helper detects devices where `D` and `G` are on the
+same schematic net, finds terminal access on `layer`, and adds a direct
+stack-owned rectangle between overlapping access geometry.
+
+For Sky130, `layer="M1"` means locali. This helper is intended for local device
+ties only; normal signal routing should stay on the preferred routing layers.
+
+#### `StackGroup.routeMirror(layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True) → StackGroup`
+
+Route common current mirror terminals across the whole stack. By default it only
+considers gate and source terminals, creates one vertical trunk per shared net,
+and exposes one nested group port per routed net. Source-terminal ports default
+to the middle of the trunk; use `edges={net: edge}` to override a specific port.
+
 #### `addPhysicalInstance(cellName, instanceName, x, y) → Instance`
 
 Place a cell by name at an explicit coordinate without a netlist entry.

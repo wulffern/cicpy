@@ -59,6 +59,8 @@ class LayoutCell(Cell):
         self.nodeGraph = dict()
         self.nodeGraphList = list()
         self.um = 10000
+        self.cellgroups = []
+        self.guiHierarchy = []
         self.log = logging.getLogger("LayoutCell")
         self.dummyCounter = 0
         self.routeKeepouts = defaultdict(list)
@@ -113,7 +115,9 @@ class LayoutCell(Cell):
         return i
 
     def makeCellGroup(self, name: str):
-        return CellGroup(self, name)
+        group = CellGroup(self, name)
+        self.cellgroups.append(group)
+        return group
 
     def addToNodeGraph(self,inst):
 
@@ -140,6 +144,14 @@ class LayoutCell(Cell):
         o["useHalfHeight"] = self.useHalfHeight
         o["alternateGroup"] = self.alternateGroup
         o["noPowerRoute"] = self.noPowerRoute
+        #if self.cellgroups:
+        #    o["guiHierarchy"] = [
+        #        g.toGuiHierarchy()
+        #        for g in self.cellgroups
+        #        if g is not None and g.stacks
+        #    ]
+        #elif self.guiHierarchy:
+        #    o["guiHierarchy"] = self.guiHierarchy
         return o
 
     def getInstancesByName(self,regex):
@@ -1287,6 +1299,7 @@ class LayoutCell(Cell):
             self.alternateGroup = o["alternateGroup"]
         if("noPowerRoute" in o):
             self.noPowerRoute = o["noPowerRoute"]
+        self.guiHierarchy = o.get("guiHierarchy", [])
 
     def route(self):
         """Route all routes in this layout cell"""

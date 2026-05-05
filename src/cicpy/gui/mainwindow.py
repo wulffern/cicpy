@@ -705,39 +705,39 @@ class MainWindow(QMainWindow):
             if net_names:
                 self.schem_scene.highlight_net(net_names[0])
             return
-        if t == "unmatched":
+        if t in ("unmatched", "split"):
             net = payload.get("net")
-            anchors = result.get("unmatched", {}).get(net, [])
-            segments = self._segments_chain(anchors)
-            if segments:
-                self.scene.set_flight_lines(segments, color="#FFD000")
-            elif anchors:
-                # Single anchor — mark its bbox so the user can see where it is.
-                self.scene.set_short_marker(anchors[0], color="#FFD000")
+            color = "#FFD000" if t == "unmatched" else "#FFA050"
+            # Prefer transistor instance-port rects as flight-line anchors —
+            # those are the points the user actually wants to see joined.
+            ports = result.get("net_anchor_rects", {}).get(net, [])
+            if ports:
+                segments = self._segments_chain(ports)
+                if segments:
+                    self.scene.set_flight_lines(segments, color=color)
+                else:
+                    # Single port — mark it so the user can locate the net.
+                    self.scene.set_short_marker(ports[0], color=color)
             else:
-                # No physical evidence of the net at all — clear any flight
-                # lines and tell the user explicitly.
-                self.scene.clear_flight_lines()
-                self.statusBar().showMessage(
-                    f"net '{net}': no anchors and no rects found in layout — "
-                    f"likely missing route or unrouted net",
-                    6000,
-                )
-            self.schem_scene.highlight_net(net)
-            self._fit_to_flight_or_marker()
-            return
-        if t == "split":
-            net = payload.get("net")
-            comp_ids = payload.get("components", [])
-            cb = result.get("components_bbox", {})
-            anchors = [cb[c] for c in comp_ids if c in cb]
-            segments = self._segments_chain(anchors)
-            if segments:
-                self.scene.set_flight_lines(segments, color="#FFA050")
-            elif anchors:
-                self.scene.set_short_marker(anchors[0], color="#FFA050")
-            else:
-                self.scene.clear_flight_lines()
+                # Fall back to component bboxes for splits with no anchor info,
+                # or unmatched-anchor list for the legacy unmatched type.
+                if t == "split":
+                    cb = result.get("components_bbox", {})
+                    fallback = [cb[c] for c in payload.get("components", []) if c in cb]
+                else:
+                    fallback = result.get("unmatched", {}).get(net, [])
+                segments = self._segments_chain(fallback)
+                if segments:
+                    self.scene.set_flight_lines(segments, color=color)
+                elif fallback:
+                    self.scene.set_short_marker(fallback[0], color=color)
+                else:
+                    self.scene.clear_flight_lines()
+                    self.statusBar().showMessage(
+                        f"net '{net}': no anchors and no rects in layout — "
+                        f"likely missing route or unrouted net",
+                        6000,
+                    )
             self.schem_scene.highlight_net(net)
             self._fit_to_flight_or_marker()
             return

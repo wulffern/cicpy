@@ -34,6 +34,7 @@ from .text import Text
 from .graph import Graph
 from .cellgroup import CellGroup
 from .routering import RouteRing
+from .routegroup import RouteGroup
 from .guard import Guard
 from .cut import Cut
 import cicspi as spi
@@ -161,6 +162,38 @@ class LayoutCell(Cell):
         data = sorted(data, key=lambda item: item.instanceName)
 
         return data
+
+    def getSortedInstancesByGroupName(self, groupName, excludeInstances=""):
+        data = list()
+        for c in self.children:
+            if not c.isInstance():
+                continue
+            instance_name = getattr(c, "instanceName", "")
+            if excludeInstances != "" and (
+                re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(c, "name", ""))
+            ):
+                continue
+            if self._instanceGroupName(c) == groupName:
+                data.append(c)
+        if(len(data) == 0):
+            raise ValueError(f"Missing group {groupName}")
+
+        data = sorted(data, key=lambda item: self._naturalInstanceNameKey(item.instanceName))
+
+        return data
+
+    def _instanceGroupName(self, inst):
+        group = getattr(inst, "groupName", "")
+        if group:
+            return group
+        name = getattr(inst, "instanceName", "")
+        m = re.search(r"^(x\D+)", name, re.I)
+        if m is not None:
+            return m.groups(0)[0]
+        return ""
+
+    def _naturalInstanceNameKey(self, name):
+        return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)]
 
     def getOccupiedRectangles(self, layer: str, excludeInstances: str = "", ignoreNet: str = "", includeBoundaries: bool = False):
         rects = []
@@ -506,9 +539,9 @@ class LayoutCell(Cell):
                 continue
             rects = []
             if target_layer:
-                rects = graph.getRectangles("", "", target_layer)
+                rects = graph.getRectangles("^xfill_", "", target_layer)
             if len(rects) == 0:
-                rects = graph.getRectangles("", "", "")
+                rects = graph.getRectangles("^xfill_", "", "")
             for rect in rects:
                 if rect is None:
                     continue
@@ -660,6 +693,13 @@ class LayoutCell(Cell):
             for cid, rs in components.items()
         }
 
+        # Per-net anchor rects (instance-port locations). Used by the GUI to
+        # draw flight lines between actual transistor ports instead of
+        # component bbox centres.
+        net_anchor_rects = defaultdict(list)
+        for net_name, rect in anchors:
+            net_anchor_rects[net_name].append(rect)
+
         return {
             "shorts": shorts,
             "opens": opens,
@@ -667,8 +707,7 @@ class LayoutCell(Cell):
             "net_components": net_components,
             "unmatched": unmatched,
             "components_bbox": components_bbox,
-            "component_count": len(components),
-            "shape_count": len(shapes),
+            "net_anchor_rects": net_anchor_rects,
             "component_count": len(components),
             "shape_count": len(shapes),
         }
@@ -1065,7 +1104,7 @@ class LayoutCell(Cell):
                 self.named_rects[name] = p
             self.add(p)
 
-    def addPowerConnection(self, name:str, includeInstances:str, location:str):
+    def addPowerConnection(self, name:str, includeInstances:str, location:str, excludeInstances:str=""):
         # Check if node exists in nodeGraph
         if name not in self.nodeGraph:
             return
@@ -1080,9 +1119,9 @@ class LayoutCell(Cell):
         graph = self.nodeGraph.get(name)
         rects = []
         if graph is not None:
-            rects = graph.getRectangles("", includeInstances, "M1")
+            rects = graph.getRectangles(excludeInstances, includeInstances, "M1")
             if len(rects) == 0:
-                rects = graph.getRectangles("", includeInstances, "")
+                rects = graph.getRectangles(excludeInstances, includeInstances, "")
         routering = self.named_rects[router_key]
         rrect = routering.get(location)
         for r in rects:
@@ -1125,8 +1164,8 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
-    def addRouteConnection(self, path:str, includeInstances:str, layer:str, location:str, options:str, routeTypeOverride:str=""):
-        self.log.info(f"addRouteConnection(path={path}, includeInstances={includeInstances}, layer={layer}, location={location}, options={options}, routeTypeOverride={routeTypeOverride})")
+    def addRouteConnection(self, path:str, includeInstances:str, layer:str, location:str, options:str, routeTypeOverride:str="", excludeInstances:str=""):
+        self.log.info(f"addRouteConnection(path={path}, includeInstances={includeInstances}, layer={layer}, location={location}, options={options}, routeTypeOverride={routeTypeOverride}, excludeInstances={excludeInstances})")
         routeType = "-|--"
         if routeTypeOverride == "":
             if location == "top":
@@ -1151,7 +1190,7 @@ class LayoutCell(Cell):
             if rail_key not in self.named_rects:
                 continue
             g = self.nodeGraph[node]
-            rects = g.getRectangles("", includeInstances, layer)
+            rects = g.getRectangles(excludeInstances, includeInstances, layer)
             rr = self.named_rects[rail_key]
             if rr:
                 routering = rr.get(location)
@@ -1167,6 +1206,7 @@ class LayoutCell(Cell):
                         "location": location,
                         "options": options,
                         "routeTypeOverride": routeTypeOverride,
+                        "excludeInstances": excludeInstances,
                     })
                     self.routes.append(ro)
                     rr.add(ro)
@@ -1218,6 +1258,14 @@ class LayoutCell(Cell):
             self.named_rects[f"rail_l_{name}"] = rr.getPointer("left")
             self.named_rects[f"rail_r_{name}"] = rr.getPointer("right")
             self.add(rr)
+
+    def addRouteGroup(self, net: str) -> "RouteGroup":
+        """Return a chainable ``RouteGroup`` builder for ``net``.
+
+        See ``cicpy.core.routegroup`` for usage. The builder composes the
+        existing routing primitives — calling this and not invoking any
+        builder methods is a no-op."""
+        return RouteGroup(self, net)
 
     def getInstanceFromInstanceName(self, instanceName:str):
         for r in self.children:

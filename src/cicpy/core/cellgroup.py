@@ -19,6 +19,7 @@ class StackGroup(Cell):
         self.instances = []
         self.tap_instances = []
         self.dummy_routes = []
+        self.preserve_order = False
 
     def _members(self):
         members = []
@@ -103,6 +104,9 @@ class StackGroup(Cell):
         return self
 
     def sort(self):
+        if self.preserve_order:
+            self.updateBoundingRect()
+            return self
         self.instances = sorted(self.instances, key=lambda inst: (inst.y1, inst.x1, inst.instanceName))
         self.updateBoundingRect()
         return self
@@ -382,13 +386,20 @@ class CellGroup(Cell):
             rects.extend(stack.representativeAccessRects(net, accessLayer, anymetal=anymetal))
         return self.layout.collapseRepresentativeRects(net, rects)
 
-    def addStack(self, name, instances):
+    def addStack(self, name, instances, preserveOrder=False):
         stack = StackGroup(self.layout, name)
+        stack.preserve_order = preserveOrder
         stack.addInstances(instances)
         self.stacks.append(stack)
         self.add(stack)
         self.updateBoundingRect()
         return stack
+
+    def addStackByGroup(self, groupName, name=None, fillGroup=None):
+        instances = self.layout.getSortedInstancesByGroupName(groupName)
+        if fillGroup is not None:
+            instances.extend(self.layout.getSortedInstancesByGroupName(fillGroup))
+        return self.addStack(name or groupName, instances, preserveOrder=True)
 
     def calcBoundingRect(self):
         if not self.stacks:

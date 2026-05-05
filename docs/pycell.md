@@ -145,6 +145,20 @@ Return instances whose instance names match `regex`, sorted naturally by name.
 insts = layout.getSortedInstancesByInstanceName("xbias")
 ```
 
+#### `getSortedInstancesByGroupName(groupName, excludeInstances="") → list`
+
+Return instances whose schematic-derived `groupName` exactly matches `groupName`,
+sorted in natural instance-name order. The group name is normally the non-numeric
+prefix of the schematic instance name, so `xn_bias1`, `xn_bias2<0>`, and
+`xn_bias10` all belong to `xn_bias`.
+
+Use this when stack membership should be controlled by schematic naming instead
+of by a broad regular expression.
+
+```python
+insts = layout.getSortedInstancesByGroupName("xn_bias")
+```
+
 #### `getInstancesByName(regex) → list`
 
 Return instances whose cell names match `regex`.
@@ -273,22 +287,37 @@ Add a power ring (wider than a routing ring; sized relative to via stack height)
 - `layout.named_rects["power_<name>"]`
 - `layout.named_rects["RAIL_TOP_<name>"]`, `RAIL_BOTTOM_`, `RAIL_LEFT_`, `RAIL_RIGHT_`
 
-#### `addPowerConnection(name, includeInstances, location)`
+#### `addPowerConnection(name, includeInstances, location, excludeInstances="")`
 
 Connect all instances of net `name` to the power ring for `name` at the given side (`"top"`, `"bottom"`, `"left"`, `"right"`).
 
 ```python
 layout.addPowerConnection("VDD", "", "top")
 layout.addPowerConnection("VSS", "^xbias", "bottom")   # only xbias instances
+layout.addPowerConnection("VDD", "", "top", "^xfill_")  # skip explicit fillers
 ```
 
-#### `addRouteConnection(path, includeInstances, layer, location, options, routeTypeOverride="")`
+#### `addRouteConnection(path, includeInstances, layer, location, options, routeTypeOverride="", excludeInstances="")`
 
 Connect instances of nets matching `path` to their routing rail at the given side.
 
 ```python
 layout.addRouteConnection("^VBP2$", "", "M4", "top", "")
+layout.addRouteConnection("^VBP2$", "", "M4", "top", "", excludeInstances="^xfill_")
 ```
+
+#### `addRouteGroup(net) → RouteGroup`
+
+Return a chainable route builder for one logical net. A route group emits normal
+routes internally, but lets a pycell describe a trunk-and-exit route as one
+logical operation.
+
+```python
+layout.addRouteGroup("VBP2").trunk("M3", side="top", includeInstances="^xp").exit("right")
+```
+
+`trunk(...)` creates a horizontal trunk plus local spurs to matched anchors.
+`exit(...)` exposes the same net on a cell edge using `addPortOnEdge(...)`.
 
 ---
 
@@ -352,6 +381,18 @@ Add a named stack of instances to the group. Returns the `Stack`.
 
 ```python
 stack = nmos.addStack("bias_ref", layout.getSortedInstancesByInstanceName("xbias"))
+```
+
+#### `addStackByGroup(groupName, name=None, fillGroup=None) → Stack`
+
+Create a stack from all instances whose `groupName` exactly matches `groupName`.
+Instances are placed in natural name order. If `fillGroup` is provided, those
+instances are appended after the real devices, so explicit schematic fillers stay
+at the top of the stack.
+
+```python
+n_vbn = nmos.addStackByGroup("xn_vbn")
+n_vp = nmos.addStackByGroup("xn_vp", fillGroup="xfill_xn_vp")
 ```
 
 #### `addTaps()` *(on Stack)*

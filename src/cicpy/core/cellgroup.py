@@ -882,9 +882,20 @@ class StackGroup(CellGroup):
         return self
 
     def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances=""):
-        """Tie diode-connected transistor drain and gate on the lowest local layer."""
+        """Tie diode-connected transistor drain and gate via addDirectedRoute.
+
+        For each member instance whose drain and gate share a net, emits
+        ``addDirectedRoute(layer, net, f"{name}:{drain}-{name}:{gate}")``.
+        The route engine (via the path-aware ``findAllRectangles``)
+        resolves the pin rects on ``layer`` and constructs the tying
+        route. Routes are also tracked on the stack as
+        ``self.diode_routes`` and parented under the stack so JSON /
+        bounding-box walks see them.
+        """
         for inst in self._route_instances():
             instance_name = getattr(inst, "instanceName", "")
+            if not instance_name:
+                continue
             if excludeInstances and (
                 re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(inst, "name", ""))
             ):
@@ -895,17 +906,13 @@ class StackGroup(CellGroup):
             if not drain_net or drain_net != gate_net:
                 continue
 
-            drain_access = inst.getTerminalAccess(drain, target_layer=layer)
-            gate_access = inst.getTerminalAccess(gate, target_layer=layer)
-            drain_rect = self._choose_access_rect(drain_access, axis="x")
-            gate_rect = self._choose_access_rect(gate_access, reference=drain_rect, axis="y")
-            if drain_rect is None or gate_rect is None:
+            inst_re = re.escape(instance_name)
+            route_desc = f"{inst_re}:{drain}-{inst_re}:{gate}"
+            r = self.layout.addDirectedRoute(layer, drain_net, route_desc)
+            if r is None:
                 continue
-            if getattr(drain_rect, "layer", "") != layer or getattr(gate_rect, "layer", "") != layer:
-                continue
-
-            route_desc = f"{instance_name}:{drain}-{instance_name}:{gate}"
-            self._add_direct_route_between(layer, drain_net, drain_rect, gate_rect, routeType="-", is_diode=True, route_desc=route_desc)
+            self.direct_routes.append(r)
+            self.diode_routes.append(r)
         self.updateBoundingRect()
         return self
 

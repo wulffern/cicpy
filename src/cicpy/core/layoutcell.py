@@ -213,6 +213,14 @@ class LayoutCell(Cell):
                     continue
             yield child
 
+    def _searchChildren(self):
+        """Flatten cellgroup-owned instances into the search space so
+        path-style ``findAllRectangles`` lookups (e.g. ``"xn_diode1:D"``)
+        resolve under single-ownership where instances live in
+        ``stack.children`` rather than directly in ``layout.children``.
+        """
+        return list(self.iterPlacementChildren())
+
     def addToNodeGraph(self,inst):
 
         if (inst is None): return
@@ -1215,12 +1223,16 @@ class LayoutCell(Cell):
         return rr
 
     def addDirectedRoute(self, layer:str, net:str, route:str, options:str=""):
+        """Resolve a `startPath{routeType}stopPath` route string and add the
+        resulting Route to this layout. Returns the Route on success,
+        ``None`` on parse / lookup / construction failure.
+        """
         self.log.info(f"addDirectedRoute(layer={layer}, net={net}, route={route}, options={options})")
         # route is of form: startRegex + routeType symbols + stopRegex
         m = re.match(r"^([^-\|<>]*)([-\|<>]+)([^-\|<>]*)$", route)
         if not m:
             self.log.error(f"Could not parse route command '{route}'")
-            return
+            return None
         startRegex = m.group(1)
         routeType = m.group(2)
         stopRegex = m.group(3)
@@ -1237,14 +1249,13 @@ class LayoutCell(Cell):
                     "options": options,
                 })
                 self.add(r)
+                return r
             except Exception as e:
-                # Fallback: connect by a straight rect between bbox centers
-                self.log.error(f"addDirectedRoute: Failed to create route for net '{net}': {e}. Using fallback.")
-                sb = self.calcBoundingRect()
-                rb = self.calcBoundingRect()
-                (sb, rb)  # no-op to appease linters
+                self.log.error(f"addDirectedRoute: Failed to create route for net '{net}': {e}.")
+                return None
         else:
             self.log.error(f"Route did not work [ {layer} {net} {route} {options} ] stop={len(stop)} start={len(start)}")
+            return None
 
     def addVerticalRect(self, layer:str, path:str, cuts:int=0):
         self.log.info(f"addVerticalRect(layer={layer}, path={path}, cuts={cuts})")

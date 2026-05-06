@@ -508,6 +508,13 @@ class Cell(Rect):
         self._findRectangles(rects, regex, layer)
         return rects
 
+    def _searchChildren(self):
+        """Children that path-style searches (``findAllRectangles``) should
+        traverse. Defaults to ``self.children``; ``LayoutCell`` overrides to
+        flatten group-owned instances into the search space.
+        """
+        return list(self.children)
+
     def _findRectanglesByRegex(self, rects, regex, layer):
         for s in (s.strip() for s in (regex or "").split(",")):
             if not s:
@@ -518,7 +525,7 @@ class Cell(Rect):
                     inst_re = re.compile(inst_part)
                 except re.error:
                     continue
-                for child in self.children:
+                for child in self._searchChildren():
                     if child is None:
                         continue
                     if not (hasattr(child, "isInstance") and child.isInstance()):
@@ -546,7 +553,7 @@ class Cell(Rect):
         """
         if not name or "," in name or ":" in name:
             return
-        for child in self.children:
+        for child in self._searchChildren():
             if child is None:
                 continue
             if not (hasattr(child, "isInstance") and child.isInstance()):

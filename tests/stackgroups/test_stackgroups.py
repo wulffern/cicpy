@@ -202,6 +202,12 @@ assert "VT" in transistor_stack.parallel_groups[0].group_ports
 diode_layout = LayoutCell()
 diode_inst = add_instance(diode_layout, "xn_diode1")
 diode_inst.getTerminalAccess = lambda terminal, target_layer="M1": access(target_layer, terminal, 0)
+# routeDiodeConnected now resolves pin geometry via findAllRectangles, which
+# walks the instance's port children. Add real Port objects on M1 so the
+# instname:terminal regex resolves.
+from cicpy.core.port import Port
+diode_inst.add(Port("D", routeLayer="M1", rect=Rect("M1", 20, 0, 10, 10)))
+diode_inst.add(Port("G", routeLayer="M1", rect=Rect("M1", 40, 0, 10, 10)))
 diode_layout.nodeGraph = {"VDIO": type("Node", (), {"ports": []})()}
 diode_layout.nodeGraph["VDIO"].ports.append(port_stub(diode_inst, "D"))
 diode_layout.nodeGraph["VDIO"].ports.append(port_stub(diode_inst, "G"))
@@ -209,10 +215,14 @@ diode_layout.nodeGraph["VDIO"].ports.append(port_stub(diode_inst, "G"))
 diode_group = diode_layout.makeCellGroup("nmos")
 diode_stack = diode_group.transistorStack("xn_diode")
 assert len(diode_stack.diode_routes) == 1
-assert diode_stack.diode_routes[0].layer == "M1"
-assert diode_stack.diode_routes[0].net == "VDIO"
-assert diode_stack.diode_routes[0] in diode_stack.children
-assert diode_stack.diode_routes[0] not in diode_layout.children
+diode_route = diode_stack.diode_routes[0]
+assert diode_route.routeLayer == "M1"
+assert diode_route.net == "VDIO"
+# Routes live in the layout's children; the stack tracks them through the
+# diode_routes / direct_routes side-lists so JSON / connectivity walks see
+# them without re-parenting the Route under the stack.
+assert diode_route in diode_layout.children
+assert diode_route in diode_layout.routes
 
 mirror_layout = LayoutCell()
 mirror_insts = []

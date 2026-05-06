@@ -124,13 +124,57 @@ extra routing/sizing on top.
   (`CellGroup` / `StackGroup` / `RouteBundle` bboxes and ports), and
   the layout scene can collapse rendering to CellGroups, Stacks,
   RouteBundles, or Full geometry.
+- **Latest (`e55cb7a` / `4f84b98`)** — Cellgroup single ownership.
+  `CellGroup` / `StackGroup` now form a real layout-only ownership tree
+  while `.cic` JSON keeps flat physical children plus `cellgroups`
+  metadata for GUI hierarchy.
 
 ## What's next
 
-Short polish tail before declaring the GUI feature-complete. Roughly in
-priority order:
+The next major architecture item is apparent layout hierarchy: keep the
+schematic flat and recognizable, while allowing the layout to be
+refactored into routing-oriented chunks. Polish items follow that.
 
-### 1. Port authoring dialog (carried over from `be2a743` TODO)
+### 1. Apparent layout hierarchy / group macro routing
+
+The schematic should remain a human-readable analog picture with diff
+pairs, mirrors, switches, startup devices, and bias branches visible in
+one context. The layout can still be refactored into small, well-defined
+chunks that are easier to route. Treat those chunks as **layout-only
+macros**: `CellGroup`, `StackGroup`, current mirror groups, diff-pair
+groups, and switch groups can own physical instances, route local
+internals, and expose intentional **boundary ports** to top-level
+routing.
+
+**Contract:** top-level routing should prefer exported group boundary
+ports. The group is responsible for its internal routing; parent routes
+should not usually rediscover every transistor terminal inside the
+group. Direct terminal discovery remains useful as an explicit escape
+hatch for debug or special routes.
+
+**Boundary ports:** auto-detect nets that cross the group boundary:
+at least one member instance terminal inside the group, and at least one
+terminal or top-level port outside the group. Internal-only nets stay
+inside the group. Boundary ports should prefer completed local
+`RouteBundle` access; if no routed bundle exists yet, fall back to a
+representative real instance terminal access.
+
+**Completion check:** after local group routing, run a group-scoped
+connectivity check for internal-only nets. For now this should warn
+only, not fail `sch2mag`, so placement/routing can still be iterated.
+
+**Implementation sketch:**
+1. Add a shared route-access helper on `LayoutCell` that can collect
+   group boundary ports or direct instance terminal access for a net.
+2. Teach `CellGroup` / `StackGroup` to export auto boundary ports from
+   their routed local geometry.
+3. Update `addConnectivityRoute`, `addOrthogonalConnectivityRoute`,
+   and `addRouteConnection` to use group ports by default and direct
+   instance terminals only when explicitly scoped.
+4. Add stackgroup tests for boundary-net export, hidden internal nets,
+   direct-terminal escape, and warning-only internal completion.
+
+### 2. Port authoring dialog (carried over from `be2a743` TODO)
 
 `apply()` already emits `addPortOnEdge` from a `ports: [...]` list, but
 the user has to hand-edit YAML to add one. Add a "Add port…" action in
@@ -138,14 +182,14 @@ the groups panel: dialog with layer (combo from tech), net (combo from
 the cell's nets), side (N/S/E/W), style, options. Writes a port entry
 to the active group's YAML.
 
-### 2. Tools menu: bake YAML → explicit Python (carried over)
+### 3. Tools menu: bake YAML → explicit Python (carried over)
 
 For users who want to graduate a pycell off `apply()`, add a Tools menu
 action that dumps the resolved group set as the equivalent
 `addStack` / `addPortOnEdge` / `addRouteConnection` Python calls into
 the pycell scaffold. One-shot generator, not a live binding.
 
-### 3. Phase 4-ext rename — remaining open issues
+### 4. Phase 4-ext rename — remaining open issues
 
 - **`T {label} ...` text references** — if a schematic has explicit
   text labels naming a renamed component (e.g. an annotation
@@ -157,7 +201,7 @@ the pycell scaffold. One-shot generator, not a live binding.
 
 `xfoo[3:0]` bus suffix preservation and `.sch.bak` undo are already in.
 
-### 4. Open vocabulary / schema items
+### 5. Open vocabulary / schema items
 
 - **Group `kind` vocabulary** — current freeform string. Lock down
   `mirr | diff | casc | stack | xcpl` and document `role` semantics
@@ -171,7 +215,7 @@ the pycell scaffold. One-shot generator, not a live binding.
   in `docs/groups.md` so users can hand-edit confidently. Include the
   full `placement` / `ports` / `routes` keys that `apply()` consumes.
 
-### 5. Single-ownership refactor for cellgroups
+### 6. Single-ownership refactor for cellgroups
 
 CellGroups are currently a *logical overlay*: they live in
 `layout.cellgroups` (separate from `layout.children`) and re-parent
@@ -202,6 +246,10 @@ out of their previous parent before owning them. `.cic` JSON stays flat
 for physical children while retaining `cellgroups` metadata for GUI
 hierarchy.
 
+This shipped refactor is the foundation for apparent layout hierarchy:
+groups now have real ownership, but they still need a boundary-port
+contract before they behave like routed layout macros.
+
 **Plan:**
 1. Done — add `LayoutCell.iterInstances()` helper that recurses
    through `children` and `cellgroups` once.
@@ -216,7 +264,7 @@ hierarchy.
 5. Done — run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag`
    end to end. LVS-clean LELOTEMP_CMP regen is the canary.
 
-### 6. Acceptance / smoke tests
+### 7. Acceptance / smoke tests
 
 Manual smoke runs only so far. Consider a tiny PNG snapshot test for
 the layout pane on `LELOTEMP_CMP` to catch regressions in `style.py` /

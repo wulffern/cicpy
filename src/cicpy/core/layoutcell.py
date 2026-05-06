@@ -117,7 +117,60 @@ class LayoutCell(Cell):
         from .cellgroup import CellGroup
         group = CellGroup(self, name)
         self.cellgroups.append(group)
+        self.add(group)
         return group
+
+    def detachPlacementChild(self, target, keepParent=None):
+        """Remove ``target`` from the placement tree before re-parenting it."""
+        if target is None:
+            return False
+
+        def remove_from(parent):
+            removed = False
+            children = getattr(parent, "children", [])
+            if parent is not keepParent and target in children:
+                children.remove(target)
+                removed = True
+            routes = getattr(parent, "routes", [])
+            if parent is not keepParent and target in routes:
+                routes.remove(target)
+            if removed:
+                try:
+                    parent.updateBoundingRect()
+                except Exception:
+                    pass
+                return True
+            for child in list(children):
+                if child is None or child is target:
+                    continue
+                if child.isInstance() or child.isCut():
+                    continue
+                if hasattr(child, "children") and remove_from(child):
+                    return True
+            return False
+
+        return remove_from(self)
+
+    def iterJsonChildren(self):
+        """Yield flat physical children for legacy .cic JSON readers."""
+        seen = set()
+        group_classes = {"CellGroup", "StackGroup", "RouteBundle"}
+
+        def visit(children):
+            for child in children:
+                if child is None:
+                    continue
+                class_name = child.__class__.__name__
+                if class_name in group_classes:
+                    yield from visit(getattr(child, "children", []))
+                    continue
+                oid = id(child)
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                yield child
+
+        yield from visit(getattr(self, "children", []))
 
     def iterPlacementChildren(self):
         """Yield placement tree children once, including logical cellgroups.
@@ -182,6 +235,7 @@ class LayoutCell(Cell):
 
     def toJson(self):
         o = super().toJson()
+        o["children"] = [child.toJson() for child in self.iterJsonChildren()]
         o["useHalfHeight"] = self.useHalfHeight
         o["alternateGroup"] = self.alternateGroup
         o["noPowerRoute"] = self.noPowerRoute

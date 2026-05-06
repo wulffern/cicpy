@@ -39,6 +39,7 @@ assert [i.instanceName for i in layout.getSortedInstancesByGroupName("xn_a", exc
 
 group = layout.makeCellGroup("nmos")
 stack = group.addStackByGroup("xn_a", fillGroup="xfill_xn_a")
+assert group in layout.children
 assert [i.instanceName for i in stack.instances] == [
     "xn_a1",
     "xn_a2<0>",
@@ -47,6 +48,7 @@ assert [i.instanceName for i in stack.instances] == [
     "xn_a10",
     "xfill_xn_a1<0>",
 ]
+assert all(i not in layout.children for i in stack.instances)
 stack.stack()
 assert [i.instanceName for i in sorted(stack.instances, key=lambda i: i.y1)] == [
     "xn_a1",
@@ -92,7 +94,7 @@ assert "VSER" not in parallel_bus.group_ports
 assert "VSS" in parallel_bus.group_ports
 assert len(parallel_bus.route_rects) == 2
 assert parallel_bus.route_rects[0] in parallel_bus.children
-assert parallel_bus.route_rects[0] in parallel_layout.children
+assert parallel_bus.route_rects[0] not in parallel_layout.children
 assert parallel_bus.route_rects[0].width() == 10
 assert parallel_bus.route_rects[0].height() == 210
 
@@ -123,7 +125,7 @@ assert len(diode_stack.diode_routes) == 1
 assert diode_stack.diode_routes[0].layer == "M1"
 assert diode_stack.diode_routes[0].net == "VDIO"
 assert diode_stack.diode_routes[0] in diode_stack.children
-assert diode_stack.diode_routes[0] in diode_layout.children
+assert diode_stack.diode_routes[0] not in diode_layout.children
 
 mirror_layout = LayoutCell()
 mirror_insts = []
@@ -156,6 +158,12 @@ source_route = [r for r in mirror_bus.route_rects if r.net == "VS"][0]
 source_port = mirror_bus.group_ports["VS"].get("M2")
 assert source_port.centerY() == source_route.centerY()
 hierarchy = mirror_layout.toJson()["cellgroups"]
+json_instance_names = [
+    child.get("instanceName", "")
+    for child in mirror_layout.toJson()["children"]
+    if child.get("class") == "Instance"
+]
+assert json_instance_names == ["xp_mirr1", "xp_mirr2", "xp_mirr3"]
 assert hierarchy[0]["class"] == "CellGroup"
 assert hierarchy[0]["name"] == "pmos"
 assert hierarchy[0]["bbox"]["x2"] > hierarchy[0]["bbox"]["x1"]

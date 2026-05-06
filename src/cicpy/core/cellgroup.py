@@ -40,8 +40,7 @@ class _PhysicalInst:
 class RouteBundle(Cell):
     """Locally-scoped routes + ports bundled inside a StackGroup.
 
-    Members are referenced by identity — they remain owned by the
-    parent layout's children list. The bundle owns route rects and
+    Members are referenced by identity. The bundle owns route rects and
     exposes ports via `addGroupPort`.
     """
 
@@ -76,7 +75,6 @@ class RouteBundle(Cell):
     def addRouteRect(self, rect):
         self.route_rects.append(rect)
         self.add(rect)
-        self.layout.add(rect)
         self.updateBoundingRect()
         return rect
 
@@ -409,9 +407,8 @@ class StackGroup(CellGroup):
     """Vertical column-major array of instances.
 
     Owns stacking, taps, dummy fill and the route bundles produced by
-    `routeParallel` / `routeMirror`. Member instances remain children of
-    the parent layout; `StackGroup` references them and re-parents
-    them into its own children list for tree-walks.
+    `routeParallel` / `routeMirror`. Member instances are moved under
+    the stack so placement tree walkers visit them once.
     """
 
     def __init__(self, layout, name):
@@ -633,7 +630,6 @@ class StackGroup(CellGroup):
         if is_diode:
             self.diode_routes.append(rect)
         self.add(rect)
-        self.layout.add(rect)
         self.updateBoundingRect()
         return rect
 
@@ -768,6 +764,8 @@ class StackGroup(CellGroup):
     def addInstance(self, inst):
         if inst not in self.instances:
             self.instances.append(inst)
+        if inst not in self.children:
+            self.layout.detachPlacementChild(inst, keepParent=self)
         self.add(inst)
         self.updateBoundingRect()
         return inst
@@ -918,7 +916,9 @@ class StackGroup(CellGroup):
                 "routeType": route_type,
                 "internal": True,
             })
-        self.layout.add(route)
+        self.add(route)
+        if route not in self.layout.routes:
+            self.layout.routes.append(route)
         self.dummy_routes.append(route)
         return route
 
@@ -965,9 +965,11 @@ class StackGroup(CellGroup):
         top = self.layout.addPhysicalInstance(top_cell, f"xstack_{name}_top", int(base.x1), int(self.instances[-1].y2))
         if bot is not None and bot not in self.tap_instances:
             self.tap_instances.append(bot)
+            self.layout.detachPlacementChild(bot, keepParent=self)
             self.add(bot)
         if top is not None and top not in self.tap_instances:
             self.tap_instances.append(top)
+            self.layout.detachPlacementChild(top, keepParent=self)
             self.add(top)
         self.updateBoundingRect()
         return self

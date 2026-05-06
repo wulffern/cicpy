@@ -194,24 +194,27 @@ recursive walk (or to a new `getInstances()` helper). Mechanical but
 broad — wants its own commit + full test sweep, not bundled into a
 GUI feature.
 
-**Status:** in progress. The traversal helper step is shipped:
-`LayoutCell.iterPlacementChildren()` / `iterInstances()` provide a
-recursive, de-duplicated walk across `children` and `cellgroups`, and
-the core instance lookup helpers now use that path.
+**Status:** shipped. `LayoutCell.iterPlacementChildren()` /
+`iterInstances()` provide a recursive, de-duplicated walk across
+`children` and `cellgroups`; `makeCellGroup()` now registers groups as
+layout children; and `StackGroup.addInstance()` moves stacked devices
+out of their previous parent before owning them. `.cic` JSON stays flat
+for physical children while retaining `cellgroups` metadata for GUI
+hierarchy.
 
 **Plan:**
 1. Done — add `LayoutCell.iterInstances()` helper that recurses
    through `children` and `cellgroups` once.
 2. Done — replace core flat instance lookup sites with the helper.
-3. Next — move ownership in `CellGroup.addStack` /
+3. Done — move ownership in `CellGroup.addStack` /
    `StackGroup.addInstance`: pop the instance from
    `layout.children` (and any other ancestor's `children`) before
    `stack.add(inst)`.
-4. Preserve flat physical JSON output while keeping `cellgroups`
+4. Done — preserve flat physical JSON output while keeping `cellgroups`
    metadata for GUI hierarchy; revisit full hierarchical JSON only
    after downstream readers are audited.
-5. Run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag` end
-   to end. LVS-clean LELOTEMP_CMP regen is the canary.
+5. Done — run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag`
+   end to end. LVS-clean LELOTEMP_CMP regen is the canary.
 
 ### 6. Acceptance / smoke tests
 

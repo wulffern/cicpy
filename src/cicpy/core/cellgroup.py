@@ -636,13 +636,10 @@ class StackGroup(CellGroup):
             terminal_name = getattr(port, "childName", "")
             if not _terminal_allowed(terminal_name, terminalFilter):
                 continue
-            access = inst.getTerminalAccess(terminal_name, target_layer=accessLayer)
-            if access is None or access.isEmpty():
-                continue
-            rect = access.primary(anymetal=anymetal)
-            if accessLayer and rect is not None and getattr(rect, "layer", "") != accessLayer:
-                rect = next((r for r in access.accessRects if getattr(r, "layer", "") == accessLayer), None)
+            rect = port.get(accessLayer) if hasattr(port, "get") else None
             if rect is None:
+                continue
+            if accessLayer and getattr(rect, "layer", "") != accessLayer:
                 continue
             rects.append(rect)
         rects = self.layout.collapseRepresentativeRects(net, rects)

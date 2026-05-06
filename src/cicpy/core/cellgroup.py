@@ -692,6 +692,12 @@ class StackGroup(CellGroup):
         return out
 
     def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True):
+        """Resolve nodeGraph ports for ``instances`` into a per-net rect list
+        on ``layer``. Pin geometry is read from ``port.get(layer)``; ports
+        whose ``routeLayer`` doesn't match ``layer`` are skipped — those
+        nets simply won't be tied at that layer (caller's responsibility to
+        choose a layer the device actually exposes).
+        """
         terminal_set = set(terminals or [])
         member_names = {getattr(i, "instanceName", "") for i in instances}
         grouped = {}
@@ -717,10 +723,7 @@ class StackGroup(CellGroup):
                 terminal_name = getattr(port, "childName", "")
                 if terminal_set and terminal_name not in terminal_set:
                     continue
-                access = inst.getTerminalAccess(terminal_name, target_layer=layer)
-                if access is None:
-                    continue
-                rect = self._choose_access_rect(access, axis="x")
+                rect = port.get(layer) if hasattr(port, "get") else None
                 if rect is None:
                     continue
                 if getattr(rect, "layer", "") != layer:

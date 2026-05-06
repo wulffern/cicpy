@@ -78,20 +78,25 @@ class RouteBundle(Cell):
         self.updateBoundingRect()
         return rect
 
-    def addGroupPort(self, net, rect, edge):
+    def addGroupPort(self, net, rect, edge, terminal=None):
         port = Port(net, routeLayer=rect.layer, rect=rect)
         port.spicePort = False
         port.side = edge
+        port.terminalName = terminal or ""
         self.group_ports[net] = port
         self.add(port)
         self.updateBoundingRect()
         return port
 
-    def representativeAccessRects(self, net, accessLayer=None):
+    def representativeAccessRects(self, net, accessLayer=None, terminalFilter="nonbulk"):
         port = self.group_ports.get(net)
         if port is None:
             return []
+        if not _terminal_allowed(getattr(port, "terminalName", ""), terminalFilter):
+            return []
         rect = port.get(accessLayer)
+        if accessLayer and rect is not None and getattr(rect, "layer", "") != accessLayer:
+            return []
         return [rect] if rect is not None else []
 
     def toJson(self):
@@ -150,6 +155,9 @@ def _port_json(port):
     data["routeLayer"] = getattr(port, "routeLayer", data.get("layer", ""))
     data["side"] = getattr(port, "side", "")
     data["spicePort"] = getattr(port, "spicePort", False)
+    terminal = getattr(port, "terminalName", "")
+    if terminal:
+        data["terminal"] = terminal
     return data
 
 
@@ -181,6 +189,27 @@ def _dedupe_ports(ports):
     return out
 
 
+def _terminal_filter_from_options(options=""):
+    opts = options or ""
+    match = re.search(r"(?:terminal|terminals|term)\s*=\s*([A-Za-z,]+)", opts, re.I)
+    if match:
+        return {term.strip().upper() for term in match.group(1).split(",") if term.strip()}
+    if re.search(r"(?:onBulk|bulk)(,|\s+|$)", opts, re.I):
+        return {"B"}
+    if re.search(r"allTerminals(,|\s+|$)", opts, re.I):
+        return None
+    return "nonbulk"
+
+
+def _terminal_allowed(terminal_name, terminal_filter):
+    if terminal_filter is None:
+        return True
+    terminal = (terminal_name or "").upper()
+    if terminal_filter == "nonbulk":
+        return terminal != "B"
+    return terminal in terminal_filter
+
+
 class CellGroup(LayoutCell):
     """Base class for named placement groups.
 
@@ -195,6 +224,7 @@ class CellGroup(LayoutCell):
         super().__init__()
         self.name = name
         self.layout = layout
+        self.boundary_ports = {}
 
     @property
     def stacks(self):
@@ -225,11 +255,120 @@ class CellGroup(LayoutCell):
         self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
         return self
 
-    def representativeAccessRects(self, net, accessLayer, anymetal=False):
+    def representativeAccessRects(self, net, accessLayer, anymetal=False, terminalFilter="nonbulk"):
         rects = []
         for stack in self.stacks:
-            rects.extend(stack.representativeAccessRects(net, accessLayer, anymetal=anymetal))
+            rects.extend(stack.representativeAccessRects(net, accessLayer, anymetal=anymetal, terminalFilter=terminalFilter))
         return self.layout.collapseRepresentativeRects(net, rects)
+
+    def memberNames(self):
+        return {getattr(inst, "instanceName", "") for inst in self._route_instances()}
+
+    def _boundary_nets(self, forceNets=None, hideNets=None, excludeNets=""):
+        force = set(forceNets or [])
+        hide = set(hideNets or [])
+        members = self.memberNames()
+        boundary = set()
+        graph = getattr(self.layout, "nodeGraph", None)
+        if graph is None:
+            return sorted(force - hide)
+        for net, node in graph.items():
+            if excludeNets and re.search(excludeNets, net):
+                continue
+            if net in hide:
+                continue
+            inside = False
+            outside = net in getattr(self.layout, "ports", {})
+            for port in getattr(node, "ports", []):
+                inst = getattr(port, "parent", None)
+                if inst is None or not inst.isInstance():
+                    continue
+                instance_name = getattr(inst, "instanceName", "")
+                if instance_name in members:
+                    inside = True
+                else:
+                    outside = True
+            if (inside and outside) or net in force:
+                boundary.add(net)
+        boundary.update(force - hide)
+        return sorted(boundary)
+
+    def _select_boundary_rect(self, rects, options=""):
+        opts = options or ""
+        if re.search(r"onTopLeft(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (-r.y2, r.x1, r.y1))[0]
+        if re.search(r"onTopRight(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (-r.y2, -r.x2, r.y1))[0]
+        if re.search(r"onBottomLeft(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (r.y1, r.x1, r.x2))[0]
+        if re.search(r"onBottomRight(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (r.y1, -r.x2, r.x1))[0]
+        if re.search(r"onLeftTop(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (r.x1, -r.y2, r.y1))[0]
+        if re.search(r"onLeftBottom(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (r.x1, r.y1, r.y2))[0]
+        if re.search(r"onRightTop(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (-r.x2, -r.y2, r.y1))[0]
+        if re.search(r"onRightBottom(,|\s+|$)", opts, re.I):
+            return sorted(rects, key=lambda r: (-r.x2, r.y1, r.y2))[0]
+        self.updateBoundingRect()
+        target_x = 0.5 * (self.left() + self.right()) if hasattr(self, "left") else 0
+        target_y = 0.5 * (self.bottom() + self.top()) if hasattr(self, "bottom") else 0
+        return min(rects, key=lambda r: (abs(r.centerY() - target_y), abs(r.centerX() - target_x), r.x1, r.y1))
+
+    def _make_boundary_port(self, net, layer, rects, options=""):
+        if not rects:
+            return None
+        source = self._select_boundary_rect(rects, options=options)
+        rect = source.getCopy(layer)
+        rect.net = net
+        port = Port(net, routeLayer=layer, rect=rect)
+        port.spicePort = False
+        port.side = "boundary"
+        return port
+
+    def exportBoundaryPorts(self, layer="M2", excludeNets="", forceNets=None, hideNets=None, options=""):
+        ports = []
+        terminal_filter = _terminal_filter_from_options(options)
+        for net in self._boundary_nets(forceNets=forceNets, hideNets=hideNets, excludeNets=excludeNets):
+            rects = self.representativeAccessRects(net, layer, terminalFilter=terminal_filter)
+            port = self._make_boundary_port(net, layer, rects, options=options)
+            if port is None:
+                continue
+            self.boundary_ports[(net, layer, options or "")] = port
+            ports.append(port)
+        return _dedupe_ports(ports)
+
+    def checkInternalConnectivity(self, warnOnly=True):
+        boundary = set(self._boundary_nets())
+        members = self.memberNames()
+        internal = []
+        routed = set()
+        if hasattr(self, "routedNets"):
+            routed.update(self.routedNets())
+        for stack in self.stacks:
+            routed.update(stack.routedNets())
+        graph = getattr(self.layout, "nodeGraph", None)
+        if graph is not None:
+            for net, node in graph.items():
+                if net in boundary:
+                    continue
+                count = 0
+                for port in getattr(node, "ports", []):
+                    inst = getattr(port, "parent", None)
+                    if inst is not None and inst.isInstance() and getattr(inst, "instanceName", "") in members:
+                        count += 1
+                if count > 1:
+                    internal.append(net)
+        opens = sorted(net for net in internal if net not in routed)
+        if warnOnly:
+            for net in opens:
+                self.log.warning(f"Internal group net may be incomplete: group={self.name} net={net}")
+        return {
+            "boundary_nets": sorted(boundary),
+            "internal_nets": sorted(internal),
+            "opens": opens,
+        }
 
     # ------------------------------------------------------------------
     # Stack creation
@@ -385,10 +524,7 @@ class CellGroup(LayoutCell):
         return self
 
     def exportedPorts(self):
-        ports = []
-        for stack in self.stacks:
-            ports.extend(stack.exportedPorts())
-        return _dedupe_ports(ports)
+        return self.exportBoundaryPorts()
 
     # ------------------------------------------------------------------
     # JSON output
@@ -476,10 +612,10 @@ class StackGroup(CellGroup):
         self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
         return self
 
-    def representativeAccessRects(self, net, accessLayer, anymetal=False):
+    def representativeAccessRects(self, net, accessLayer, anymetal=False, terminalFilter="nonbulk"):
         rects = []
         for bundle in self.route_bundles:
-            rects.extend(bundle.representativeAccessRects(net, accessLayer))
+            rects.extend(bundle.representativeAccessRects(net, accessLayer, terminalFilter=terminalFilter))
         if rects:
             return self.layout.collapseRepresentativeRects(net, rects)
         graph = getattr(self.layout, "nodeGraph", None)
@@ -498,10 +634,14 @@ class StackGroup(CellGroup):
             if instance_name not in member_names:
                 continue
             terminal_name = getattr(port, "childName", "")
+            if not _terminal_allowed(terminal_name, terminalFilter):
+                continue
             access = inst.getTerminalAccess(terminal_name, target_layer=accessLayer)
             if access is None or access.isEmpty():
                 continue
             rect = access.primary(anymetal=anymetal)
+            if accessLayer and rect is not None and getattr(rect, "layer", "") != accessLayer:
+                rect = next((r for r in access.accessRects if getattr(r, "layer", "") == accessLayer), None)
             if rect is None:
                 continue
             rects.append(rect)
@@ -511,6 +651,23 @@ class StackGroup(CellGroup):
         target_y = 0.5 * (self.bottom() + self.top())
         chosen = min(rects, key=lambda r: (abs(r.centerY() - target_y), abs(r.centerX() - self.left()), r.x1, r.y1))
         return [chosen]
+
+    def routedNets(self):
+        nets = set()
+        for bundle in self.route_bundles:
+            for rect in getattr(bundle, "route_rects", []):
+                net = getattr(rect, "net", "")
+                if net:
+                    nets.add(net)
+        for rect in self.direct_routes + self.diode_routes:
+            net = getattr(rect, "net", "")
+            if net:
+                nets.add(net)
+        for route in self.dummy_routes:
+            net = getattr(route, "net", "")
+            if net:
+                nets.add(net)
+        return nets
 
     def _bus_group_name(self, instance_name):
         if not re.search(r"<[^>]+>$", instance_name or ""):
@@ -688,7 +845,7 @@ class StackGroup(CellGroup):
                 if port_rect is None:
                     continue
                 port_rect.net = net
-                bundle.addGroupPort(net, port_rect, port_edge)
+                bundle.addGroupPort(net, port_rect, port_edge, terminal=terminal_name)
 
             if bundle.route_rects:
                 self.route_bundles.append(bundle)
@@ -719,7 +876,7 @@ class StackGroup(CellGroup):
             if port_rect is None:
                 continue
             port_rect.net = net
-            bundle.addGroupPort(net, port_rect, port_edge)
+            bundle.addGroupPort(net, port_rect, port_edge, terminal=terminal_name)
 
         if bundle.route_rects:
             self.route_bundles.append(bundle)
@@ -1028,10 +1185,7 @@ class StackGroup(CellGroup):
         return self
 
     def exportedPorts(self):
-        ports = []
-        for bundle in self.route_bundles:
-            ports.extend(bundle.group_ports.values())
-        return _dedupe_ports(ports)
+        return self.exportBoundaryPorts()
 
     def toJson(self):
         return {

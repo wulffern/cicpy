@@ -128,14 +128,18 @@ extra routing/sizing on top.
   `CellGroup` / `StackGroup` now form a real layout-only ownership tree
   while `.cic` JSON keeps flat physical children plus `cellgroups`
   metadata for GUI hierarchy.
+- **Latest** — Apparent layout hierarchy / group macro routing.
+  `CellGroup` / `StackGroup` can auto-export boundary ports for nets
+  crossing the group boundary, top-level connectivity routes prefer
+  those ports, and `includeInstances` remains the explicit direct
+  terminal escape hatch.
 
 ## What's next
 
-The next major architecture item is apparent layout hierarchy: keep the
-schematic flat and recognizable, while allowing the layout to be
-refactored into routing-oriented chunks. Polish items follow that.
+Apparent layout hierarchy is now in place. Remaining work is mostly GUI
+polish and schema documentation.
 
-### 1. Apparent layout hierarchy / group macro routing
+### 1. Apparent layout hierarchy / group macro routing (shipped)
 
 The schematic should remain a human-readable analog picture with diff
 pairs, mirrors, switches, startup devices, and bias branches visible in
@@ -163,15 +167,20 @@ representative real instance terminal access.
 connectivity check for internal-only nets. For now this should warn
 only, not fail `sch2mag`, so placement/routing can still be iterated.
 
-**Implementation sketch:**
-1. Add a shared route-access helper on `LayoutCell` that can collect
+**Implemented:**
+1. `LayoutCell.getNodeAccessRects(...)` collects
    group boundary ports or direct instance terminal access for a net.
-2. Teach `CellGroup` / `StackGroup` to export auto boundary ports from
-   their routed local geometry.
-3. Update `addConnectivityRoute`, `addOrthogonalConnectivityRoute`,
+2. `CellGroup.exportBoundaryPorts(...)` and `StackGroup` auto-export
+   one selected boundary port from routed local geometry or
+   representative terminal access. Route-style selectors such as
+   `onTopLeft`, `onTopRight`, `onBottomLeft`, and `onBottomRight`
+   choose which access point is exposed. Transistor bulk access is not
+   mixed into normal D/G/S boundary ports; use `bulk` or `terminal=B`
+   when a body connection is intentionally requested.
+3. `addConnectivityRoute`, `addOrthogonalConnectivityRoute`,
    and `addRouteConnection` to use group ports by default and direct
    instance terminals only when explicitly scoped.
-4. Add stackgroup tests for boundary-net export, hidden internal nets,
+4. Stackgroup tests cover boundary-net export, hidden internal nets,
    direct-terminal escape, and warning-only internal completion.
 
 ### 2. Port authoring dialog (carried over from `be2a743` TODO)
@@ -264,7 +273,78 @@ contract before they behave like routed layout macros.
 5. Done — run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag`
    end to end. LVS-clean LELOTEMP_CMP regen is the canary.
 
-### 7. Acceptance / smoke tests
+### 7. Remove `TerminalAccess` / `getTerminalAccess`
+
+`TerminalAccess` (`core/instance.py`) and the various
+`getTerminalAccess(...)` paths into `cellgroup.py`, `layoutcell.py`,
+and `routes/build_route_examples.py` were intended as a "find the legal
+metal pin on this device terminal at layer X" helper. In practice the
+apparent-layout-hierarchy work (§1) ended up using terminal access as a
+backdoor for routing — picking access rectangles inside groups that
+should have gone through their boundary ports, and re-discovering
+geometry that `directedRoute` already produces correctly.
+
+That violates the macro contract: groups own their internal routing
+and expose boundary ports; outside the group, callers should route to
+those ports, not introspect terminals. Where a parent route really
+does need a specific transistor pin, `addDirectedRoute(layer, net,
+route, options)` already names the start/stop endpoints explicitly and
+honours the access-layer rules.
+
+**Routing-API principle (applies beyond this section):**
+The supported routing primitives are
+`addConnectivityRoute`, `addOrthogonalConnectivityRoute`, and
+`addDirectedRoute` (the last is the emergency hatch for explicit
+pin-to-pin connections). New routing helpers should be **compositions
+of these primitives**, not new code paths into the route engine. If a
+helper feels like it needs a fourth route function, that is a signal
+the abstraction is wrong — fold it into one of the three.
+
+**Plan:**
+
+1. **Step 1 — Fallback in `_directNodeAccessRects`** (cheap).
+   Remove `layoutcell.py:273-278` `getTerminalAccess` fallback. After
+   boundary ports (§1) and direct `port.get(layer)` fail, the only
+   answer is `addDirectedRoute`; the terminal-access fallback was the
+   loophole that let routes skip the boundary-port contract.
+2. **Step 2 — Fallback in `representativeAccessRects`** (cheap).
+   Replace `cellgroup.py:639-647` access lookup with `port.get(layer)`;
+   return empty if absent.
+3. **Step 3 — `routeDiodeConnected`** (real work). Rewrite as a loop
+   of `addDirectedRoute(layer, net, f"{name}:D-{name}:G")` calls (one
+   per diode-connected instance). Keep the diode-connect detection
+   logic (drain_net == gate_net) — only the geometry construction
+   changes.
+4. **Step 4 — `routeDummyTerminals`** (real work). Rewrite as three
+   `addDirectedRoute` calls per dummy device: `B-D` mid, `B-S` side,
+   `D-S` vertical, all on `M1`.
+5. **Step 5 — `routeParallel` / `routeMirror`** (real work).
+   Collapse the trunk-construction path to `addConnectivityRoute`
+   calls scoped by `includeInstances` to the stack's members. The
+   `RouteBundle` then exposes its boundary port as a post-pass that
+   harvests the produced route geometry on the bundle's edge layer
+   and wraps it as the group's exported port (preserves §1).
+6. **Step 6 — Delete `TerminalAccess` / `Instance.getTerminalAccess`**.
+   Strip imports from `tests/stackgroups/test_stackgroups.py` and
+   rewrite those tests to assert against routed geometry / boundary
+   ports. Remove `tests/routes/build_route_examples.py:150` use.
+7. **Step 7 — Documentation**. Update
+   `tests/sch2mag/lelo_temp_sky130a/AGENTS.md` and
+   `tests/routes/routes.md` to drop `getTerminalAccess` from the
+   "preferred API" guidance and point at the three primitives plus
+   boundary ports.
+
+Each step ends with the full test sweep (`tests/stackgroups`,
+`tests/sch2mag/lelo_temp_sky130a`, `tests/spi2mag`, `tests/routes`).
+LVS-clean LELOTEMP_CMP regen is the canary. Commit per green step,
+not all at once.
+
+**Why now:** the boundary-port contract from §1 only holds if there
+isn't a parallel terminal-access path that bypasses it. Leaving
+`TerminalAccess` in the codebase invites future routing code to route
+through it again and re-introduce the bug.
+
+### 8. Acceptance / smoke tests
 
 Manual smoke runs only so far. Consider a tiny PNG snapshot test for
 the layout pane on `LELOTEMP_CMP` to catch regressions in `style.py` /

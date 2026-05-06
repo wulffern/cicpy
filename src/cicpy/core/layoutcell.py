@@ -233,6 +233,101 @@ class LayoutCell(Cell):
                         self.nodeGraphList.append(p.name)
                         self.nodeGraph[p.name] = g
 
+    def _access_rect_key(self, rect):
+        return (rect.layer, rect.x1, rect.y1, rect.x2, rect.y2)
+
+    def _instance_matches_route_scope(self, inst, includeInstances="", excludeInstances=""):
+        instance_name = getattr(inst, "instanceName", "")
+        cell_name = getattr(inst, "name", "")
+        if excludeInstances and (re.search(excludeInstances, instance_name) or re.search(excludeInstances, cell_name)):
+            return False
+        if includeInstances and not (re.search(includeInstances, instance_name) or re.search(includeInstances, cell_name)):
+            return False
+        return True
+
+    def _directNodeAccessRects(self, net, layer, includeInstances="", excludeInstances="", skipInstances=None, anymetal=False, requireLayer=False):
+        graph = self.nodeGraph.get(net)
+        if graph is None:
+            return []
+        skip = set(skipInstances or [])
+        rects = []
+        seen = set()
+        for port in getattr(graph, "ports", []):
+            inst = getattr(port, "parent", None)
+            if inst is None or not inst.isInstance():
+                continue
+            instance_name = getattr(inst, "instanceName", "")
+            if instance_name in skip:
+                continue
+            if not self._instance_matches_route_scope(inst, includeInstances=includeInstances, excludeInstances=excludeInstances):
+                continue
+
+            rr = None
+            if hasattr(port, "get"):
+                rr = port.get(layer) if layer else port.get()
+                if requireLayer and layer and rr is not None and getattr(rr, "layer", "") != layer:
+                    rr = None
+
+            if rr is None:
+                continue
+            key = self._access_rect_key(rr)
+            if key in seen:
+                continue
+            seen.add(key)
+            rects.append(rr)
+        return rects
+
+    def _groupNodeAccessRects(self, net, layer, includeGroups="", options=""):
+        rects = []
+        suppressed = set()
+        seen = set()
+        for group in getattr(self, "cellgroups", []):
+            if group is None:
+                continue
+            if includeGroups and not re.search(includeGroups, getattr(group, "name", "")):
+                continue
+            if hasattr(group, "_boundary_nets") and net in group._boundary_nets():
+                suppressed.update(group.memberNames())
+            for port in group.exportBoundaryPorts(layer=layer, options=options):
+                if getattr(port, "name", "") != net:
+                    continue
+                rr = port.get(layer)
+                if rr is None:
+                    continue
+                key = self._access_rect_key(rr)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rects.append(rr)
+        return rects, suppressed
+
+    def getNodeAccessRects(self, net, layer, includeInstances="", excludeInstances="", includeGroups="", anymetal=False, requireLayer=False, options=""):
+        rects = []
+        suppressed = set()
+        if not includeInstances:
+            group_rects, suppressed = self._groupNodeAccessRects(net, layer, includeGroups=includeGroups, options=options)
+            rects.extend(group_rects)
+        rects.extend(
+            self._directNodeAccessRects(
+                net,
+                layer,
+                includeInstances=includeInstances,
+                excludeInstances=excludeInstances,
+                skipInstances=suppressed,
+                anymetal=anymetal,
+                requireLayer=requireLayer,
+            )
+        )
+        out = []
+        seen = set()
+        for rect in rects:
+            key = self._access_rect_key(rect)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(rect)
+        return out
+
     def toJson(self):
         o = super().toJson()
         o["children"] = [child.toJson() for child in self.iterJsonChildren()]
@@ -1202,7 +1297,7 @@ class LayoutCell(Cell):
         graph = self.nodeGraph.get(name)
         rects = []
         if graph is not None:
-            rects = graph.getRectangles(excludeInstances, includeInstances, "M1")
+            rects = self.getNodeAccessRects(name, "M1", includeInstances=includeInstances, excludeInstances=excludeInstances)
             if len(rects) == 0:
                 rects = graph.getRectangles(excludeInstances, includeInstances, "")
         routering = self.named_rects[router_key]
@@ -1247,8 +1342,8 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
-    def addRouteConnection(self, path:str, includeInstances:str, layer:str, location:str, options:str, routeTypeOverride:str="", excludeInstances:str=""):
-        self.log.info(f"addRouteConnection(path={path}, includeInstances={includeInstances}, layer={layer}, location={location}, options={options}, routeTypeOverride={routeTypeOverride}, excludeInstances={excludeInstances})")
+    def addRouteConnection(self, path:str, includeInstances:str, layer:str, location:str, options:str, routeTypeOverride:str="", excludeInstances:str="", includeGroups:str=""):
+        self.log.info(f"addRouteConnection(path={path}, includeInstances={includeInstances}, layer={layer}, location={location}, options={options}, routeTypeOverride={routeTypeOverride}, excludeInstances={excludeInstances}, includeGroups={includeGroups})")
         routeType = "-|--"
         if routeTypeOverride == "":
             if location == "top":
@@ -1272,8 +1367,7 @@ class LayoutCell(Cell):
             rail_key = f"rail_{node}"
             if rail_key not in self.named_rects:
                 continue
-            g = self.nodeGraph[node]
-            rects = g.getRectangles(excludeInstances, includeInstances, layer)
+            rects = self.getNodeAccessRects(node, layer, includeInstances=includeInstances, excludeInstances=excludeInstances, includeGroups=includeGroups, options=options)
             rr = self.named_rects[rail_key]
             if rr:
                 routering = rr.get(location)
@@ -1290,6 +1384,7 @@ class LayoutCell(Cell):
                         "options": options,
                         "routeTypeOverride": routeTypeOverride,
                         "excludeInstances": excludeInstances,
+                        "includeGroups": includeGroups,
                     })
                     self.routes.append(ro)
                     rr.add(ro)
@@ -1515,8 +1610,8 @@ class LayoutCell(Cell):
                     self.addToNodeGraph(c)
                 self.add(c)
 
-    def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances):
-        self.log.info(f"addConnectivityRoute(layer={layer}, regex={regex}, routeType={routeType}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances})")
+    def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances, includeGroups=""):
+        self.log.info(f"addConnectivityRoute(layer={layer}, regex={regex}, routeType={routeType}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, includeGroups={includeGroups})")
         prefer_anymetal = bool(re.search(r"anymetal(,|\s+|$)", options or ""))
         for node in list(self.nodeGraphList):
             if not re.search(regex, node):
@@ -1526,7 +1621,7 @@ class LayoutCell(Cell):
             g = self.nodeGraph.get(node)
             if g is None:
                 continue
-            rects = g.getRectangles(excludeInstances, includeInstances, layer)
+            rects = self.getNodeAccessRects(node, layer, includeInstances=includeInstances, excludeInstances=excludeInstances, includeGroups=includeGroups, anymetal=prefer_anymetal, options=options)
             if len(rects) == 0:
                 self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
                 continue
@@ -1543,6 +1638,7 @@ class LayoutCell(Cell):
                     "cuts": cuts,
                     "excludeInstances": excludeInstances,
                     "includeInstances": includeInstances,
+                    "includeGroups": includeGroups,
                     "node": node,
                 })
                 log.info(f"addConnectivityRoute: r={r}")
@@ -1573,11 +1669,11 @@ class LayoutCell(Cell):
         r.route()
         return r
 
-    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, accessLayer=None):
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, accessLayer=None, includeGroups=""):
         if accessLayer is None:
             accessLayer = verticalLayer
         self.log.info(
-            f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, accessLayer={accessLayer})"
+            f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, accessLayer={accessLayer}, includeGroups={includeGroups})"
         )
         for node in list(self.nodeGraphList):
             if not re.search(regex, node):
@@ -1587,37 +1683,7 @@ class LayoutCell(Cell):
             g = self.nodeGraph.get(node)
             if g is None:
                 continue
-            rects = []
-            seen = set()
-            for p in g.ports:
-                i = getattr(p, "parent", None)
-                if i is None or not i.isInstance():
-                    continue
-                instanceName = getattr(i, 'instanceName', '')
-                if excludeInstances != "" and (re.search(excludeInstances, instanceName) or re.search(excludeInstances, getattr(i, 'name', ''))):
-                    continue
-                if includeInstances != "" and not (re.search(includeInstances, getattr(i, 'name', '')) or re.search(includeInstances, instanceName)):
-                    continue
-
-                rr = p.get(accessLayer)
-                if rr is None:
-                    rr = p.get()
-                if rr is not None and getattr(rr, "layer", "") != accessLayer:
-                    rr = None
-
-                if rr is None:
-                    terminal_name = getattr(p, "childName", "")
-                    access = i.getTerminalAccess(terminal_name, target_layer=accessLayer)
-                    if access is not None:
-                        rr = access.primary(anymetal=False)
-
-                if rr is None:
-                    continue
-                key = (rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
-                if key in seen:
-                    continue
-                seen.add(key)
-                rects.append(rr)
+            rects = self.getNodeAccessRects(node, accessLayer, includeInstances=includeInstances, excludeInstances=excludeInstances, includeGroups=includeGroups, requireLayer=True, options=options)
             if len(rects) == 0:
                 self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
                 continue
@@ -1633,6 +1699,7 @@ class LayoutCell(Cell):
                     "excludeInstances": excludeInstances,
                     "includeInstances": includeInstances,
                     "accessLayer": accessLayer,
+                    "includeGroups": includeGroups,
                     "node": node,
                 })
                 log.info(f"addOrthogonalConnectivityRoute: r={r}")

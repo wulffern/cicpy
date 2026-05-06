@@ -194,16 +194,22 @@ recursive walk (or to a new `getInstances()` helper). Mechanical but
 broad — wants its own commit + full test sweep, not bundled into a
 GUI feature.
 
+**Status:** in progress. The traversal helper step is shipped:
+`LayoutCell.iterPlacementChildren()` / `iterInstances()` provide a
+recursive, de-duplicated walk across `children` and `cellgroups`, and
+the core instance lookup helpers now use that path.
+
 **Plan:**
-1. Add `LayoutCell.iterInstances()` helper that recurses through
-   `children` and `cellgroups` once.
-2. Replace flat-iteration sites with the helper.
-3. Move ownership in `CellGroup.addStack` /
+1. Done — add `LayoutCell.iterInstances()` helper that recurses
+   through `children` and `cellgroups` once.
+2. Done — replace core flat instance lookup sites with the helper.
+3. Next — move ownership in `CellGroup.addStack` /
    `StackGroup.addInstance`: pop the instance from
    `layout.children` (and any other ancestor's `children`) before
    `stack.add(inst)`.
-4. Drop `cellgroups` field on `LayoutCell.toJson` (cellgroups appear
-   naturally as children).
+4. Preserve flat physical JSON output while keeping `cellgroups`
+   metadata for GUI hierarchy; revisit full hierarchical JSON only
+   after downstream readers are audited.
 5. Run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag` end
    to end. LVS-clean LELOTEMP_CMP regen is the canary.
 

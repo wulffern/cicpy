@@ -119,6 +119,47 @@ class LayoutCell(Cell):
         self.cellgroups.append(group)
         return group
 
+    def iterPlacementChildren(self):
+        """Yield placement tree children once, including logical cellgroups.
+
+        Cellgroups are currently stored as a side table while the same member
+        instances also remain in ``children``. The de-duplicating traversal lets
+        callers become hierarchy-aware before ownership is moved fully under
+        the groups.
+        """
+        seen = set()
+        stack = list(getattr(self, "children", []))
+        for group in getattr(self, "cellgroups", []):
+            if group is not None:
+                stack.append(group)
+
+        while stack:
+            child = stack.pop(0)
+            if child is None:
+                continue
+            oid = id(child)
+            if oid in seen:
+                continue
+            seen.add(oid)
+            yield child
+
+            if child.isInstance() or child.isCut():
+                continue
+            if hasattr(child, "children"):
+                stack[0:0] = list(child.children)
+
+    def iterInstances(self, regex="", by="instanceName", includeCuts=False):
+        for child in self.iterPlacementChildren():
+            if child is None:
+                continue
+            if not (child.isInstance() or (includeCuts and child.isCut())):
+                continue
+            if regex:
+                value = getattr(child, by, "")
+                if not re.search(regex, value):
+                    continue
+            yield child
+
     def addToNodeGraph(self,inst):
 
         if (inst is None): return
@@ -152,18 +193,14 @@ class LayoutCell(Cell):
 
     def getInstancesByName(self,regex):
         data = list()
-        for c in self.children:
-            if(c.isInstance()):
-                if(re.search(regex,c.name)):
-                    data.append(c)
+        for c in self.iterInstances(regex, by="name"):
+            data.append(c)
         return data
 
     def getSortedInstancesByInstanceName(self,regex):
         data = list()
-        for c in self.children:
-            if(c.isInstance()):
-                if(re.search(regex,c.instanceName)):
-                    data.append(c)
+        for c in self.iterInstances(regex, by="instanceName"):
+            data.append(c)
         if(len(data) == 0):
             raise ValueError(f"Missing instance {regex}")
 
@@ -173,9 +210,7 @@ class LayoutCell(Cell):
 
     def getSortedInstancesByGroupName(self, groupName, excludeInstances=""):
         data = list()
-        for c in self.children:
-            if not c.isInstance():
-                continue
+        for c in self.iterInstances():
             instance_name = getattr(c, "instanceName", "")
             if excludeInstances != "" and (
                 re.search(excludeInstances, instance_name) or re.search(excludeInstances, getattr(c, "name", ""))
@@ -205,7 +240,7 @@ class LayoutCell(Cell):
 
     def getOccupiedRectangles(self, layer: str, excludeInstances: str = "", ignoreNet: str = "", includeBoundaries: bool = False):
         rects = []
-        for child in self.children:
+        for child in self.iterPlacementChildren():
             if child is None:
                 continue
 
@@ -227,18 +262,6 @@ class LayoutCell(Cell):
                     continue
                 rects.append(child.getCopy())
                 continue
-
-            if child.isCell():
-                if ignoreNet != "" and getattr(child, "name", "") == ignoreNet:
-                    continue
-                for grandchild in child.children:
-                    if grandchild is None or not grandchild.isRect():
-                        continue
-                    if grandchild.layer != layer:
-                        continue
-                    if ignoreNet != "" and getattr(grandchild, "net", "") == ignoreNet:
-                        continue
-                    rects.append(grandchild.getCopy())
 
         return rects
 
@@ -266,10 +289,8 @@ class LayoutCell(Cell):
 
     def getInstancesByCellname(self,regex):
         data = list()
-        for c in self.children:
-            if(c.isInstance()):
-                if(re.search(regex,c.cell)):
-                    data.append(c)
+        for c in self.iterInstances(regex, by="cell"):
+            data.append(c)
         return data
 
     def _normalizeLayerName(self, layer_name):
@@ -1276,12 +1297,9 @@ class LayoutCell(Cell):
         return RouteGroup(self, net)
 
     def getInstanceFromInstanceName(self, instanceName:str):
-        for r in self.children:
-            if r is None: continue
-            if r.isInstance():
-                i = r
-                if getattr(i, 'instanceName', '') == instanceName:
-                    return i
+        for i in self.iterInstances():
+            if getattr(i, 'instanceName', '') == instanceName:
+                return i
         return None
 
 
@@ -1369,10 +1387,7 @@ class LayoutCell(Cell):
 
     def findRectanglesByNode(self,node:str,filterChild:str=None,matchInstance:str=None):
         rects = list()
-        for i in self.children:
-            if(i is None): continue
-            if(not i.isInstance()): continue
-
+        for i in self.iterInstances():
             if(matchInstance is not None):
                 if(not re.search(matchInstance,i.name)): continue
 

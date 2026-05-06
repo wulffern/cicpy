@@ -32,7 +32,6 @@ from .rules import Rules
 from .instance import Instance
 from .text import Text
 from .graph import Graph
-from .cellgroup import CellGroup
 from .routering import RouteRing
 from .routegroup import RouteGroup
 from .guard import Guard
@@ -115,6 +114,7 @@ class LayoutCell(Cell):
         return i
 
     def makeCellGroup(self, name: str):
+        from .cellgroup import CellGroup
         group = CellGroup(self, name)
         self.cellgroups.append(group)
         return group
@@ -144,14 +144,8 @@ class LayoutCell(Cell):
         o["useHalfHeight"] = self.useHalfHeight
         o["alternateGroup"] = self.alternateGroup
         o["noPowerRoute"] = self.noPowerRoute
-        #if self.cellgroups:
-        #    o["guiHierarchy"] = [
-        #        g.toGuiHierarchy()
-        #        for g in self.cellgroups
-        #        if g is not None and g.stacks
-        #    ]
-        #elif self.guiHierarchy:
-        #    o["guiHierarchy"] = self.guiHierarchy
+        if self.cellgroups:
+            o["cellgroups"] = [g.toJson() for g in self.cellgroups if g is not None]
         return o
 
     def getInstancesByName(self,regex):

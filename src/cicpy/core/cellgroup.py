@@ -1,8 +1,31 @@
 #!/usr/bin/env python3
 
+"""Group classes used during placement and routing.
+
+Hierarchy:
+
+    LayoutCell
+        ↑
+    CellGroup           — base for named placement groups (this file)
+        ↑
+    StackGroup          — vertical column-major array of instances
+
+    Cell
+        ↑
+    RouteBundle         — container of locally-scoped routes + ports
+                          produced inside a StackGroup. Not a placement
+                          group: holds geometry only, references members.
+
+`RouteBundle` is what older revisions called `ParallelGroup`. It is a
+plain `Cell` (not a `CellGroup`) because it never owns instances and is
+never abutted; it lives inside the StackGroup that produced it and
+exposes a subset of its routed nets as Ports.
+"""
+
 import re
 
 from .cell import Cell
+from .layoutcell import LayoutCell
 from .port import Port
 from .rect import Rect
 from .route import Route
@@ -14,16 +37,29 @@ class _PhysicalInst:
         self.subcktName = subckt_name
 
 
-class ParallelGroup(Cell):
-    def __init__(self, layout, name, instances):
+class RouteBundle(Cell):
+    """Locally-scoped routes + ports bundled inside a StackGroup.
+
+    Members are referenced by identity — they remain owned by the
+    parent layout's children list. The bundle owns route rects and
+    exposes ports via `addGroupPort`.
+    """
+
+    def __init__(self, layout, name, members=None):
         super().__init__(name)
         self.layout = layout
-        self.instances = list(instances or [])
+        self.members = list(members or [])
         self.route_rects = []
         self.group_ports = {}
 
+    # Backward-compat alias: bundles used to be called ParallelGroup
+    # and its members were exposed as ``instances``.
+    @property
+    def instances(self):
+        return self.members
+
     def _members(self):
-        return self.instances + self.route_rects + list(self.group_ports.values())
+        return self.members + self.route_rects + list(self.group_ports.values())
 
     def calcBoundingRect(self):
         members = self._members()
@@ -60,18 +96,265 @@ class ParallelGroup(Cell):
         rect = port.get(accessLayer)
         return [rect] if rect is not None else []
 
+    def toJson(self):
+        return {
+            "class": "RouteBundle",
+            "name": self.name,
+            "members": [getattr(m, "instanceName", "") for m in self.members],
+            "routes": [
+                {
+                    "layer": getattr(r, "layer", ""),
+                    "net": getattr(r, "net", ""),
+                    "x1": r.x1, "y1": r.y1, "x2": r.x2, "y2": r.y2,
+                }
+                for r in self.route_rects
+            ],
+            "ports": {
+                net: {"layer": getattr(p, "routeLayer", ""), "side": getattr(p, "side", "")}
+                for net, p in self.group_ports.items()
+            },
+        }
 
-class StackGroup(Cell):
-    def __init__(self, layout, name):
-        super().__init__(name)
+
+# Backward-compat: older code referenced this class as ParallelGroup.
+ParallelGroup = RouteBundle
+
+
+class CellGroup(LayoutCell):
+    """Base class for named placement groups.
+
+    Inherits LayoutCell so groups have their own port/connectivity
+    context and serialize into JSON via `toJson`. A CellGroup contains
+    StackGroups (or other CellGroups) and exposes group-scoped routing
+    helpers that delegate to the parent layout's routing engine but
+    constrain matching to the group's member instances.
+    """
+
+    def __init__(self, layout, name=""):
+        super().__init__()
+        self.name = name
         self.layout = layout
+
+    @property
+    def stacks(self):
+        return [c for c in self.children if isinstance(c, StackGroup)]
+
+    # ------------------------------------------------------------------
+    # Group-scoped routing
+    # ------------------------------------------------------------------
+    def _route_instances(self):
+        data = []
+        for stack in self.stacks:
+            data.extend(stack._route_instances())
+        return data
+
+    def instanceRegex(self):
+        names = [re.escape(inst.instanceName) for inst in self._route_instances()]
+        if not names:
+            return ""
+        return "^(" + "|".join(names) + ")$"
+
+    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=1, excludeInstances=""):
+        include = self.instanceRegex()
+        self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
+        return self
+
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances="", accessLayer=None):
+        include = self.instanceRegex()
+        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
+        return self
+
+    def representativeAccessRects(self, net, accessLayer, anymetal=False):
+        rects = []
+        for stack in self.stacks:
+            rects.extend(stack.representativeAccessRects(net, accessLayer, anymetal=anymetal))
+        return self.layout.collapseRepresentativeRects(net, rects)
+
+    # ------------------------------------------------------------------
+    # Stack creation
+    # ------------------------------------------------------------------
+    def addStack(self, name, instances, preserveOrder=False):
+        stack = StackGroup(self.layout, name)
+        stack.preserve_order = preserveOrder
+        stack.addInstances(instances)
+        self.add(stack)
+        self.updateBoundingRect()
+        return stack
+
+    def addStackByGroup(self, groupName, name=None, fillGroup=None):
+        instances = self.layout.getSortedInstancesByGroupName(groupName)
+        if fillGroup is not None:
+            instances.extend(self.layout.getSortedInstancesByGroupName(fillGroup))
+        return self.addStack(name or groupName, instances, preserveOrder=True)
+
+    def addParallelStack(self, name, instances, preserveOrder=False):
+        return self.addStack(name, instances, preserveOrder=preserveOrder)
+
+    def addParallelStackByGroup(self, groupName, name=None, fillGroup=None):
+        return self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+
+    def addTransistorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
+        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+        stack.stack().addTaps()
+        if routeDiodes:
+            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
+        stack.routeParallel(
+            layer=layer,
+            terminals=terminals,
+            edge=edge,
+            edges=edges,
+            excludeInstances=excludeInstances,
+            excludeNets=excludeNets,
+            minRects=minRects,
+            sameTerminal=sameTerminal,
+        )
+        return stack
+
+    def transistorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
+        return self.addTransistorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
+
+    def addCurrentMirrorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
+        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+        stack.stack().addTaps()
+        if routeDiodes:
+            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
+        stack.routeMirror(
+            layer=layer,
+            terminals=terminals,
+            edge=edge,
+            edges=edges,
+            excludeInstances=excludeInstances,
+            excludeNets=excludeNets,
+            minRects=minRects,
+            sameTerminal=sameTerminal,
+        )
+        return stack
+
+    def currentMirrorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
+        return self.addCurrentMirrorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
+
+    # ------------------------------------------------------------------
+    # Geometry helpers
+    # ------------------------------------------------------------------
+    def calcBoundingRect(self):
+        if not self.stacks:
+            return super().calcBoundingRect()
+        active = [stack for stack in self.stacks if stack.instances]
+        if not active:
+            return super().calcBoundingRect()
+        return Cell.calcBoundingRectFromList(active, False)
+
+    def left(self):
+        if not self.stacks:
+            return 0
+        self.updateBoundingRect()
+        return self.x1
+
+    def right(self):
+        if not self.stacks:
+            return 0
+        self.updateBoundingRect()
+        return self.x2
+
+    def bottom(self):
+        if not self.stacks:
+            return 0
+        self.updateBoundingRect()
+        return self.y1
+
+    def top(self):
+        if not self.stacks:
+            return 0
+        self.updateBoundingRect()
+        return self.y2
+
+    def abutTop(self, other, space=0):
+        if not self.stacks:
+            return self
+        dx = int(other.left() - self.left())
+        dy = int(other.top() + space - self.bottom())
+        self.translate(dx, dy)
+        return self
+
+    def abutBottom(self, other, space=0):
+        if not self.stacks:
+            return self
+        dx = int(other.left() - self.left())
+        dy = int(other.bottom() - space - self.top())
+        self.translate(dx, dy)
+        return self
+
+    def abutLeft(self, other, space=0):
+        if not self.stacks:
+            return self
+        dx = int(other.left() - space - self.right())
+        dy = int(other.bottom() - self.bottom())
+        self.translate(dx, dy)
+        return self
+
+    def abutRight(self, other, space=0):
+        if not self.stacks:
+            return self
+        dx = int(other.right() + space - self.left())
+        dy = int(other.bottom() - self.bottom())
+        self.translate(dx, dy)
+        return self
+
+    def moveAbove(self, other, ygap=0):
+        return self.abutTop(other, ygap)
+
+    def moveBelow(self, other, ygap=0):
+        return self.abutBottom(other, ygap)
+
+    def fillDummyTransistors(self, direction="top"):
+        if not self.stacks:
+            return self
+        target_height = max(stack.height() for stack in self.stacks)
+        for stack in self.stacks:
+            stack.fillDummyTransistors(target_height, direction=direction)
+        self.updateBoundingRect()
+        return self
+
+    def routeDummyDevices(self):
+        for stack in self.stacks:
+            stack.routeDummyDevices()
+        self.updateBoundingRect()
+        return self
+
+    # ------------------------------------------------------------------
+    # JSON output
+    # ------------------------------------------------------------------
+    def toJson(self):
+        return {
+            "class": self.__class__.__name__,
+            "name": self.name,
+            "stacks": [s.toJson() for s in self.stacks],
+        }
+
+
+class StackGroup(CellGroup):
+    """Vertical column-major array of instances.
+
+    Owns stacking, taps, dummy fill and the route bundles produced by
+    `routeParallel` / `routeMirror`. Member instances remain children of
+    the parent layout; `StackGroup` references them and re-parents
+    them into its own children list for tree-walks.
+    """
+
+    def __init__(self, layout, name):
+        super().__init__(layout, name)
         self.instances = []
         self.tap_instances = []
         self.dummy_routes = []
         self.direct_routes = []
         self.diode_routes = []
-        self.parallel_groups = []
+        self.route_bundles = []
         self.preserve_order = False
+
+    # Backward-compat alias for code that still reads `parallel_groups`.
+    @property
+    def parallel_groups(self):
+        return self.route_bundles
 
     def _members(self):
         members = []
@@ -81,7 +364,7 @@ class StackGroup(Cell):
             + self.tap_instances
             + self.dummy_routes
             + self.direct_routes
-            + self.parallel_groups
+            + self.route_bundles
         ):
             if obj is None:
                 continue
@@ -124,8 +407,8 @@ class StackGroup(Cell):
 
     def representativeAccessRects(self, net, accessLayer, anymetal=False):
         rects = []
-        for group in self.parallel_groups:
-            rects.extend(group.representativeAccessRects(net, accessLayer))
+        for bundle in self.route_bundles:
+            rects.extend(bundle.representativeAccessRects(net, accessLayer))
         if rects:
             return self.layout.collapseRepresentativeRects(net, rects)
         graph = getattr(self.layout, "nodeGraph", None)
@@ -180,7 +463,7 @@ class StackGroup(Cell):
             if len(instances) < 2:
                 continue
             instances = sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", "")))
-            out.append(ParallelGroup(self.layout, f"{self.name}_{name}", instances))
+            out.append(RouteBundle(self.layout, f"{self.name}_{name}", instances))
         return out
 
     def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True):
@@ -316,15 +599,10 @@ class StackGroup(Cell):
         raise ValueError(f"Unsupported parallel port edge '{edge}'")
 
     def routeParallel(self, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True):
-        """Join repeated device terminals inside the stack and expose one group port per net.
-
-        The method prefers existing terminal access on ``layer``. For a vertical
-        transistor stack that normally means extending the device M2 access into a
-        single trunk and placing one access rectangle on a group edge.
-        """
-        for group in self._parallel_instance_groups(excludeInstances=excludeInstances):
-            nets = self._ports_by_net(group.instances, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
-            required_rects = minRects if minRects is not None else len(group.instances)
+        """Join repeated device terminals inside the stack and expose one bundle port per net."""
+        for bundle in self._parallel_instance_groups(excludeInstances=excludeInstances):
+            nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
+            required_rects = minRects if minRects is not None else len(bundle.members)
             required_rects = max(2, required_rects)
             for net, (terminal_name, rects) in nets.items():
                 if len(rects) < required_rects:
@@ -333,34 +611,28 @@ class StackGroup(Cell):
                 if route_rect is None:
                     continue
                 route_rect.net = net
-                group.addRouteRect(route_rect)
+                bundle.addRouteRect(route_rect)
 
                 port_edge = edges.get(net, edge) if edges else edge
                 port_rect = self._edge_port_rect(layer, route_rect, port_edge, rects[0].height())
                 if port_rect is None:
                     continue
                 port_rect.net = net
-                group.addGroupPort(net, port_rect, port_edge)
+                bundle.addGroupPort(net, port_rect, port_edge)
 
-            if group.route_rects:
-                self.parallel_groups.append(group)
-                self.add(group)
+            if bundle.route_rects:
+                self.route_bundles.append(bundle)
+                self.add(bundle)
         self.updateBoundingRect()
         return self
 
     def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True):
-        """Route common mirror terminals inside the stack.
-
-        Current mirror stacks normally share gate and source nets while each
-        drain remains distinct. This helper routes only common terminals from
-        ``terminals`` across the whole stack and exposes one nested group port
-        per routed net.
-        """
+        """Route common mirror terminals across the whole stack as one bundle."""
         instances = self._route_instances_excluding(excludeInstances=excludeInstances)
         if len(instances) < 2:
             return self
-        group = ParallelGroup(self.layout, f"{self.name}_mirror", sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", ""))))
-        nets = self._ports_by_net(group.instances, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
+        bundle = RouteBundle(self.layout, f"{self.name}_mirror", sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", ""))))
+        nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
         required_rects = minRects if minRects is not None else 2
         required_rects = max(2, required_rects)
         for net, (terminal_name, rects) in nets.items():
@@ -370,27 +642,23 @@ class StackGroup(Cell):
             if route_rect is None:
                 continue
             route_rect.net = net
-            group.addRouteRect(route_rect)
+            bundle.addRouteRect(route_rect)
 
             port_edge = edges.get(net, edge) if edges else ("middle" if terminal_name == "S" else edge)
             port_rect = self._edge_port_rect(layer, route_rect, port_edge, rects[0].height())
             if port_rect is None:
                 continue
             port_rect.net = net
-            group.addGroupPort(net, port_rect, port_edge)
+            bundle.addGroupPort(net, port_rect, port_edge)
 
-        if group.route_rects:
-            self.parallel_groups.append(group)
-            self.add(group)
+        if bundle.route_rects:
+            self.route_bundles.append(bundle)
+            self.add(bundle)
         self.updateBoundingRect()
         return self
 
     def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances=""):
-        """Tie diode-connected transistor drain and gate on the lowest local layer.
-
-        A transistor is treated as diode-connected when its drain and gate
-        terminals are on the same schematic net. Bulk is ignored.
-        """
+        """Tie diode-connected transistor drain and gate on the lowest local layer."""
         for inst in self._route_instances():
             instance_name = getattr(inst, "instanceName", "")
             if excludeInstances and (
@@ -447,7 +715,7 @@ class StackGroup(Cell):
     def calcBoundingRect(self):
         members = self._members()
         if not members:
-            return super().calcBoundingRect()
+            return Cell.calcBoundingRect(self)
         return Cell.calcBoundingRectFromList(members, False)
 
     def height(self):
@@ -533,7 +801,6 @@ class StackGroup(Cell):
         self.translate(dx, dy)
         return self
 
-    # Compatibility aliases
     def moveBelow(self, other, ygap=0):
         return self.abutBottom(other, ygap)
 
@@ -684,184 +951,12 @@ class StackGroup(Cell):
         self.updateBoundingRect()
         return self
 
-
-class CellGroup(Cell):
-    def __init__(self, layout, name):
-        super().__init__(name)
-        self.layout = layout
-        self.stacks = []
-
-    def _route_instances(self):
-        data = []
-        for stack in self.stacks:
-            data.extend(stack._route_instances())
-        return data
-
-    def instanceRegex(self):
-        names = [re.escape(inst.instanceName) for inst in self._route_instances()]
-        if not names:
-            return ""
-        return "^(" + "|".join(names) + ")$"
-
-    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=1, excludeInstances=""):
-        include = self.instanceRegex()
-        self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
-        return self
-
-    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances="", accessLayer=None):
-        include = self.instanceRegex()
-        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
-        return self
-
-    def representativeAccessRects(self, net, accessLayer, anymetal=False):
-        rects = []
-        for stack in self.stacks:
-            rects.extend(stack.representativeAccessRects(net, accessLayer, anymetal=anymetal))
-        return self.layout.collapseRepresentativeRects(net, rects)
-
-    def addStack(self, name, instances, preserveOrder=False):
-        stack = StackGroup(self.layout, name)
-        stack.preserve_order = preserveOrder
-        stack.addInstances(instances)
-        self.stacks.append(stack)
-        self.add(stack)
-        self.updateBoundingRect()
-        return stack
-
-    def addStackByGroup(self, groupName, name=None, fillGroup=None):
-        instances = self.layout.getSortedInstancesByGroupName(groupName)
-        if fillGroup is not None:
-            instances.extend(self.layout.getSortedInstancesByGroupName(fillGroup))
-        return self.addStack(name or groupName, instances, preserveOrder=True)
-
-    def addParallelStack(self, name, instances, preserveOrder=False):
-        return self.addStack(name, instances, preserveOrder=preserveOrder)
-
-    def addParallelStackByGroup(self, groupName, name=None, fillGroup=None):
-        return self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
-
-    def addTransistorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
-        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
-        stack.stack().addTaps()
-        if routeDiodes:
-            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
-        stack.routeParallel(
-            layer=layer,
-            terminals=terminals,
-            edge=edge,
-            edges=edges,
-            excludeInstances=excludeInstances,
-            excludeNets=excludeNets,
-            minRects=minRects,
-            sameTerminal=sameTerminal,
-        )
-        return stack
-
-    def transistorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
-        return self.addTransistorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
-
-    def addCurrentMirrorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
-        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
-        stack.stack().addTaps()
-        if routeDiodes:
-            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
-        stack.routeMirror(
-            layer=layer,
-            terminals=terminals,
-            edge=edge,
-            edges=edges,
-            excludeInstances=excludeInstances,
-            excludeNets=excludeNets,
-            minRects=minRects,
-            sameTerminal=sameTerminal,
-        )
-        return stack
-
-    def currentMirrorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
-        return self.addCurrentMirrorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
-
-    def calcBoundingRect(self):
-        if not self.stacks:
-            return super().calcBoundingRect()
-        active = [stack for stack in self.stacks if stack.instances]
-        if not active:
-            return super().calcBoundingRect()
-        return Cell.calcBoundingRectFromList(active, False)
-
-    def left(self):
-        if not self.stacks:
-            return 0
-        self.updateBoundingRect()
-        return self.x1
-
-    def right(self):
-        if not self.stacks:
-            return 0
-        self.updateBoundingRect()
-        return self.x2
-
-    def bottom(self):
-        if not self.stacks:
-            return 0
-        self.updateBoundingRect()
-        return self.y1
-
-    def top(self):
-        if not self.stacks:
-            return 0
-        self.updateBoundingRect()
-        return self.y2
-
-    def abutTop(self, other, space=0):
-        if not self.stacks:
-            return self
-        dx = int(other.left() - self.left())
-        dy = int(other.top() + space - self.bottom())
-        self.translate(dx, dy)
-        return self
-
-    def abutBottom(self, other, space=0):
-        if not self.stacks:
-            return self
-        dx = int(other.left() - self.left())
-        dy = int(other.bottom() - space - self.top())
-        self.translate(dx, dy)
-        return self
-
-    def abutLeft(self, other, space=0):
-        if not self.stacks:
-            return self
-        dx = int(other.left() - space - self.right())
-        dy = int(other.bottom() - self.bottom())
-        self.translate(dx, dy)
-        return self
-
-    def abutRight(self, other, space=0):
-        if not self.stacks:
-            return self
-        dx = int(other.right() + space - self.left())
-        dy = int(other.bottom() - self.bottom())
-        self.translate(dx, dy)
-        return self
-
-    # Compatibility aliases
-    def moveAbove(self, other, ygap=0):
-        return self.abutTop(other, ygap)
-
-    def moveBelow(self, other, ygap=0):
-        return self.abutBottom(other, ygap)
-
-    def fillDummyTransistors(self, direction="top"):
-        if not self.stacks:
-            return self
-        target_height = max(stack.height() for stack in self.stacks)
-        for stack in self.stacks:
-            stack.fillDummyTransistors(target_height, direction=direction)
-        self.updateBoundingRect()
-        return self
-
-    def routeDummyDevices(self):
-        for stack in self.stacks:
-            stack.routeDummyDevices()
-        self.updateBoundingRect()
-        return self
+    def toJson(self):
+        return {
+            "class": "StackGroup",
+            "name": self.name,
+            "preserve_order": self.preserve_order,
+            "instances": [getattr(i, "instanceName", "") for i in self.instances],
+            "tap_instances": [getattr(i, "instanceName", "") for i in self.tap_instances],
+            "route_bundles": [b.toJson() for b in self.route_bundles],
+        }

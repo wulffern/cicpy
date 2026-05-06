@@ -165,7 +165,43 @@ the pycell scaffold. One-shot generator, not a live binding.
   in `docs/groups.md` so users can hand-edit confidently. Include the
   full `placement` / `ports` / `routes` keys that `apply()` consumes.
 
-### 5. Acceptance / smoke tests
+### 5. Single-ownership refactor for cellgroups
+
+CellGroups are currently a *logical overlay*: they live in
+`layout.cellgroups` (separate from `layout.children`) and re-parent
+their member instances into `stack.children` while the same instances
+remain in `layout.children`. Two views of the same data, kept in sync
+manually.
+
+The cleaner model — and what `ciccreator/cic-core` does in C++ — is
+single ownership: when `cg.addStack(name, instances)` runs, *move*
+those instances out of `layout.children` into `stack.children`.
+`layout.children` then holds ungrouped instances + cellgroups; each
+instance is visited exactly once by tree-walkers (toJson, scene render,
+calcBoundingRect, routing passes).
+
+**Why defer:** at least 8+ flat-iteration sites in `layoutcell.py`
+plus `magicprinter.py`, `routering.py`, `instance.py` do
+`for c in self.children: if c.isInstance(): ...` and would silently
+miss grouped instances. Each needs to be audited and switched to a
+recursive walk (or to a new `getInstances()` helper). Mechanical but
+broad — wants its own commit + full test sweep, not bundled into a
+GUI feature.
+
+**Plan:**
+1. Add `LayoutCell.iterInstances()` helper that recurses through
+   `children` and `cellgroups` once.
+2. Replace flat-iteration sites with the helper.
+3. Move ownership in `CellGroup.addStack` /
+   `StackGroup.addInstance`: pop the instance from
+   `layout.children` (and any other ancestor's `children`) before
+   `stack.add(inst)`.
+4. Drop `cellgroups` field on `LayoutCell.toJson` (cellgroups appear
+   naturally as children).
+5. Run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag` end
+   to end. LVS-clean LELOTEMP_CMP regen is the canary.
+
+### 6. Acceptance / smoke tests
 
 Manual smoke runs only so far. Consider a tiny PNG snapshot test for
 the layout pane on `LELOTEMP_CMP` to catch regressions in `style.py` /

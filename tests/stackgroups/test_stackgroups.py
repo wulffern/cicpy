@@ -1,43 +1,77 @@
 from cicpy.core.instance import Instance
-from cicpy.core.instance import TerminalAccess
 from cicpy.core.layoutcell import LayoutCell
+from cicpy.core.port import Port
 from cicpy.core.rect import Rect
 
 
-def add_instance(layout, name):
+# Synthetic per-terminal x offsets — chosen so that the bulk-port boundary
+# tests can distinguish the bulk contact (x=80) from the source pin (x=60).
+TERMINAL_X = {"D": 20, "G": 40, "S": 60, "B": 80}
+
+
+def add_instance(layout, name, width=100, height=100):
+    """Create a synthetic Instance with a real bounding box.
+
+    Tests previously decoupled rect lookup (via a stubbed
+    ``getTerminalAccess`` lambda) from instance position, so zero-sized
+    instances were fine. Now ``port.get`` reads the actual port child of
+    the instance, and ``stack().stack()`` translates ports with the
+    instance — so each instance needs a non-zero bbox for stacking to
+    place ports at distinct y values.
+    """
     inst = Instance()
     inst.instanceName = name
     inst.name = "DUMMY"
     layout.add(inst)
+    if width or height:
+        inst.setPoint1(0, 0)
+        inst.setPoint2(width, height)
     return inst
 
 
+def add_terminals(inst, terminals, layer, x=None, y=None):
+    """Attach real Port objects to ``inst`` for each named terminal.
+
+    Coordinates default to the instance's current x1/y1; the per-terminal
+    x offset comes from ``TERMINAL_X``. Use this in place of the old
+    ``getTerminalAccess`` lambdas.
+    """
+    if x is None:
+        x = inst.x1
+    if y is None:
+        y = inst.y1
+    for t in terminals:
+        tx = x + TERMINAL_X.get(t, 80)
+        inst.add(Port(t, routeLayer=layer, rect=Rect(layer, tx, y, 10, 10)))
+
+
 def port_stub(parent, terminal):
-    """Graph-node port stub with a real ``.get(layer)`` that mirrors a real
-    Port. Production code no longer falls back through ``getTerminalAccess``,
-    so the stub provides a rect via ``parent.getTerminalAccess`` (which the
-    test still stubs per-instance) until Step 6 drops that path entirely.
+    """Graph-node port stub. ``.get(layer)`` reads ``parent.getPort(terminal)``
+    so the stub mirrors the production lookup path used by
+    ``LayoutCell.getNodeAccessRects`` and ``StackGroup._ports_by_net``.
     """
     p = type("Port", (), {})()
     p.parent = parent
     p.childName = terminal
 
     def _get(layer=None, _parent=parent, _term=terminal):
-        get_access = getattr(_parent, "getTerminalAccess", None)
-        if get_access is None:
+        port = _parent.getPort(_term) if hasattr(_parent, "getPort") else None
+        if port is None or not hasattr(port, "get"):
             return None
-        access_obj = get_access(_term, target_layer=layer or "M2")
-        if access_obj is None or not getattr(access_obj, "accessRects", []):
+        rr = port.get(layer)
+        if rr is None:
+            rr = port.get()
+        if rr is None:
             return None
-        rect = access_obj.accessRects[0]
-        if layer and getattr(rect, "layer", "") != layer:
+        if layer and getattr(rr, "layer", "") and getattr(rr, "layer", "") != layer:
             return None
-        return rect
+        return rr
 
     p.get = _get
     return p
 
 
+# ---- 1. Group-name lookup and stack ownership --------------------------------
 layout = LayoutCell()
 for name in [
     "xn_a10",
@@ -85,23 +119,17 @@ assert [i.instanceName for i in sorted(stack.instances, key=lambda i: i.y1)] == 
     "xfill_xn_a1<0>",
 ]
 
-
-def access(layer, terminal, y):
-    x_by_terminal = {"D": 20, "G": 40, "S": 60}
-    x = x_by_terminal.get(terminal, 80)
-    return TerminalAccess(terminal, layer, layer, None, [], [Rect(layer, x, y, 10, 10)])
-
-
+# ---- 2. routeParallel: trunk + bundle port -----------------------------------
 parallel_layout = LayoutCell()
 parallel_insts = []
 for idx in range(3):
     inst = add_instance(parallel_layout, f"xp_par1<{idx}>")
     inst.moveTo(0, idx * 100)
-    inst.getTerminalAccess = lambda terminal, target_layer="M2", idx=idx: access(target_layer, terminal, idx * 100)
+    add_terminals(inst, ("D", "S"), "M2")
     parallel_insts.append(inst)
 parallel_outside = add_instance(parallel_layout, "xout")
 parallel_outside.moveTo(200, 500)
-parallel_outside.getTerminalAccess = lambda terminal, target_layer="M2": TerminalAccess(terminal, target_layer, target_layer, None, [], [Rect(target_layer, 200, 500, 10, 10)])
+parallel_outside.add(Port("D", routeLayer="M2", rect=Rect("M2", 200, 500, 10, 10)))
 
 parallel_layout.nodeGraph = {
     "VPAR": type("Node", (), {"ports": []})(),
@@ -144,6 +172,7 @@ assert "VSER" in internal_check["opens"]
 assert "VSS" not in internal_check["opens"]
 assert "VSS" not in internal_check["boundary_nets"]
 
+# ---- 3. exportBoundaryPorts onTopLeft / onTopRight selectors -----------------
 selector_layout = LayoutCell()
 selector_group = selector_layout.makeCellGroup("selector")
 selector_layout.nodeGraph = {"VSEL": type("Node", (), {"ports": []})()}
@@ -151,17 +180,20 @@ selector_layout.nodeGraphList = ["VSEL"]
 for name, x, y in (("xsel_a", 0, 0), ("xsel_b", 0, 100), ("xsel_c", 100, 100)):
     inst = add_instance(selector_layout, name)
     inst.moveTo(x, y)
-    inst.getTerminalAccess = lambda terminal, target_layer="M2", x=x, y=y: TerminalAccess(terminal, target_layer, target_layer, None, [], [Rect(target_layer, x, y, 10, 10)])
+    # Each selector instance only exposes a "D" port at its own (x, y).
+    inst.add(Port("D", routeLayer="M2", rect=Rect("M2", x, y, 10, 10)))
     selector_layout.nodeGraph["VSEL"].ports.append(port_stub(inst, "D"))
-    selector_group.addStack(name, [inst]).stack()
+    # Single-instance stack — skip .stack() so the explicit (x, y) is preserved.
+    selector_group.addStack(name, [inst])
 selector_outside = add_instance(selector_layout, "xsel_out")
-selector_outside.getTerminalAccess = lambda terminal, target_layer="M2": TerminalAccess(terminal, target_layer, target_layer, None, [], [Rect(target_layer, 200, 0, 10, 10)])
+selector_outside.add(Port("D", routeLayer="M2", rect=Rect("M2", 200, 0, 10, 10)))
 selector_layout.nodeGraph["VSEL"].ports.append(port_stub(selector_outside, "D"))
 assert selector_group.exportBoundaryPorts(layer="M2", options="onTopLeft")[0].x1 == 0
 assert selector_group.exportBoundaryPorts(layer="M2", options="onTopLeft")[0].y1 == 100
 assert selector_group.exportBoundaryPorts(layer="M2", options="onTopRight")[0].x1 == 100
 assert selector_group.exportBoundaryPorts(layer="M2", options="onTopRight")[0].y1 == 100
 
+# ---- 4. exportBoundaryPorts: bulk vs source default --------------------------
 bulk_layout = LayoutCell()
 bulk_group = bulk_layout.makeCellGroup("bulk")
 bulk_layout.nodeGraph = {"VSS": type("Node", (), {"ports": []})()}
@@ -169,12 +201,13 @@ bulk_layout.nodeGraphList = ["VSS"]
 for idx in range(2):
     inst = add_instance(bulk_layout, f"xn_bulk{idx}")
     inst.moveTo(0, idx * 100)
-    inst.getTerminalAccess = lambda terminal, target_layer="M2", idx=idx: access(target_layer, terminal, idx * 100)
+    add_terminals(inst, ("S", "B"), "M2")
     bulk_layout.nodeGraph["VSS"].ports.append(port_stub(inst, "S"))
     bulk_layout.nodeGraph["VSS"].ports.append(port_stub(inst, "B"))
-    bulk_group.addStack(f"bulk{idx}", [inst]).stack()
+    # Single-instance stack — skip .stack() so the explicit y is preserved.
+    bulk_group.addStack(f"bulk{idx}", [inst])
 bulk_outside = add_instance(bulk_layout, "xbulk_out")
-bulk_outside.getTerminalAccess = lambda terminal, target_layer="M2": TerminalAccess(terminal, target_layer, target_layer, None, [], [Rect(target_layer, 200, 0, 10, 10)])
+bulk_outside.add(Port("S", routeLayer="M2", rect=Rect("M2", 200, 0, 10, 10)))
 bulk_layout.nodeGraph["VSS"].ports.append(port_stub(bulk_outside, "S"))
 default_bulk_ports = bulk_group.exportBoundaryPorts(layer="M2")
 assert len(default_bulk_ports) == 1
@@ -185,11 +218,12 @@ bulk_top_rects = bulk_layout.getNodeAccessRects("VSS", "M2")
 assert any(r.x1 == 60 for r in bulk_top_rects)
 assert not any(r.x1 == 80 for r in bulk_top_rects)
 
+# ---- 5. transistorStack with shared gate net (parallel routing) --------------
 transistor_layout = LayoutCell()
 for idx in range(2):
     inst = add_instance(transistor_layout, f"xn_t1<{idx}>")
     inst.moveTo(0, idx * 100)
-    inst.getTerminalAccess = lambda terminal, target_layer="M2", idx=idx: access(target_layer, terminal, idx * 100)
+    add_terminals(inst, ("G",), "M2")
 transistor_layout.nodeGraph = {"VT": type("Node", (), {"ports": []})()}
 for inst in transistor_layout.children:
     transistor_layout.nodeGraph["VT"].ports.append(port_stub(inst, "G"))
@@ -199,15 +233,10 @@ transistor_stack = transistor_group.transistorStack("xn_t")
 assert len(transistor_stack.parallel_groups) == 1
 assert "VT" in transistor_stack.parallel_groups[0].group_ports
 
+# ---- 6. routeDiodeConnected: D-G tie via addDirectedRoute --------------------
 diode_layout = LayoutCell()
 diode_inst = add_instance(diode_layout, "xn_diode1")
-diode_inst.getTerminalAccess = lambda terminal, target_layer="M1": access(target_layer, terminal, 0)
-# routeDiodeConnected now resolves pin geometry via findAllRectangles, which
-# walks the instance's port children. Add real Port objects on M1 so the
-# instname:terminal regex resolves.
-from cicpy.core.port import Port
-diode_inst.add(Port("D", routeLayer="M1", rect=Rect("M1", 20, 0, 10, 10)))
-diode_inst.add(Port("G", routeLayer="M1", rect=Rect("M1", 40, 0, 10, 10)))
+add_terminals(diode_inst, ("D", "G"), "M1")
 diode_layout.nodeGraph = {"VDIO": type("Node", (), {"ports": []})()}
 diode_layout.nodeGraph["VDIO"].ports.append(port_stub(diode_inst, "D"))
 diode_layout.nodeGraph["VDIO"].ports.append(port_stub(diode_inst, "G"))
@@ -224,16 +253,18 @@ assert diode_route.net == "VDIO"
 assert diode_route in diode_layout.children
 assert diode_route in diode_layout.routes
 
+# ---- 7. currentMirrorStack: shared G/S, distinct D ---------------------------
 mirror_layout = LayoutCell()
 mirror_insts = []
 for idx in range(3):
     inst = add_instance(mirror_layout, f"xp_mirr{idx + 1}")
     inst.moveTo(0, idx * 100)
-    inst.getTerminalAccess = lambda terminal, target_layer="M2", idx=idx: access(target_layer, terminal, idx * 100)
+    add_terminals(inst, ("D", "G", "S"), "M2")
     mirror_insts.append(inst)
 mirror_outside = add_instance(mirror_layout, "xbias")
 mirror_outside.moveTo(200, 500)
-mirror_outside.getTerminalAccess = lambda terminal, target_layer="M2": TerminalAccess(terminal, target_layer, target_layer, None, [], [Rect(target_layer, 200, 500, 10, 10)])
+mirror_outside.add(Port("G", routeLayer="M2", rect=Rect("M2", 200, 500, 10, 10)))
+mirror_outside.add(Port("S", routeLayer="M2", rect=Rect("M2", 200, 500, 10, 10)))
 mirror_layout.nodeGraph = {
     "VG": type("Node", (), {"ports": []})(),
     "VS": type("Node", (), {"ports": []})(),

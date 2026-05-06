@@ -28,7 +28,6 @@ from .cell import Cell
 from .layoutcell import LayoutCell
 from .port import Port
 from .rect import Rect
-from .route import Route
 
 
 class _PhysicalInst:
@@ -765,48 +764,6 @@ class StackGroup(CellGroup):
                     return net
         return None
 
-    def _direct_tie_rect(self, layer, first, second, routeType=""):
-        if first is None or second is None:
-            return None
-        y1 = max(first.y1, second.y1)
-        y2 = min(first.y2, second.y2)
-        if y2 > y1 and routeType in ("", "-", "-|--", "--|-"):
-            x1 = min(first.x1, second.x1)
-            x2 = max(first.x2, second.x2)
-            return Rect(layer, x1, y1, x2 - x1, y2 - y1)
-        x1 = max(first.x1, second.x1)
-        x2 = min(first.x2, second.x2)
-        if x2 > x1 and routeType in ("", "||", "-|--", "--|-"):
-            y1 = min(first.y1, second.y1)
-            y2 = max(first.y2, second.y2)
-            return Rect(layer, x1, y1, x2 - x1, y2 - y1)
-        return None
-
-    def _add_direct_route_rect(self, rect, is_diode=False):
-        self.direct_routes.append(rect)
-        if is_diode:
-            self.diode_routes.append(rect)
-        self.add(rect)
-        self.updateBoundingRect()
-        return rect
-
-    def _add_direct_route_between(self, layer, net, start_rect, stop_rect, routeType="", is_diode=False, route_desc=""):
-        route_rect = self._direct_tie_rect(layer, start_rect, stop_rect, routeType=routeType)
-        if route_rect is None:
-            return None
-        route_rect.net = net
-        if route_desc:
-            route_rect.route_owner_info = {
-                "name": net,
-                "net": net,
-                "layer": layer,
-                "route": route_desc,
-                "options": "",
-                "debug_api": "routeDiodeConnected" if is_diode else "directRouteRect",
-                "debug_internal": False,
-            }
-        return self._add_direct_route_rect(route_rect, is_diode=is_diode)
-
     def _edge_port_rect(self, layer, route_rect, edge, port_height):
         if route_rect is None:
             return None
@@ -1045,46 +1002,6 @@ class StackGroup(CellGroup):
 
     def _tap_name(self, cell_name, suffix):
         return re.sub(r"C\d+F\d+$", suffix, cell_name)
-
-    def _overlap_amount(self, a, b, axis="y"):
-        if a is None or b is None:
-            return 0
-        if axis == "x":
-            return max(0, min(a.x2, b.x2) - max(a.x1, b.x1))
-        return max(0, min(a.y2, b.y2) - max(a.y1, b.y1))
-
-    def _choose_access_rect(self, access, reference=None, axis="y", prefer_lower=True):
-        if access is None or not access.accessRects:
-            return None
-        if reference is None:
-            rects = sorted(access.accessRects, key=lambda r: (r.y1, r.x1))
-            return rects[0] if prefer_lower else rects[-1]
-
-        def score(rect):
-            overlap = self._overlap_amount(rect, reference, axis)
-            distance = abs(rect.centerY() - reference.centerY()) + abs(rect.centerX() - reference.centerX())
-            tie = rect.y1 if prefer_lower else -rect.y2
-            return (-overlap, distance, tie, rect.x1)
-
-        return sorted(access.accessRects, key=score)[0]
-
-    def _add_dummy_route(self, net_name, route_layer, start_rects, stop_rects, route_type):
-        if not start_rects or not stop_rects:
-            return None
-        route = Route(net_name, route_layer, start_rects, stop_rects, "", route_type)
-        if hasattr(self.layout, "_annotateRoute"):
-            self.layout._annotateRoute(route, "routeDummyTerminals", {
-                "stack": self.name,
-                "net": net_name,
-                "layer": route_layer,
-                "routeType": route_type,
-                "internal": True,
-            })
-        self.add(route)
-        if route not in self.layout.routes:
-            self.layout.routes.append(route)
-        self.dummy_routes.append(route)
-        return route
 
     def routeDummyTerminals(self, inst):
         """Tie B-D, B-S, and D-S of a dummy fill device on M1 via three

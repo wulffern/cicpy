@@ -147,10 +147,12 @@ def add_terminal_labels(cell, labels):
         inst = instances.get(instance_name)
         if inst is None:
             continue
-        access = inst.getTerminalAccess(terminal_name, target_layer="M1")
-        if access is None or access.isEmpty():
+        port = inst.getPort(terminal_name)
+        if port is None:
             continue
-        rect = access.primary()
+        rect = port.get("M1")
+        if rect is None:
+            continue
         text = cic.Text(text_value)
         text.moveTo(rect.x1, rect.y2 + LABEL_DY)
         cell.add(text)

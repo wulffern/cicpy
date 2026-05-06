@@ -3,9 +3,10 @@
 Status: **Phases 1, 2, 2.5, 3, 4a–4d, and 4-ext all shipped.** The viewer
 is a working planning surface: layout + schematic panes, cross-probing,
 hierarchy nav, planning groups, connectivity check with flight lines,
-route authoring, schematic rename, and a nets panel with lasso select.
-Pycells consume the YAML via `cicpy.groups.apply(layout)`. Remaining
-work is a short tail of polish items — see [What's next](#whats-next).
+route authoring, schematic rename, a nets panel with lasso select, and
+layout hierarchy levels. Pycells consume the YAML via
+`cicpy.groups.apply(layout)`. Remaining work is a short tail of polish
+items — see [What's next](#whats-next).
 
 See [`gui`](/cicpy/gui) for usage.
 
@@ -118,6 +119,11 @@ extra routing/sizing on top.
 - **Latest (`be2a743`)** — Lasso selection in the schem pane, nets
   panel listing every `lab=` net with active-group filter and substring
   search, `apply()` consumes per-group `ports`.
+- **Latest (`ea4d804` + follow-up)** — Layout hierarchy metadata and
+  rendering. `.cic` JSON now carries `cellgroups` metadata
+  (`CellGroup` / `StackGroup` / `RouteBundle` bboxes and ports), and
+  the layout scene can collapse rendering to CellGroups, Stacks,
+  RouteBundles, or Full geometry.
 
 ## What's next
 
@@ -165,54 +171,7 @@ the pycell scaffold. One-shot generator, not a live binding.
   in `docs/groups.md` so users can hand-edit confidently. Include the
   full `placement` / `ports` / `routes` keys that `apply()` consumes.
 
-### 5. Hierarchy levels in the layout pane
-
-Let the user collapse the layout pane to higher levels of the
-CellGroup → StackGroup → RouteBundle hierarchy, so a busy schematic
-can be skimmed at the group level and only drilled into when needed.
-
-**Level mapping (proposed):**
-
-| Level | Renders | Hidden |
-|-------|---------|--------|
-| 0 | top-level CellGroup outlines (labeled box per `nmos`/`pmos`) | everything inside any CellGroup |
-| 1 | StackGroup outlines (`n_mirr_load`, `p_diff`, …) | instances inside any StackGroup |
-| 2 | RouteBundle outlines + instance bboxes | nothing extra |
-| 3 | Full geometry (current behaviour) | — |
-
-Items not inside any group (loose instances, top-level routes, port
-shapes) stay visible at every level.
-
-**Control:** a "Hierarchy level" submenu under **View** with four
-checkable actions (0 / 1 / 2 / Full). Start global; per-group
-collapse in `groups_panel.py` is a possible refinement.
-
-**Implementation notes:**
-
-- CellGroups are not in `layout.children` today (see §6). The scene
-  must walk `cell.cellgroups` separately for structure, then walk
-  `cell.children` for geometry, hiding instances whose containing
-  group exceeds the current level.
-- Each group already has a `calcBoundingRect`; outline rendering is a
-  cosmetic `QGraphicsRectItem` plus a `QGraphicsSimpleTextItem` label
-  that ignores transformations (so labels stay readable at any zoom).
-- Build a `hidden_instance_names` set from the group walk; short-circuit
-  in `LayoutScene._add_instance` based on that set.
-- Re-run `set_cell` (cheap) on level change; or factor the overlay
-  logic out so only outline items are rebuilt.
-
-**Files touched:**
-
-- `src/cicpy/gui/mainwindow.py` — View menu submenu + handler.
-- `src/cicpy/gui/layout_scene.py` — `set_level`, `_build_group_overlay`,
-  `_add_group_outline`, hooks in `set_cell` / `_add_instance`.
-
-**Open question:** when descending levels, do we keep the higher-level
-outlines drawn as a faint background, or hide them entirely? Faint
-background gives orientation; hide is cleaner. I'd default to hide
-and let the user redraw the outline by stepping back up.
-
-### 6. Single-ownership refactor for cellgroups
+### 5. Single-ownership refactor for cellgroups
 
 CellGroups are currently a *logical overlay*: they live in
 `layout.cellgroups` (separate from `layout.children`) and re-parent

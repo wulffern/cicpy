@@ -10,7 +10,16 @@ import re
 import shutil
 
 from PySide6.QtCore import QFileSystemWatcher, QProcess, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
@@ -27,7 +36,13 @@ from cicpy import groups as cicgroups
 from cicpy.eda.xschem import Schematic
 from .connectivity_panel import ConnectivityPanel
 from .groups_panel import GroupsPanel
-from .layout_scene import LayoutScene
+from .layout_scene import (
+    HIERARCHY_BUNDLES,
+    HIERARCHY_CELLGROUPS,
+    HIERARCHY_FULL,
+    HIERARCHY_STACKS,
+    LayoutScene,
+)
 from .nets_panel import NetsPanel
 from .layout_view import LayoutView
 from .schem_scene import SchemScene
@@ -131,6 +146,7 @@ class MainWindow(QMainWindow):
         self.design = self._load_design()
 
         self.scene = LayoutScene(self.design, self.style)
+        self.scene.set_hierarchy_level(self._restore_hierarchy_level())
         self.view = LayoutView(self.scene)
 
         symbol_libs = []
@@ -225,6 +241,7 @@ class MainWindow(QMainWindow):
         self._rerun_debounce.setSingleShot(True)
         self._rerun_debounce.setInterval(500)
         self._rerun_debounce.timeout.connect(self.rerun_spi2mag)
+        self._hierarchy_actions = {}
         # menu
         self._build_menu()
 
@@ -451,6 +468,26 @@ class MainWindow(QMainWindow):
         run_menu.addAction(a_cmd)
 
         view_menu = menu_bar.addMenu("&View")
+        hier_menu = QMenu("Hierarchy level", self)
+        self._hierarchy_action_group = QActionGroup(self)
+        self._hierarchy_action_group.setExclusive(True)
+        for level, label in (
+            (HIERARCHY_CELLGROUPS, "CellGroups"),
+            (HIERARCHY_STACKS, "Stacks"),
+            (HIERARCHY_BUNDLES, "RouteBundles"),
+            (HIERARCHY_FULL, "Full"),
+        ):
+            action = QAction(label, self, checkable=True)
+            action.setData(level)
+            action.setChecked(self.scene.hierarchy_level() == level)
+            action.triggered.connect(
+                lambda checked=False, lvl=level: self._set_hierarchy_level(lvl)
+            )
+            self._hierarchy_action_group.addAction(action)
+            hier_menu.addAction(action)
+            self._hierarchy_actions[level] = action
+        view_menu.addMenu(hier_menu)
+
         a_mute = QAction("Mute dummy fillers", self, checkable=True)
         a_mute.setChecked(True)
         a_mute.toggled.connect(self.scene.set_dummies_muted)
@@ -499,6 +536,29 @@ class MainWindow(QMainWindow):
         self.settings.setValue("auto_rerun", self._auto_rerun)
         state = "on" if self._auto_rerun else "off"
         self.statusBar().showMessage(f"auto-rerun {state}", 2000)
+
+    def _restore_hierarchy_level(self):
+        value = self.settings.value("hierarchy_level", HIERARCHY_FULL)
+        try:
+            return int(value)
+        except Exception:
+            return HIERARCHY_FULL
+
+    def _set_hierarchy_level(self, level):
+        self.scene.set_hierarchy_level(level)
+        for lvl, action in self._hierarchy_actions.items():
+            action.setChecked(lvl == self.scene.hierarchy_level())
+        self._populate_routes()
+        self.scene.apply_visibility()
+        self._apply_group_filter()
+        self.settings.setValue("hierarchy_level", self.scene.hierarchy_level())
+        label = {
+            HIERARCHY_CELLGROUPS: "CellGroups",
+            HIERARCHY_STACKS: "Stacks",
+            HIERARCHY_BUNDLES: "RouteBundles",
+            HIERARCHY_FULL: "Full",
+        }.get(self.scene.hierarchy_level(), "Full")
+        self.statusBar().showMessage(f"hierarchy level: {label}", 2000)
 
     def _edit_rerun_cmd(self):
         from PySide6.QtWidgets import QInputDialog

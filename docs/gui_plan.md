@@ -310,25 +310,36 @@ the abstraction is wrong — fold it into one of the three.
 2. **Step 2 — Fallback in `representativeAccessRects`** (cheap).
    Replace `cellgroup.py:639-647` access lookup with `port.get(layer)`;
    return empty if absent.
-3. **Step 3 — `routeDiodeConnected`** (real work). Rewrite as a loop
+3. **Step 2.5 — Port C++ `findAllRectangles` path semantics**
+   (prerequisite for Steps 3–5). cicpy's current `Cell.findAllRectangles`
+   only iterates direct children matching `child.name`; the
+   `instname:terminal` syntax used by the C++ tool's
+   `addDirectedRoutes` JSON does **not** work in Python today. Port the
+   ciccreator behavior from `cic-core/src/core/cell.cpp:90-180`:
+   comma-split regex, `:`-recurse into instances by `instanceName`,
+   local port lookup on bare names, plus the auxiliary
+   immediate-child-instance-port match. With that, route strings like
+   `"xn_diode1:D-xn_diode1:G"` resolve correctly and Steps 3–5 can use
+   `addDirectedRoute` as the rewrite target.
+4. **Step 3 — `routeDiodeConnected`** (real work). Rewrite as a loop
    of `addDirectedRoute(layer, net, f"{name}:D-{name}:G")` calls (one
    per diode-connected instance). Keep the diode-connect detection
    logic (drain_net == gate_net) — only the geometry construction
    changes.
-4. **Step 4 — `routeDummyTerminals`** (real work). Rewrite as three
+5. **Step 4 — `routeDummyTerminals`** (real work). Rewrite as three
    `addDirectedRoute` calls per dummy device: `B-D` mid, `B-S` side,
    `D-S` vertical, all on `M1`.
-5. **Step 5 — `routeParallel` / `routeMirror`** (real work).
+6. **Step 5 — `routeParallel` / `routeMirror`** (real work).
    Collapse the trunk-construction path to `addConnectivityRoute`
    calls scoped by `includeInstances` to the stack's members. The
    `RouteBundle` then exposes its boundary port as a post-pass that
    harvests the produced route geometry on the bundle's edge layer
    and wraps it as the group's exported port (preserves §1).
-6. **Step 6 — Delete `TerminalAccess` / `Instance.getTerminalAccess`**.
+7. **Step 6 — Delete `TerminalAccess` / `Instance.getTerminalAccess`**.
    Strip imports from `tests/stackgroups/test_stackgroups.py` and
    rewrite those tests to assert against routed geometry / boundary
    ports. Remove `tests/routes/build_route_examples.py:150` use.
-7. **Step 7 — Documentation**. Update
+8. **Step 7 — Documentation**. Update
    `tests/sch2mag/lelo_temp_sky130a/AGENTS.md` and
    `tests/routes/routes.md` to drop `getTerminalAccess` from the
    "preferred API" guidance and point at the three primitives plus

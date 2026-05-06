@@ -486,16 +486,99 @@ class Cell(Rect):
                 rects.append(child)
 
     def findAllRectangles(self, regex:str, layer:str):
-        rects = list()
+        """Resolve ``regex`` to a list of rectangles on ``layer``.
+
+        Mirrors ``cIcCore::Cell::findAllRectangles`` from ciccreator
+        (`cic-core/src/core/cell.cpp:90-180`). The query string is
+        comma-separated; each segment is one of:
+
+        * ``"name"`` — matches this cell's local port named ``name``,
+          this cell's ``named_rects[name]``, and any immediate
+          child-instance port named ``name``.
+        * ``"instname:path"`` — matches instances whose
+          ``instanceName`` matches the regex ``instname`` and recurses
+          into each match with ``path`` (which may itself contain
+          further ``:`` segments).
+
+        The layer argument filters: a rect is only returned when its
+        layer equals ``layer`` (or ``layer`` is empty).
+        """
+        rects = []
+        self._findRectanglesByRegex(rects, regex, layer)
+        self._findRectangles(rects, regex, layer)
+        return rects
+
+    def _findRectanglesByRegex(self, rects, regex, layer):
+        for s in (s.strip() for s in (regex or "").split(",")):
+            if not s:
+                continue
+            if ":" in s:
+                inst_part, _, sub_path = s.partition(":")
+                try:
+                    inst_re = re.compile(inst_part)
+                except re.error:
+                    continue
+                for child in self.children:
+                    if child is None:
+                        continue
+                    if not (hasattr(child, "isInstance") and child.isInstance()):
+                        continue
+                    if not inst_re.search(getattr(child, "instanceName", "")):
+                        continue
+                    if hasattr(child, "_findRectanglesByRegex"):
+                        child._findRectanglesByRegex(rects, sub_path, layer)
+            else:
+                # Local port lookup (exact name match — matches C++ behavior).
+                port = self.ports.get(s)
+                if port is not None:
+                    rr = self._port_rect_on_layer(port, layer)
+                    if rr is not None:
+                        rects.append(rr)
+                # named_rects entry by exact name.
+                nr = self.named_rects.get(s)
+                if nr is not None and (not layer or getattr(nr, "layer", "") == layer):
+                    rects.append(nr)
+
+    def _findRectangles(self, rects, name, layer):
+        """Match `name` (no path semantics) against immediate child instance
+        ports and named_rects on this cell. C++ counterpart:
+        ``cIcCore::Cell::findRectangles``.
+        """
+        if not name or "," in name or ":" in name:
+            return
         for child in self.children:
             if child is None:
                 continue
-            if layer and child.layer != layer:
+            if not (hasattr(child, "isInstance") and child.isInstance()):
                 continue
-            cname = getattr(child,'name','')
-            if re.search(regex, cname) or (hasattr(child,'isRect') and child.isRect() and re.search(regex, layer)):
-                rects.append(child)
-        return rects
+            for pi in getattr(child, "children", []):
+                if pi is None:
+                    continue
+                if not (hasattr(pi, "isInstancePort") and pi.isInstancePort()):
+                    continue
+                if getattr(pi, "name", "") != name:
+                    continue
+                rr = self._port_rect_on_layer(pi, layer)
+                if rr is not None:
+                    rects.append(rr)
+        nr = self.named_rects.get(name)
+        if nr is not None and (not layer or getattr(nr, "layer", "") == layer):
+            # Already appended in _findRectanglesByRegex when no `:`/`,`; skip
+            # to avoid duplication.
+            if nr not in rects:
+                rects.append(nr)
+
+    def _port_rect_on_layer(self, port, layer):
+        if port is None or not hasattr(port, "get"):
+            return None
+        rr = port.get(layer)
+        if rr is None:
+            rr = port.get()
+        if rr is None:
+            return None
+        if layer and getattr(rr, "layer", "") and getattr(rr, "layer", "") != layer:
+            return None
+        return rr
 
     #     QJsonObject toJson();
     #     void fromJson(QJsonObject o);

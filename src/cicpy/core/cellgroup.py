@@ -100,6 +100,7 @@ class RouteBundle(Cell):
         return {
             "class": "RouteBundle",
             "name": self.name,
+            "bbox": _bbox_json(self),
             "members": [getattr(m, "instanceName", "") for m in self.members],
             "routes": [
                 {
@@ -109,15 +110,77 @@ class RouteBundle(Cell):
                 }
                 for r in self.route_rects
             ],
-            "ports": {
-                net: {"layer": getattr(p, "routeLayer", ""), "side": getattr(p, "side", "")}
-                for net, p in self.group_ports.items()
-            },
+            "ports": _ports_json(self.group_ports.values()),
         }
 
 
 # Backward-compat: older code referenced this class as ParallelGroup.
 ParallelGroup = RouteBundle
+
+
+def _rect_json(obj):
+    if obj is None:
+        return None
+    return {
+        "x1": obj.x1,
+        "y1": obj.y1,
+        "x2": obj.x2,
+        "y2": obj.y2,
+        "layer": getattr(obj, "layer", ""),
+        "net": getattr(obj, "net", ""),
+    }
+
+
+def _bbox_json(obj):
+    if obj is None:
+        return None
+    try:
+        obj.updateBoundingRect()
+    except Exception:
+        pass
+    return _rect_json(obj)
+
+
+def _port_json(port):
+    if port is None:
+        return None
+    rect = port.get(getattr(port, "routeLayer", None)) if hasattr(port, "get") else port
+    data = _rect_json(rect)
+    if data is None:
+        return None
+    data["name"] = getattr(port, "name", "")
+    data["routeLayer"] = getattr(port, "routeLayer", data.get("layer", ""))
+    data["side"] = getattr(port, "side", "")
+    data["spicePort"] = getattr(port, "spicePort", False)
+    return data
+
+
+def _ports_json(ports):
+    out = []
+    for port in ports:
+        data = _port_json(port)
+        if data is not None:
+            out.append(data)
+    return out
+
+
+def _dedupe_ports(ports):
+    out = []
+    seen = set()
+    for port in ports:
+        key = (
+            getattr(port, "name", ""),
+            getattr(port, "routeLayer", ""),
+            getattr(port, "x1", None),
+            getattr(port, "y1", None),
+            getattr(port, "x2", None),
+            getattr(port, "y2", None),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(port)
+    return out
 
 
 class CellGroup(LayoutCell):
@@ -195,6 +258,7 @@ class CellGroup(LayoutCell):
 
     def addTransistorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
         stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+        stack.kind = "transistorStack"
         stack.stack().addTaps()
         if routeDiodes:
             stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
@@ -215,6 +279,7 @@ class CellGroup(LayoutCell):
 
     def addCurrentMirrorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
         stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
+        stack.kind = "mirrorStack"
         stack.stack().addTaps()
         if routeDiodes:
             stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
@@ -321,6 +386,12 @@ class CellGroup(LayoutCell):
         self.updateBoundingRect()
         return self
 
+    def exportedPorts(self):
+        ports = []
+        for stack in self.stacks:
+            ports.extend(stack.exportedPorts())
+        return _dedupe_ports(ports)
+
     # ------------------------------------------------------------------
     # JSON output
     # ------------------------------------------------------------------
@@ -328,6 +399,8 @@ class CellGroup(LayoutCell):
         return {
             "class": self.__class__.__name__,
             "name": self.name,
+            "bbox": _bbox_json(self),
+            "ports": _ports_json(self.exportedPorts()),
             "stacks": [s.toJson() for s in self.stacks],
         }
 
@@ -350,6 +423,7 @@ class StackGroup(CellGroup):
         self.diode_routes = []
         self.route_bundles = []
         self.preserve_order = False
+        self.kind = "stack"
 
     # Backward-compat alias for code that still reads `parallel_groups`.
     @property
@@ -951,10 +1025,19 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
+    def exportedPorts(self):
+        ports = []
+        for bundle in self.route_bundles:
+            ports.extend(bundle.group_ports.values())
+        return _dedupe_ports(ports)
+
     def toJson(self):
         return {
             "class": "StackGroup",
             "name": self.name,
+            "kind": self.kind,
+            "bbox": _bbox_json(self),
+            "ports": _ports_json(self.exportedPorts()),
             "preserve_order": self.preserve_order,
             "instances": [getattr(i, "instanceName", "") for i in self.instances],
             "tap_instances": [getattr(i, "instanceName", "") for i in self.tap_instances],

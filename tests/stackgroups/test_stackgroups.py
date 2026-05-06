@@ -155,6 +155,21 @@ assert len(mirror_bus.route_rects) == 2
 source_route = [r for r in mirror_bus.route_rects if r.net == "VS"][0]
 source_port = mirror_bus.group_ports["VS"].get("M2")
 assert source_port.centerY() == source_route.centerY()
+hierarchy = mirror_layout.toJson()["cellgroups"]
+assert hierarchy[0]["class"] == "CellGroup"
+assert hierarchy[0]["name"] == "pmos"
+assert hierarchy[0]["bbox"]["x2"] > hierarchy[0]["bbox"]["x1"]
+assert {p["name"] for p in hierarchy[0]["ports"]} == {"VG", "VS"}
+assert hierarchy[0]["stacks"][0]["class"] == "StackGroup"
+assert hierarchy[0]["stacks"][0]["kind"] == "mirrorStack"
+assert hierarchy[0]["stacks"][0]["instances"] == ["xp_mirr1", "xp_mirr2", "xp_mirr3"]
+assert {p["name"] for p in hierarchy[0]["stacks"][0]["ports"]} == {"VG", "VS"}
+assert hierarchy[0]["stacks"][0]["route_bundles"][0]["class"] == "RouteBundle"
+loaded_layout = LayoutCell()
+loaded_layout.design = type("Design", (), {"prefix": ""})()
+loaded_layout.fromJson(mirror_layout.toJson())
+assert loaded_layout.guiHierarchy == hierarchy
+assert loaded_layout.toJson()["cellgroups"] == hierarchy
 
 with open("stackgroups.status", "w", encoding="utf-8") as fh:
     fh.write("stack group helper test passed\n")

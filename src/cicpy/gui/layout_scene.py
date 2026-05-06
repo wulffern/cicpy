@@ -33,6 +33,10 @@ ROUTE_CLASSES = {
 }
 TEXT_FONT_SIZE = 18.0
 TEXT_Z_VALUE = 1000
+HIERARCHY_CELLGROUPS = 0
+HIERARCHY_STACKS = 1
+HIERARCHY_BUNDLES = 2
+HIERARCHY_FULL = 3
 
 
 def _is_xfill_name(name):
@@ -61,8 +65,22 @@ class LayoutScene(QGraphicsScene):
         self._dummy_groups = []
         self._dummies_muted = True
         self._highlight_overlays = []
+        self._hierarchy_level = HIERARCHY_FULL
+        self._hierarchy_hidden_instances = set()
+        self._hierarchy_hidden_rects = set()
         self.cell = None
         self.setBackgroundBrush(QBrush(QColor(20, 20, 20)))
+
+    def set_hierarchy_level(self, level):
+        level = max(HIERARCHY_CELLGROUPS, min(HIERARCHY_FULL, int(level)))
+        if level == self._hierarchy_level:
+            return
+        self._hierarchy_level = level
+        if self.cell is not None:
+            self.set_cell(self.cell)
+
+    def hierarchy_level(self):
+        return self._hierarchy_level
 
     def set_cell(self, cell):
         self.clear()
@@ -78,12 +96,16 @@ class LayoutScene(QGraphicsScene):
         self._highlight_overlays = []
         self._flight_items = []
         self._member_filter = None
+        self._hierarchy_hidden_instances = set()
+        self._hierarchy_hidden_rects = set()
         self.cell = cell
         if cell is None:
             self.setSceneRect(QRectF())
             return
+        self._build_hierarchy_filter(cell)
         self._port_label_names = self._collect_top_port_label_names(cell.children)
         self._walk(cell.children, parent=None)
+        self._add_hierarchy_overlay(cell)
         bb = cell.calcBoundingRect()
         if bb is not None and bb.width() > 0 and bb.height() > 0:
             margin_x = bb.width() * 0.05
@@ -204,6 +226,138 @@ class LayoutScene(QGraphicsScene):
                     names.add(child.name)
         return names
 
+    def _hierarchy(self, cell):
+        return list(getattr(cell, "guiHierarchy", []) or [])
+
+    def _rect_key(self, data):
+        if not data:
+            return None
+        return (
+            data.get("layer", ""),
+            data.get("net", ""),
+            data.get("x1"),
+            data.get("y1"),
+            data.get("x2"),
+            data.get("y2"),
+        )
+
+    def _object_rect_key(self, obj):
+        return (
+            getattr(obj, "layer", ""),
+            getattr(obj, "net", ""),
+            getattr(obj, "x1", None),
+            getattr(obj, "y1", None),
+            getattr(obj, "x2", None),
+            getattr(obj, "y2", None),
+        )
+
+    def _group_instance_names(self, group):
+        names = set()
+        for stack in group.get("stacks", []) or []:
+            names.update(stack.get("instances", []) or [])
+            names.update(stack.get("tap_instances", []) or [])
+        return names
+
+    def _group_route_rect_keys(self, group):
+        keys = set()
+        for stack in group.get("stacks", []) or []:
+            for bundle in stack.get("route_bundles", []) or []:
+                for route in bundle.get("routes", []) or []:
+                    key = self._rect_key(route)
+                    if key is not None:
+                        keys.add(key)
+        return keys
+
+    def _build_hierarchy_filter(self, cell):
+        if self._hierarchy_level >= HIERARCHY_FULL:
+            return
+        for group in self._hierarchy(cell):
+            if self._hierarchy_level <= HIERARCHY_STACKS:
+                self._hierarchy_hidden_instances.update(self._group_instance_names(group))
+                self._hierarchy_hidden_rects.update(self._group_route_rect_keys(group))
+
+    def _qrect_from_data(self, data):
+        if not data:
+            return QRectF()
+        x1 = data.get("x1", 0)
+        y1 = data.get("y1", 0)
+        x2 = data.get("x2", x1)
+        y2 = data.get("y2", y1)
+        return QRectF(x1, y1, x2 - x1, y2 - y1)
+
+    def _add_hierarchy_outline(self, data, label, color="#FFD000"):
+        rect = self._qrect_from_data(data.get("bbox", {}))
+        if rect.isEmpty():
+            return None
+        pen = QPen(QColor(color))
+        pen.setCosmetic(True)
+        pen.setWidth(3)
+        item = self.addRect(rect, pen, QBrush(Qt.NoBrush))
+        item.setZValue(TEXT_Z_VALUE + 4)
+        text = self._make_text_item(
+            label,
+            rect.x(),
+            rect.y(),
+            "_hierarchy",
+            None,
+            None,
+            TEXT_FONT_SIZE,
+        )
+        if text is not None:
+            text.setZValue(TEXT_Z_VALUE + 5)
+        return item
+
+    def _add_hierarchy_port(self, port):
+        rect = self._qrect_from_data(port)
+        if rect.isEmpty():
+            return
+        layer = port.get("routeLayer") or port.get("layer") or "TXT"
+        pen = self.style.pen(layer) or QPen(QColor("#80D8FF"))
+        brush = self.style.brush(layer) or QBrush(QColor(128, 216, 255, 120))
+        item = self.addRect(rect, pen, brush)
+        item.setZValue(TEXT_Z_VALUE + 6)
+        name = port.get("name", "")
+        if name:
+            text = self._make_text_item(
+                name,
+                rect.x(),
+                rect.y(),
+                "_hierarchy",
+                None,
+                None,
+                TEXT_FONT_SIZE,
+            )
+            if text is not None:
+                text.setZValue(TEXT_Z_VALUE + 7)
+
+    def _add_hierarchy_ports(self, ports):
+        for port in ports or []:
+            self._add_hierarchy_port(port)
+
+    def _add_hierarchy_overlay(self, cell):
+        hierarchy = self._hierarchy(cell)
+        if not hierarchy or self._hierarchy_level >= HIERARCHY_FULL:
+            return
+        if self._hierarchy_level == HIERARCHY_CELLGROUPS:
+            for group in hierarchy:
+                self._add_hierarchy_outline(group, group.get("name", "CellGroup"), "#FFD000")
+                self._add_hierarchy_ports(group.get("ports", []))
+            return
+        if self._hierarchy_level == HIERARCHY_STACKS:
+            for group in hierarchy:
+                for stack in group.get("stacks", []) or []:
+                    kind = stack.get("kind", "StackGroup")
+                    name = stack.get("name", "")
+                    self._add_hierarchy_outline(stack, f"{kind}: {name}", "#9BE7FF")
+                    self._add_hierarchy_ports(stack.get("ports", []))
+            return
+        if self._hierarchy_level == HIERARCHY_BUNDLES:
+            for group in hierarchy:
+                for stack in group.get("stacks", []) or []:
+                    for bundle in stack.get("route_bundles", []) or []:
+                        self._add_hierarchy_outline(bundle, bundle.get("name", "RouteBundle"), "#C7FF8A")
+                        self._add_hierarchy_ports(bundle.get("ports", []))
+
     def _walk(self, children, parent, route_key=None, show_port_labels=True):
         for child in children:
             if child is None:
@@ -230,6 +384,9 @@ class LayoutScene(QGraphicsScene):
         cell = self._resolve_inst_cell(inst)
         if cell is None:
             return
+        inst_name = getattr(inst, "instanceName", "") or ""
+        if inst_name in self._hierarchy_hidden_instances:
+            return
         group = QGraphicsItemGroup(parent) if parent else QGraphicsItemGroup()
         p = inst.getCellPoint()
         group.setPos(p.x, p.y)
@@ -239,7 +396,6 @@ class LayoutScene(QGraphicsScene):
         # Tag instances by their SPICE instanceName for cross-probing. Placement
         # helpers may wrap schematic devices in generated groups, so the
         # user-visible device is not necessarily a direct top-level child.
-        inst_name = getattr(inst, "instanceName", "") or ""
         is_dummy = bool(inst_name) and _is_xfill_name(inst_name)
         index_instance = bool(inst_name) and not is_dummy
         if index_instance:
@@ -271,7 +427,7 @@ class LayoutScene(QGraphicsScene):
             self._items_by_route.setdefault(route_key, []).append(item)
 
     def _item_visible(self, layer, route_key, kind):
-        layer_visible = self.style.is_visible(layer)
+        layer_visible = True if layer == "_hierarchy" else self.style.is_visible(layer)
         route_visible = route_key is None or self.is_route_visible(route_key)
         return layer_visible and route_visible
 
@@ -296,6 +452,8 @@ class LayoutScene(QGraphicsScene):
 
     def _add_rect(self, r, parent, route_key=None):
         if r.x1 == r.x2 or r.y1 == r.y2:
+            return
+        if self._object_rect_key(r) in self._hierarchy_hidden_rects:
             return
         layer = r.layer or ""
         if not layer:

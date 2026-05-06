@@ -146,6 +146,8 @@ class LayoutCell(Cell):
         o["noPowerRoute"] = self.noPowerRoute
         if self.cellgroups:
             o["cellgroups"] = [g.toJson() for g in self.cellgroups if g is not None]
+        elif self.guiHierarchy:
+            o["cellgroups"] = self.guiHierarchy
         return o
 
     def getInstancesByName(self,regex):
@@ -1293,7 +1295,7 @@ class LayoutCell(Cell):
             self.alternateGroup = o["alternateGroup"]
         if("noPowerRoute" in o):
             self.noPowerRoute = o["noPowerRoute"]
-        self.guiHierarchy = o.get("guiHierarchy", [])
+        self.guiHierarchy = o.get("cellgroups", o.get("guiHierarchy", [])) or []
 
     def route(self):
         """Route all routes in this layout cell"""
@@ -1402,8 +1404,13 @@ class LayoutCell(Cell):
         if("useHalfHeight" in o):
             self.useHalfHeight = o["useHalfHeight"]
 
+        if("noPowerRoute" in o):
+            self.noPowerRoute = o["noPowerRoute"]
+
         if("boundarIgnoreRouting" in o):
             self.boundaryIgnoreRouting = o["boundaryIgnoreRouting"]
+
+        self.guiHierarchy = o.get("cellgroups", o.get("guiHierarchy", [])) or []
 
         if("meta" in o):
             self.meta = o["meta"]

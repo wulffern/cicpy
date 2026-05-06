@@ -1084,31 +1084,25 @@ class StackGroup(CellGroup):
         return route
 
     def routeDummyTerminals(self, inst):
+        """Tie B-D, B-S, and D-S of a dummy fill device on M1 via three
+        addDirectedRoute calls. Pin geometry is resolved by
+        ``findAllRectangles`` against ``inst:terminal`` paths.
+        """
         if inst is None:
             return self
-
-        d_access = inst.getTerminalAccess("D", target_layer="M1")
-        g_access = inst.getTerminalAccess("G", target_layer="M1")
-        s_access = inst.getTerminalAccess("S", target_layer="M1")
-        b_access = inst.getTerminalAccess("B", target_layer="M1")
-        if d_access is None or g_access is None or s_access is None or b_access is None:
+        name = getattr(inst, "instanceName", "") or getattr(inst, "name", "")
+        if not name:
             return self
-        if d_access.isEmpty() or g_access.isEmpty() or s_access.isEmpty() or b_access.isEmpty():
-            return self
-
-        d_rect = self._choose_access_rect(d_access)
-        g_rect = self._choose_access_rect(g_access, reference=d_rect)
-        s_rect = self._choose_access_rect(s_access, reference=d_rect, prefer_lower=True)
-        b_mid = self._choose_access_rect(b_access, reference=d_rect)
-        b_side = self._choose_access_rect(b_access, reference=s_rect)
-
-        if d_rect is None or g_rect is None or s_rect is None or b_mid is None or b_side is None:
-            return self
-
-        base = inst.instanceName or inst.name or self.name
-        self._add_dummy_route(f"{base}_dummy_mid", "M1", [b_mid], [d_rect], "-")
-        self._add_dummy_route(f"{base}_dummy_side", "M1", [b_side], [s_rect], "-")
-        self._add_dummy_route(f"{base}_dummy_vert", "M1", [d_rect], [s_rect], "||")
+        nre = re.escape(name)
+        layer = "M1"
+        for net_name, route_str in (
+            (f"{name}_dummy_mid",  f"{nre}:B-{nre}:D"),
+            (f"{name}_dummy_side", f"{nre}:B-{nre}:S"),
+            (f"{name}_dummy_vert", f"{nre}:D||{nre}:S"),
+        ):
+            r = self.layout.addDirectedRoute(layer, net_name, route_str)
+            if r is not None:
+                self.dummy_routes.append(r)
         self.updateBoundingRect()
         return self
 

@@ -65,10 +65,10 @@ Arguments:
 - `cuts`: currently stored but not used to size the cuts; the implementation uses `1x2` or `2x1`
 - `excludeInstances`: regex for dropping instances
 - `includeInstances`: regex for limiting candidate instances
-- `accessLayer`: terminal access layer collected with `instance.getTerminalAccess(...)`; defaults to `verticalLayer`
+- `accessLayer`: per-pin layer used to fetch instance port rectangles via `port.get(accessLayer)`; defaults to `verticalLayer`. Group boundary ports (`CellGroup.exportBoundaryPorts`) are preferred when no `includeInstances` is set, otherwise direct instance port rects on `accessLayer` are used. If a device pin is not exposed on the requested layer, emit an `addDirectedRoute` against the specific pin (e.g. `"xn_bias:D-xn_load:S"`) instead.
 
 Behavior:
-- collects terminal access rectangles on `accessLayer`
+- collects port rectangles on `accessLayer` (group boundary ports first, then instance ports)
 - finds a free vertical trunk track on `verticalLayer`
 - creates horizontal branches on `horizontalLayer`
 - uses `1x2` for vertical access rectangles and `2x1` for horizontal access rectangles

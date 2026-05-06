@@ -133,6 +133,19 @@ extra routing/sizing on top.
   crossing the group boundary, top-level connectivity routes prefer
   those ports, and `includeInstances` remains the explicit direct
   terminal escape hatch.
+- **Latest (§7)** — TerminalAccess removed. The
+  `Instance.getTerminalAccess` / `TerminalAccess` path that walked
+  cell-internal connected geometry is gone; pin discovery now reads
+  `port.get(layer)` directly. `Cell.findAllRectangles` gained the
+  `instname:terminal` path semantics from C++ ciccreator so
+  `addDirectedRoute("M1", net, "xn_diode1:D-xn_diode1:G")` resolves
+  correctly. `routeDiodeConnected` and `routeDummyTerminals` now emit
+  `addDirectedRoute` calls; `routeParallel` / `routeMirror` use
+  `port.get(layer)` for pin discovery and keep the trunk + bundle
+  shape that backs the §1 boundary-port contract. The supported
+  routing primitives are now the only routing primitives:
+  `addConnectivityRoute`, `addOrthogonalConnectivityRoute`, and
+  `addDirectedRoute`.
 
 ## What's next
 
@@ -273,7 +286,7 @@ contract before they behave like routed layout macros.
 5. Done — run `tests/stackgroups`, `tests/sch2mag`, and `tests/spi2mag`
    end to end. LVS-clean LELOTEMP_CMP regen is the canary.
 
-### 7. Remove `TerminalAccess` / `getTerminalAccess`
+### 7. Remove `TerminalAccess` / `getTerminalAccess` (shipped)
 
 `TerminalAccess` (`core/instance.py`) and the various
 `getTerminalAccess(...)` paths into `cellgroup.py`, `layoutcell.py`,

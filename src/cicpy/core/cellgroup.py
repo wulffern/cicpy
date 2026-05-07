@@ -26,6 +26,7 @@ import re
 
 from .cell import Cell
 from .layoutcell import LayoutCell
+from .rules import Rules
 from .port import Port
 from .rect import Rect
 
@@ -1004,25 +1005,24 @@ class StackGroup(CellGroup):
         return re.sub(r"C\d+F\d+$", suffix, cell_name)
 
     def routeDummyTerminals(self, inst):
-        """Tie B-D, B-S, and D-S of a dummy fill device on M1 via three
-        addDirectedRoute calls. Pin geometry is resolved by
-        ``findAllRectangles`` against ``inst:terminal`` paths.
+        """Lay a single M1 strap rectangle across the middle of a filler
+        transistor.
+
+        The strap is plain geometry, not a route — fillers don't need the
+        three-primitive routing contract; they just need a body-tie-friendly
+        M1 conductor across the device. One rect per filler.
         """
         if inst is None:
             return self
-        name = getattr(inst, "instanceName", "") or getattr(inst, "name", "")
-        if not name:
-            return self
-        nre = re.escape(name)
-        layer = "M1"
-        for net_name, route_str in (
-            (f"{name}_dummy_mid",  f"{nre}:B-{nre}:D"),
-            (f"{name}_dummy_side", f"{nre}:B-{nre}:S"),
-            (f"{name}_dummy_vert", f"{nre}:D||{nre}:S"),
-        ):
-            r = self.layout.addDirectedRoute(layer, net_name, route_str)
-            if r is not None:
-                self.dummy_routes.append(r)
+        rules = Rules.getInstance()
+        if rules is not None and rules.hasRules():
+            width = rules.get("M1", "width")
+        else:
+            width = 320
+        cy = int(inst.centerY())
+        rect = Rect("M1", int(inst.x1), cy - width // 2, int(inst.width()), int(width))
+        self.layout.add(rect)
+        self.dummy_routes.append(rect)
         self.updateBoundingRect()
         return self
 

@@ -215,8 +215,12 @@ assert default_bulk_ports[0].x1 == 60
 assert bulk_group.exportBoundaryPorts(layer="M2", options="bulk")[0].x1 == 80
 assert bulk_group.exportBoundaryPorts(layer="M2", options="terminal=B")[0].x1 == 80
 bulk_top_rects = bulk_layout.getNodeAccessRects("VSS", "M2")
+# With no internal routing for VSS in the bulk_group stacks, member pins
+# are not suppressed — both source (x=60) and bulk (x=80) surface for the
+# parent route engine. The boundary "nonbulk" preference still applies to
+# exportBoundaryPorts directly (covered above).
 assert any(r.x1 == 60 for r in bulk_top_rects)
-assert not any(r.x1 == 80 for r in bulk_top_rects)
+assert any(r.x1 == 80 for r in bulk_top_rects)
 
 # ---- 5. transistorStack with shared gate net (parallel routing) --------------
 transistor_layout = LayoutCell()

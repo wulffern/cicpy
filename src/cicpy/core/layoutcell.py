@@ -292,7 +292,17 @@ class LayoutCell(Cell):
                 continue
             if includeGroups and not re.search(includeGroups, getattr(group, "name", "")):
                 continue
-            if hasattr(group, "_boundary_nets") and net in group._boundary_nets():
+            # Only suppress member pins when the group owns internal routing
+            # for the net (route_bundles / direct / diode / dummy). With no
+            # internal routing the boundary port is just one rep pin; keeping
+            # the other member pins lets the parent route tie them all.
+            group_routes = set()
+            for stack in getattr(group, "stacks", []):
+                if hasattr(stack, "routedNets"):
+                    group_routes.update(stack.routedNets())
+            if hasattr(group, "routedNets"):
+                group_routes.update(group.routedNets())
+            if hasattr(group, "_boundary_nets") and net in group._boundary_nets() and net in group_routes:
                 suppressed.update(group.memberNames())
             for port in group.exportBoundaryPorts(layer=layer, options=options):
                 if getattr(port, "name", "") != net:
@@ -1306,10 +1316,6 @@ class LayoutCell(Cell):
         rects = []
         if graph is not None:
             rects = self.getNodeAccessRects(name, "M1", includeInstances=includeInstances, excludeInstances=excludeInstances)
-            # Power straps live on M1; reject any port rects the engine
-            # returned on other layers (e.g. M2 D/S/G pins on a sky130A
-            # transistor whose locali bulk pin is the actual M1 contact).
-            rects = [r for r in rects if getattr(r, "layer", "") == "M1"]
             if len(rects) == 0:
                 rects = graph.getRectangles(excludeInstances, includeInstances, "")
         routering = self.named_rects[router_key]

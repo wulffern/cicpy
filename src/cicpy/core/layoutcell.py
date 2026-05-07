@@ -1306,6 +1306,10 @@ class LayoutCell(Cell):
         rects = []
         if graph is not None:
             rects = self.getNodeAccessRects(name, "M1", includeInstances=includeInstances, excludeInstances=excludeInstances)
+            # Power straps live on M1; reject any port rects the engine
+            # returned on other layers (e.g. M2 D/S/G pins on a sky130A
+            # transistor whose locali bulk pin is the actual M1 contact).
+            rects = [r for r in rects if getattr(r, "layer", "") == "M1"]
             if len(rects) == 0:
                 rects = graph.getRectangles(excludeInstances, includeInstances, "")
         routering = self.named_rects[router_key]

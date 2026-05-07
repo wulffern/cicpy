@@ -250,9 +250,9 @@ class CellGroup(LayoutCell):
         self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
         return self
 
-    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances="", accessLayer=None):
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances=""):
         include = self.instanceRegex()
-        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
+        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include)
         return self
 
     def representativeAccessRects(self, net, accessLayer, anymetal=False, terminalFilter="nonbulk"):
@@ -320,9 +320,12 @@ class CellGroup(LayoutCell):
         if not rects:
             return None
         source = self._select_boundary_rect(rects, options=options)
-        rect = source.getCopy(layer)
+        # Boundary port lives on the source rect's actual layer; the route
+        # engine adds the cuts to bridge to the requested layer.
+        port_layer = getattr(source, "layer", "") or layer
+        rect = source.getCopy(port_layer)
         rect.net = net
-        port = Port(net, routeLayer=layer, rect=rect)
+        port = Port(net, routeLayer=port_layer, rect=rect)
         port.spicePort = False
         port.side = "boundary"
         return port
@@ -607,9 +610,9 @@ class StackGroup(CellGroup):
         self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
         return self
 
-    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances="", accessLayer=None):
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances=""):
         include = self.instanceRegex()
-        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include, accessLayer=accessLayer)
+        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include)
         return self
 
     def representativeAccessRects(self, net, accessLayer, anymetal=False, terminalFilter="nonbulk"):
@@ -638,8 +641,6 @@ class StackGroup(CellGroup):
                 continue
             rect = port.get(accessLayer) if hasattr(port, "get") else None
             if rect is None:
-                continue
-            if accessLayer and getattr(rect, "layer", "") != accessLayer:
                 continue
             rects.append(rect)
         rects = self.layout.collapseRepresentativeRects(net, rects)

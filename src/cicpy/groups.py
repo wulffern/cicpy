@@ -460,7 +460,6 @@ def _apply_route(layout, cellgroups, r):
                 r.get("options", "") or "",
                 int(r.get("cuts", 1) or 1),
                 r.get("exclude_instances", "") or "",
-                accessLayer=r.get("access_layer") or None,
             )
         else:
             # Layout-level variant
@@ -472,7 +471,6 @@ def _apply_route(layout, cellgroups, r):
                 int(r.get("cuts", 1) or 1),
                 r.get("exclude_instances", "") or "",
                 r.get("include_instances", "") or "",
-                accessLayer=r.get("access_layer") or None,
             )
         log.info(f"apply: orthogonal route net={net} {r.get('layer1')}/{r.get('layer2')}")
         return

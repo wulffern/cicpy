@@ -53,7 +53,6 @@ layout.addOrthogonalConnectivityRoute(
     cuts,
     excludeInstances,
     includeInstances,
-    accessLayer=None,
 )
 ```
 
@@ -65,10 +64,9 @@ Arguments:
 - `cuts`: currently stored but not used to size the cuts; the implementation uses `1x2` or `2x1`
 - `excludeInstances`: regex for dropping instances
 - `includeInstances`: regex for limiting candidate instances
-- `accessLayer`: per-pin layer used to fetch instance port rectangles via `port.get(accessLayer)`; defaults to `verticalLayer`. Group boundary ports (`CellGroup.exportBoundaryPorts`) are preferred when no `includeInstances` is set, otherwise direct instance port rects on `accessLayer` are used. If a device pin is not exposed on the requested layer, emit an `addDirectedRoute` against the specific pin (e.g. `"xn_bias:D-xn_load:S"`) instead.
 
 Behavior:
-- collects port rectangles on `accessLayer` (group boundary ports first, then instance ports)
+- collects port rectangles on whatever layer the device exposes (group boundary ports first, then instance ports); the route engine adds the cuts to bridge to `verticalLayer` / `horizontalLayer`
 - finds a free vertical trunk track on `verticalLayer`
 - creates horizontal branches on `horizontalLayer`
 - uses `1x2` for vertical access rectangles and `2x1` for horizontal access rectangles
@@ -77,7 +75,7 @@ Behavior:
 Example:
 
 ```python
-layout.addOrthogonalConnectivityRoute("M2", "M3", r"^D$", "nolabel", 1, "", "", accessLayer="M1")
+layout.addOrthogonalConnectivityRoute("M2", "M3", r"^D$", "nolabel", 1, "", "")
 ```
 
 ## Route types

@@ -336,7 +336,7 @@ Connect all instances whose net name matches `regex` on the given `layer`.
 | `verticaltrackN` | Use vertical trunk track N (`trackN` alias supported) |
 | `horizontaltrackN` | Use horizontal branch track N (`branchtrackN` alias supported) |
 
-#### `addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, accessLayer=None)`
+#### `addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances)`
 
 Route a net using explicit vertical and horizontal layers. Suitable for multi-layer routes where vertical and horizontal segments should stay on different metals.
 
@@ -344,7 +344,7 @@ Route a net using explicit vertical and horizontal layers. Suitable for multi-la
 layout.addOrthogonalConnectivityRoute("M2", "M3", "^VOUT$", "track0", 1, "", "")
 ```
 
-`accessLayer` defaults to `verticalLayer`. Set it to select which layer is used to reach the device terminal.
+The route engine reads pin geometry on whatever layer the device exposes the port (`port.get().layer`) and adds cuts to bridge up to `verticalLayer` / `horizontalLayer`. There is no `accessLayer` argument — callers don't need to hand-feed the engine a layer hint that the device geometry already determines.
 
 #### `addDirectedRoute(layer, net, route, options="")`
 
@@ -528,7 +528,7 @@ Groups and stacks expose a scoped version of the routing APIs. These route only 
 
 ```python
 nmos.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances)
-nmos.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, accessLayer)
+nmos.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances)
 ```
 
 ---

@@ -263,10 +263,27 @@ class MagicPrinter(DesignPrinter):
 
         rotation = inst.angle
 
-        tr1 = "1 0"
-        tr2 = "0 1"
-        if(rotation == "MY"):
-            tr1 = "-1 0"
+        #- Magic writes the transform as "a b c d e f", which maps a point in
+        #- the child to (a*x + b*y + c, d*x + e*y + f). Only the 2x2 part is
+        #- set here, c and f stay the placement point, since ciccreator has
+        #- already folded the rotation offset into it through xcell/ycell.
+        #- Anything not listed used to fall through to the identity, which
+        #- placed rotated instances unrotated without saying so.
+        orientations = {
+            ""     : ("1 0",  "0 1"),
+            "R0"   : ("1 0",  "0 1"),
+            "MY"   : ("-1 0", "0 1"),
+            "MX"   : ("1 0",  "0 -1"),
+            "R90"  : ("0 -1", "1 0"),
+            "R180" : ("-1 0", "0 -1"),
+            "R270" : ("0 1",  "-1 0"),
+        }
+
+        if(rotation in orientations):
+            tr1, tr2 = orientations[rotation]
+        else:
+            tr1, tr2 = orientations[""]
+            print(f"Warning: orientation {rotation} of {inst.cell} is not known, placing it unrotated")
 
         path = ""
         if(inst.libpath != ""):

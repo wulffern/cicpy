@@ -197,10 +197,6 @@ class MagicPrinter(DesignPrinter):
         y2 = self.toMicron(p.y2)
         routeLayerAlias = self.rules.layerToAlias(p.layer)
 
-        if(p.name not in self.portOrder):
-            raise(Exception(f"Could not find {p.name} in circuit nodes"))
-
-
         direction = "bidirectional"
         if(p.direction == "input"):
             direction = "input"
@@ -210,8 +206,15 @@ class MagicPrinter(DesignPrinter):
         sigclass = p.sigclass
 
         lbl = f"""flabel {routeLayerAlias} s %d %d %d %d 0 FreeSans 400 0 0 0 {p.name}
-port %d nsew %s %s
-""" % (x1,y1,x2,y2,self.portOrder[p.name],sigclass,direction)
+""" % (x1,y1,x2,y2)
+
+        #- Only a node on the subcircuit interface can be a port. A label on an
+        #- internal net, such as the via addPortVias drops on a net between two
+        #- child instances, gets the flabel without the port statement, so magic
+        #- still names the net for LVS without inventing a pin.
+        if(p.name in self.portOrder):
+            lbl += "port %d nsew %s %s\n" % (self.portOrder[p.name],sigclass,direction)
+
         self.labels.append(lbl)
 
         self.printRect(p)

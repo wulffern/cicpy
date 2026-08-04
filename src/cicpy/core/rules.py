@@ -58,9 +58,13 @@ class Rules:
 
 
         if(Rules.rules is not None):
-            self.gamma = self.getValue("technology","gamma")
-            self.grid = self.getValue("technology","grid")
-            self.spiceunit = self.getValue("technology","spiceunit")
+            #- These three are optional, and cIcCore::Rules falls back to the
+            #- same defaults when a technology file leaves them out. Requiring
+            #- them here made every such file unusable from cicpy
+            tech = Rules.rules.get("technology",dict())
+            self.gamma = tech.get("gamma",50)
+            self.grid = tech.get("grid",5)
+            self.spiceunit = tech.get("spiceunit",1e-6)
 
         #if(Rules.rules is None):
         #    raise Exception("Rules: No rules loaded!")

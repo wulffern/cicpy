@@ -96,17 +96,20 @@ class Placer():
         if(len(dfg) != 2):
             raise("Error: I don't know how to layout more other number than 2 transistors in a diff pair")
 
+        #- cc is indexed by group name, so the counts have to be taken by
+        #- position. Pandas used to fall back to positional lookup for cc[0],
+        #- but that fallback is gone and a plain cc[0] now raises KeyError
         cc = dfg["row"].count()
-        if(cc[0] != cc[1]):
+        if(cc.iloc[0] != cc.iloc[1]):
             raise("Error: I don't know how to layout diffpairs with unequal number of transistors")
 
-        isOdd = cc[0] % 2
+        isOdd = cc.iloc[0] % 2
 
         if(isOdd):
             raise("Error: I don't know how to layout diffpairs with odd number of transistors")
 
 
-        num = cc[0]
+        num = cc.iloc[0]
         if(num not in self.dPattern):
             raise(f"Error: I don't know how to layout diffpairs with {num*2} transistors")
 

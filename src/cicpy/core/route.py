@@ -137,6 +137,10 @@ class Route(Cell):
             for r in self.stopRects:
                 r.layer = self.stopLayer
 
+        #- "-|-" carries no alignment of its own, so the options decide what it
+        #- does, and it falls back to a right route when none of them match
+        optionsDecideRoute = False
+
         rt = routeType
         if rt == "-|--":
             self.routeType = "LEFT"
@@ -158,13 +162,33 @@ class Route(Cell):
             self.routeType = "STRAIGHT"
         elif rt == "||":
             self.routeType = "VERTICAL"
+        elif rt == "-|-":
+            self.routeType = "RIGHT"
+            self.leftAlignCut = False
+            optionsDecideRoute = True
+        #- ">-|--" is a left route where the start is pulled down by one routing
+        #- width, the same as a left route with the offsetlow option
+        elif rt == ">-|--":
+            self.routeType = "LEFT"
+            self.startOffset = "LOW"
         else:
             self.routeType = "ROUTE_UNKNOWN"
 
+        if re.search(r"cutalignright(,|\s+|$)", self.options):
+            self.leftAlignCut = False
+
+        #- Route. The order matters, an explicit left route wins over "straight"
         if re.search(r"leftdownleftup", self.options):
             self.routeType = "LEFT_DOWN_LEFT_UP"
         if re.search(r"leftupleftdown", self.options):
             self.routeType = "LEFT_UP_LEFT_DOWN"
+
+        #- Only for the types that have no alignment of their own, so that a
+        #- "straight" option cannot turn an explicit left or right route into a
+        #- straight one
+        if optionsDecideRoute and re.search(r"straight", self.options):
+            self.routeType = "STRAIGHT"
+
         if re.search(r"strap", self.options):
             self.routeType = "STRAP"
 

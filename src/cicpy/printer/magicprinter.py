@@ -36,24 +36,15 @@ import logging
 
 class MagicPrinter(DesignPrinter):
 
-    def _bbox_with_margin(self, cell):
-        x1 = cell.x1
-        y1 = cell.y1
-        x2 = cell.x2
-        y2 = cell.y2
-        margin = getattr(cell, "fixed_bbox_margin", None)
-        if margin is None:
-            return (x1, y1, x2, y2)
-        if isinstance(margin, (int, float)):
-            margin = [margin, margin, margin, margin]
-        if len(margin) != 4:
-            return (x1, y1, x2, y2)
-        return (
-            x1 - margin[0],
-            y1 - margin[1],
-            x2 + margin[2],
-            y2 + margin[3],
-        )
+    def _cell_bbox(self, cell):
+        #- The abutment box the compiler stored in the cic file. The live
+        #- x1..y2 are recomputed from the drawn children during load, which
+        #- turns the box into a content extent and breaks the overlap tiling
+        #- of stacked devices, so prefer the stored box
+        bbox = getattr(cell, "cic_bbox", None)
+        if bbox is not None:
+            return bbox
+        return (cell.x1, cell.y1, cell.x2, cell.y2)
 
 
     def toMicron(self,angstrom):
@@ -148,13 +139,13 @@ class MagicPrinter(DesignPrinter):
 
         self.fcell.write("timestamp %d\n" % time.mktime(currentDate.timetuple()))
 
-        x1, y1, x2, y2 = self._bbox_with_margin(cell)
+        x1, y1, x2, y2 = self._cell_bbox(cell)
         self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(x1),self.toMicron(y1),self.toMicron(x2),self.toMicron(y2)))
 
     def endCell(self,cell):
 
         #- Print additional properties
-        x1, y1, x2, y2 = self._bbox_with_margin(cell)
+        x1, y1, x2, y2 = self._cell_bbox(cell)
         xu1 = self.toMicron(x1)
         xu2 = self.toMicron(x2)
         yu1 = self.toMicron(y1)

@@ -277,6 +277,14 @@ class Cell(Rect):
 
     def fromJson(self,o):
         super().fromJson(o)
+
+        #- The cell box stored in the cic file is the abutment box the
+        #- compiler placed the cell on, not the extent of the drawn geometry.
+        #- Adding the children later recomputes x1..y2 from the drawing, so
+        #- keep the stored box, it is what FIXED_BBOX and placement need
+        if all(k in o for k in ("x1","y1","x2","y2")):
+            self.cic_bbox = (o["x1"], o["y1"], o["x2"], o["y2"])
+
         self.prefix = self.design.prefix
         self.name = self.design.prefix  + o["name"]
 

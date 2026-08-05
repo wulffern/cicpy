@@ -1477,6 +1477,82 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
+    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="M1", widthmult:int=1):
+        """Tie every device source on a power net to that device's own bulk
+        guard ring, locally, on the layer the pins already live on.
+
+        For a library that rings each device in its own tap, this is the
+        whole power connection and there is nothing to strap. The source
+        of a device whose source *is* the supply sits a fraction of a
+        micron from the guard column beside it, on the same layer, and the
+        guard is already continuous up and down the stack and tied left to
+        right by the tap cells. So the connection is a short jog at the
+        device's own row instead of a rail running the height of the
+        column, and every layer above stays empty for signals.
+
+        Contrast addPowerStrap, which is for cells that expose a pin and
+        nothing else: it has to carry the net out to a ring, and whatever
+        it crosses on the way is the caller's problem.
+
+        Only devices that have both the power net on ``terminals`` and the
+        same net on ``bulk`` are connected: a cascode whose source is an
+        internal node is left alone for the signal router.
+        """
+        self.log.info(
+            f"addPowerGuardConnection(name={name}, includeInstances={includeInstances}, excludeInstances={excludeInstances}, terminals={terminals}, bulk={bulk}, layer={layer})"
+        )
+        graph = self.nodeGraph.get(name)
+        if graph is None:
+            return
+
+        sources, bulks = {}, {}
+        for port in getattr(graph, "ports", []):
+            inst = getattr(port, "parent", None)
+            if inst is None or not inst.isInstance():
+                continue
+            if not self._instance_matches_route_scope(inst, includeInstances=includeInstances, excludeInstances=excludeInstances):
+                continue
+            child = getattr(port, "childName", "")
+            if child in terminals:
+                sources.setdefault(id(inst), []).append(port)
+            elif child == bulk:
+                bulks.setdefault(id(inst), []).append(port)
+
+        made = 0
+        for key, sports in sources.items():
+            bports = bulks.get(key)
+            if not bports:
+                #- source on the supply but bulk somewhere else, or a cell
+                #- with no guard of its own. Not ours to connect.
+                continue
+            for sp in sports:
+                s = sp.get(layer) if hasattr(sp, "get") else None
+                if s is None:
+                    continue
+                #- nearest guard, a device can be ringed on both sides
+                best = None
+                for bp in bports:
+                    b = bp.get(layer) if hasattr(bp, "get") else None
+                    if b is None:
+                        continue
+                    d = abs(b.centerX() - s.centerX())
+                    if best is None or d < best[0]:
+                        best = (d, b)
+                if best is None:
+                    continue
+                b = best[1]
+                #- centre to centre, so the jog starts inside the guard and
+                #- ends inside the source rather than merely touching them
+                x1, x2 = sorted((int(b.centerX()), int(s.centerX())))
+                h = int(s.height()) * widthmult
+                y1 = int(s.centerY() - h // 2)
+                r = Rect(layer, x1, y1, x2 - x1, h)
+                r.net = name
+                self.add(r)
+                made += 1
+        if made == 0:
+            self.log.warning(f"addPowerGuardConnection: nothing connected on {name}")
+
     def _fittedCut(self, rect, toLayer):
         """Largest cut between ``rect``'s layer and ``toLayer`` that fits
         inside ``rect``. A via wider than the pin it lands on reaches over

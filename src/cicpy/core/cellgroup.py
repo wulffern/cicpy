@@ -1041,7 +1041,13 @@ class StackGroup(CellGroup):
             width = 320
         cy = int(inst.centerY())
         rect = Rect("M1", int(inst.x1), cy - width // 2, int(inst.width()), int(width))
+        #- The strap belongs to the stack, like the filler it covers. Left in
+        #- the layout's placement tree as well it is translated twice on
+        #- resetOrigin, once as a layout child and once through the stack's
+        #- dummy_routes, which threw every strap far outside the cell
         self.layout.add(rect)
+        self.layout.detachPlacementChild(rect, keepParent=self)
+        self.add(rect)
         self.dummy_routes.append(rect)
         self.updateBoundingRect()
         return self
@@ -1077,6 +1083,26 @@ class StackGroup(CellGroup):
             if not inst_name.startswith("xfill_"):
                 continue
             self.routeDummyTerminals(inst)
+        self.updateBoundingRect()
+        return self
+
+    def mirror(self):
+        """Mirror every device and tap in the stack about its own vertical
+        axis.
+
+        A matched pair of columns wants the mirrored arrangement, the two
+        halves then share their seam with mirror symmetric edge geometry
+        instead of repeating the same edge, which is what allows them to sit
+        closer than two identical columns can.
+        """
+        for inst in self.instances + self.tap_instances:
+            #- setAngle leaves the instance position in the mirrored frame,
+            #- the printer recovers through xcell but every bounding box
+            #- consumer would not, so pin the instance back where it was
+            x, y = inst.x1, inst.y1
+            inst.setAngle("MY")
+            inst.moveTo(int(x), int(y))
+            inst.updateBoundingRect()
         self.updateBoundingRect()
         return self
 

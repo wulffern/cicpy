@@ -263,14 +263,15 @@ def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
-def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity):
+@click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
     """Netlist a xschem to spice, and load file to Magic"""
 
     os.system(f"make xsch LIB={lib} CELL={cell}")
 
     spi = "xsch/" + cell + ".spice"
 
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
 
 
 
@@ -287,11 +288,11 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity):
     """Translate a SPICE file to Magic"""
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
 
 
 
-def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False):
+def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -338,6 +339,7 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
         if(hasattr(pycell,"data")):
             pycellData = pycell.data
 
+    lcell.strict_route = strict
     lcell.layout(pycell,pycellData)
 
     if check_connectivity:

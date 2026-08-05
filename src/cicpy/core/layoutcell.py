@@ -1482,11 +1482,43 @@ class LayoutCell(Cell):
             self.noPowerRoute = o["noPowerRoute"]
         self.guiHierarchy = o.get("cellgroups", o.get("guiHierarchy", [])) or []
 
+    def _shortSignature(self):
+        """Set of net-name frozensets, one per multi net short component."""
+        result = self.checkConnectivity()
+        return {frozenset(s.get("nets", [])) for s in result.get("shorts", [])
+                if len(s.get("nets", [])) > 1}
+
     def route(self):
-        """Route all routes in this layout cell"""
+        """Route all routes in this layout cell.
+
+        With strict_route set, connectivity is checked after every single
+        route, and a route that introduces a new short stops the flow on
+        the spot with the offending command and callsite in the message.
+        Finding the guilty route at the end is possible but painful, so
+        the default of the sch2mag --strict flow is to not proceed when
+        something is wrong.
+        """
+        strict = getattr(self, "strict_route", False)
+        baseline = self._shortSignature() if strict else set()
+        if strict and baseline:
+            nets = "; ".join(",".join(sorted(s)) for s in baseline)
+            raise RuntimeError(
+                f"placement is already shorted before routing: {nets}. "
+                "Fix the placement first, a route check cannot pass on top "
+                "of a shorted placement")
         for r in self.routes:
             if r.isRoute() and not getattr(r, '_pre_routed', False):
                 r.route()
+                if strict:
+                    now = self._shortSignature()
+                    fresh = now - baseline
+                    if fresh:
+                        nets = "; ".join(",".join(sorted(s)) for s in fresh)
+                        cmd = getattr(r, "debug_command", "") or getattr(r, "name", "?")
+                        site = getattr(r, "debug_callsite", "")
+                        raise RuntimeError(
+                            f"route created a short ({nets}): {cmd}"
+                            + (f" at {site}" if site else ""))
 
     def paint(self):
         """Paint the cell - route power if needed"""

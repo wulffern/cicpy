@@ -28,6 +28,14 @@ cicpy svg ../design/<LIB>/<CELL>.cic <tech> <CELL> --I <libs...>
                                     # render it and LOOK at it
 ```
 
+Routing has a stricter loop: **one route, one check**. Run
+`cicpy sch2mag --strict <LIB> <CELL>` and the flow checks connectivity
+after every route, stopping at the first one that creates a short, with
+the command and file:line in the error. It also refuses to route at all
+while the placement itself is shorted. The `connectivity` MCP tool runs
+the same check on demand and lists every short and open with route
+attribution.
+
 Rules that follow from the loop:
 
 - **Never guess spacing.** Design rules are not monotonic in distance:
@@ -223,6 +231,22 @@ Route debugging: `sch2mag` prints a route short report naming the shorted
 nets and the python callsite that drew the offending route. For opens and
 split nets run `sch2mag --check-connectivity`, it is slower and not the
 default loop.
+
+## Router facts that cost a day to learn
+
+- **One net per row channel.** The router lays a horizontal bar per
+  device row and puts every bar of a channel at the same height, the
+  track option does not separate them. Two nets whose bars share a row
+  channel with overlapping x short. Keep nets column local (vertical
+  bundle rails via routeDiodeConnected/routeMirror) and make cross links
+  span as little x as possible.
+- **routeMirror rails do not stagger.** A column with several nets on
+  the same terminal puts all their rails on the same x. Until the router
+  staggers rails, such columns cannot be bundle routed.
+- **Series chains cannot overlap stack.** The transistor cells carry
+  full height M2 rails, and at the overlap pitch neighbouring cells
+  merge them, which shorts a ladder end to end. DRC does not see it,
+  the connectivity check does.
 
 ## Verification beyond DRC
 

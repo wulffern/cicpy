@@ -87,3 +87,19 @@ class McpToolsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_MCP, "mcp package not installed")
+class ConnectivityParseTest(unittest.TestCase):
+    def test_parse_shorts_and_opens(self):
+        from cicpy.mcp_server import _parse_connectivity
+        log = "\n".join([
+            "\x1b[33mWARNING: SHORT component=1 nets=A,B bounds=(0,0)-(1,1) rects=2 routes=none\x1b[0m",
+            "\x1b[33mWARNING: ROUTE SHORT component=1 nets=A,B bounds=(0,0)-(1,1) rects=2 routes=x\x1b[0m",
+            "\x1b[33mWARNING: OPEN net=VS split_components=[1, 2]\x1b[0m",
+        ])
+        shorts, opens = _parse_connectivity(log)
+        self.assertEqual(len(shorts), 1)
+        self.assertIn("nets=A,B", shorts[0])
+        self.assertEqual(len(opens), 1)
+        self.assertIn("net=VS", opens[0])

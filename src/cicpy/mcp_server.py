@@ -349,6 +349,53 @@ def drc(workdir: str, cell: str) -> str:
     return "\n".join(out)
 
 
+def _parse_connectivity(log_text):
+    shorts, opens = [], []
+    for l in log_text.split("\n"):
+        m = re.search(r"WARNING: (?:ROUTE )?SHORT (component=\S+ nets=\S+.*)", l)
+        if m and "ROUTE SHORT" not in l:
+            shorts.append(re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
+        m = re.search(r"WARNING: OPEN (net=\S+ split_components=[^\x1b]+)", l)
+        if m:
+            opens.append(re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
+    return shorts, opens
+
+
+@mcp.tool()
+def connectivity(workdir: str, library: str, cell: str) -> str:
+    """Check layout connectivity: shorts and opens, with route attribution.
+
+    Reruns the design repository's sch2mag flow with the connectivity
+    check enabled, which is the same analysis the layout GUI shows. A
+    SHORT lists the merged nets and, when a route caused it, the exact
+    python route command and file:line that drew it. An OPEN lists a net
+    whose pins are not all connected yet. Run this after every routing
+    change, and do not add more routes on top of a reported short.
+
+    Args:
+        workdir: The repository's work directory, where make runs.
+        library: The design library name.
+        cell: The cell to check.
+    """
+    proc = subprocess.run(
+        ["cicpy", "sch2mag", "--check-connectivity", library, cell],
+        cwd=workdir, capture_output=True, text=True,
+    )
+    shorts, opens = _parse_connectivity(proc.stdout + proc.stderr)
+    out = [f"{cell}: {len(shorts)} shorts, {len(opens)} opens"]
+    if shorts:
+        out.append("shorts:")
+        out += ["  " + s for s in shorts]
+    if opens:
+        out.append("opens:")
+        out += ["  " + o for o in opens]
+    if not shorts and not opens:
+        out.append("clean")
+    if proc.returncode != 0:
+        out.append(f"(sch2mag exited {proc.returncode})")
+    return "\n".join(out)
+
+
 def main():
     mcp.run()
 

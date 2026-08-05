@@ -1005,6 +1005,25 @@ class StackGroup(CellGroup):
     def _tap_name(self, cell_name, suffix):
         return re.sub(r"C\d+F\d+$", suffix, cell_name)
 
+    def _resolve_tap_cell(self, cell_name, suffix):
+        """Return the name of a tap cell that actually exists, or None.
+
+        The tap ring carries no gate, so a device variant marker like LVT has
+        no tap counterpart in the libraries. When the directly derived name is
+        missing, retry without the variant marker, so an LVT stack picks up
+        the plain tap of the same width class.
+        """
+        candidates = [self._tap_name(cell_name, suffix)]
+        stripped = re.sub(r"(?<=_)LVT_", "", cell_name, count=1)
+        if stripped != cell_name:
+            candidates.append(self._tap_name(stripped, suffix))
+        for cand in candidates:
+            if cand == cell_name:
+                continue
+            if self.layout.parent.getLayoutCell(cand) is not None:
+                return cand
+        return None
+
     def routeDummyTerminals(self, inst):
         """Lay a single M1 strap rectangle across the middle of a filler
         transistor.
@@ -1032,9 +1051,11 @@ class StackGroup(CellGroup):
             return self
         self.sort()
         base = self.instances[0]
-        bot_cell = self._tap_name(base.cell, "CTAPBOT")
-        top_cell = self._tap_name(base.cell, "CTAPTOP")
-        if bot_cell == base.cell or top_cell == base.cell:
+        bot_cell = self._resolve_tap_cell(base.cell, "CTAPBOT")
+        top_cell = self._resolve_tap_cell(base.cell, "CTAPTOP")
+        if bot_cell is None or top_cell is None:
+            self.layout.log.warning(
+                f"No tap cells found for {base.cell}, stack {self.name} is left untapped")
             return self
         name = prefix or self.name
         bot = self.layout.addPhysicalInstance(bot_cell, f"xstack_{name}_bot", int(base.x1), int(base.y1 - 24000))

@@ -1,6 +1,6 @@
-
 test:
 	cicpy transpile SAR9B_CV.cic.gz demo.tech SAR9B --layskill --schskill --verilog --xschem --spice --winfo --rinfo demo.txt --magic
+	python3 check_bbox.py SAR9B_CV.cic.gz SAR9B
 
 clean:
 	-rm *.spice

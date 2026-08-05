@@ -62,7 +62,7 @@ class Cut(Cell):
                 encRule = l.next + "encOpposite"
                 try:
                     encOpposite = rules.get(l.name, encRule)
-                except:
+                except Exception:
                     encOpposite = 0
                     
                 encThis = l.next + "enclosure"
@@ -71,14 +71,14 @@ class Cut(Cell):
                         enclosure = rules.get(l.name, encThis)
                     else:
                         enclosure = rules.get(l.name, "enclosure")
-                except:
+                except Exception:
                     enclosure = 0
                 
                 try:
                     cut_width = rules.get(l.next, "width")
                     cut_height = rules.get(l.next, "height")
                     cut_space = rules.get(l.next, "space")
-                except:
+                except Exception:
                     self.log.warning(f"Missing cut rules for {l.next}")
                     continue
                 
@@ -101,7 +101,7 @@ class Cut(Cell):
                 encRule = l.name + "encOpposite"
                 try:
                     encOpposite = rules.get(l.previous, encRule)
-                except:
+                except Exception:
                     encOpposite = 0
                     
                 encThis = l.name + "enclosure"
@@ -110,14 +110,14 @@ class Cut(Cell):
                         enclosure = rules.get(l.previous, encThis)
                     else:
                         enclosure = rules.get(l.previous, "enclosure")
-                except:
+                except Exception:
                     enclosure = 0
                 
                 try:
                     cut_width = rules.get(l.name, "width")
                     cut_height = rules.get(l.name, "height")
                     cut_space = rules.get(l.name, "space")
-                except:
+                except Exception:
                     self.log.warning(f"Missing cut rules for {l.name}")
                     continue
                 

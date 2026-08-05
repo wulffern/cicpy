@@ -41,7 +41,7 @@ class Object():
     def property(self,key,val=None):
         if(key in self.properties):
             if(val):
-                self.properties[key] = cal
+                self.properties[key] = val
             return self.properties[key]
         else:
             return None
@@ -222,25 +222,6 @@ class Component(Object):
         self.y = 0
         self.rotation = 0
         self.flip = 0
-
-
-    def parseProperties(self,ss):
-        if(re.search(r"^\s*$",ss)):
-            return
-
-        ss = re.sub(r"\n"," ",ss).strip()
-
-        key_value_pairs = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+',ss)
-        for s in key_value_pairs:
-            if(re.search(r"^\s*$",s)):
-                continue
-            ar = re.split("=",s)
-            if(len(ar) != 2):
-
-                raise Exception("Don't know how to parse %s" %(ar))
-                continue
-            (key,val) = ar
-            self.properties[key] = val
 
 
     def name(self,val = None):

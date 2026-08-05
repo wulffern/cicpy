@@ -1020,7 +1020,7 @@ class LayoutCell(Cell):
             name =  re.sub(r"C\d+F\d+",repl,subcktName)
 
         if(name is not None):
-            si = SubcktInstance()
+            si = spi.SubcktInstance()
             si.subcktName = name
             si.name = "xdmy__"  + str(self.dummyCounter)
             self.dummyCounter += 1
@@ -1044,6 +1044,12 @@ class LayoutCell(Cell):
 
         next_x = 0
         next_y = 0
+
+        #- The running placement point. The C++ place() starts it at the
+        #- origin; without this the first dummy instance of a group reads
+        #- x and y before the loop has assigned them
+        x = 0
+        y = 0
 
         prevgroup = ""
 

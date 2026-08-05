@@ -239,6 +239,7 @@ class Rect:
         if(self.width() >= self.height()):
             return True
         return False
+        return False
     
     def isVertical(self):
         if(self.height() >= self.width()):

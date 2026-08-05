@@ -155,7 +155,7 @@ class Rules:
             #print(obj[key])
             return obj[key]*self.gamma
         else:
-            raise Exception(f"RuleError: Coult not find rule {key} on layer {layer}")
+            raise Exception(f"RuleError: Could not find rule {key} on layer {layer}")
 
     def hasRule(self, layer, key):
         try:

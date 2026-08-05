@@ -286,7 +286,8 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
-def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity):
+@click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
+def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
     """Translate a SPICE file to Magic"""
     _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
 

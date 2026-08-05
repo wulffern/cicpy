@@ -22,7 +22,7 @@ docs:
 	${foreach d, ${docs}, cd ${cwd}; cd ${d} && make docs PYTHON=${PYTHON} || exit  ;}
 
 unit_test:
-	@true
+	${PYTHON} -m unittest discover -s tests/unittests -q
 
 test: unit_test
 	${foreach d, ${dirs}, cd ${cwd}; cd ${d} && echo "\n#INFO: Testing ${d}\n" && make test PYTHON=${PYTHON} || exit  ;}

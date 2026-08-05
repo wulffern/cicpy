@@ -28,9 +28,11 @@ classifiers = [
 
 [project.optional-dependencies]
 gui = ["PySide6"]
+mcp = ["mcp[cli]"]        # MCP server (cicpy-mcp); requires Python >= 3.10
 
 [project.scripts]
 cicpy = "cicpy.cic:cli"
+cicpy-mcp = "cicpy.mcp_server:main"
 
 
 [project.urls]

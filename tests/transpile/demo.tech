@@ -54,6 +54,7 @@
     "technology" :{
         "gamma" : 100,
         "grid" : 5,
+        "gridcheck" : false,
         "spiceunit" : 1,
         "techlib" : "tech",
          "symbol_libs" : ["cpdk"

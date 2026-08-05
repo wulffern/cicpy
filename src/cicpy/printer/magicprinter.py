@@ -25,6 +25,7 @@
 ##  
 ######################################################################
 from .designprinter import DesignPrinter
+from ..core.gridcheck import GridChecker
 import sys
 import numpy as np
 import datetime
@@ -54,6 +55,9 @@ class MagicPrinter(DesignPrinter):
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
         self.exclude = r"^cut_"
+        #- Every coordinate that leaves here must sit on the technology
+        #- grid. See core/gridcheck.py
+        self.gridcheck = GridChecker(rules,output="magic")
 
     def startLib(self,name):
 
@@ -119,6 +123,8 @@ class MagicPrinter(DesignPrinter):
 
         self.labels.append("<< labels >>\n")
 
+        self.gridcheck.setCell(cell.name)
+
         file_name_cell = self.libname + os.path.sep + cell.name + ".mag"
 
         self.openCellFile(file_name_cell)
@@ -140,6 +146,7 @@ class MagicPrinter(DesignPrinter):
         self.fcell.write("timestamp %d\n" % time.mktime(currentDate.timetuple()))
 
         x1, y1, x2, y2 = self._cell_bbox(cell)
+        self.gridcheck.check(x1,y1,x2,y2,layer="",net="",what="cell bounding box")
         self.fcell.write("<< checkpaint >>\nrect %d %d %d %d\n"% (self.toMicron(x1),self.toMicron(y1),self.toMicron(x2),self.toMicron(y2)))
 
     def endCell(self,cell):
@@ -180,8 +187,10 @@ class MagicPrinter(DesignPrinter):
         if(layerAlias == ""):
             return
 
-        direction = "inputOutput"        
-        
+        direction = "inputOutput"
+
+        self.gridcheck.checkRect(p,what="port",where="name=" + str(p.name))
+
         x1 = self.toMicron(p.x1)
         y1 = self.toMicron(p.y1)
         x2 = self.toMicron(p.x2)
@@ -227,6 +236,8 @@ class MagicPrinter(DesignPrinter):
 
         layerNumber = self.rules.layerToNumber(r.layer)
 
+        self.gridcheck.checkRect(r)
+
         if(layerAlias not in self.rects):
             self.rects[layerAlias] = f"<< {layerAlias} >>\n"
 
@@ -245,6 +256,11 @@ class MagicPrinter(DesignPrinter):
 
 
         p = inst.getCellPoint()
+
+        self.gridcheck.check(p.x,p.y,p.x + inst.width(),p.y + inst.height(),
+                             layer=inst.layer,net=inst.net,
+                             what="instance " + str(inst.cell),
+                             where="name=" + str(inst.instanceName))
 
         x1 = self.toMicron(p.x)
         y1 = self.toMicron(p.y)

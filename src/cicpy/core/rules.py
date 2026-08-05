@@ -65,6 +65,10 @@ class Rules:
             self.gamma = tech.get("gamma",50)
             self.grid = tech.get("grid",5)
             self.spiceunit = tech.get("spiceunit",1e-6)
+            #- Whether coordinates written with these rules have to sit on
+            #- the grid. Tech files that only drive svg or other views of an
+            #- existing design have no grid to answer to. See core/gridcheck
+            self.gridcheck = tech.get("gridcheck",True)
 
         #if(Rules.rules is None):
         #    raise Exception("Rules: No rules loaded!")

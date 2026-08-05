@@ -355,8 +355,14 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     #for m in design.maglib.values():
         #if(m._lay is not None):
 
-    with open(libdir + lib + os.path.sep + lcell.name + ".cic","w") as fo:
-        fo.write(json.dumps(design.toJson(),indent=4))
+    cicfile = libdir + lib + os.path.sep + lcell.name + ".cic"
+    obj = design.toJson()
+
+    #- Same boundary check as MagicPrinter: nothing off grid leaves cicpy
+    cic.checkJsonOnGrid(obj,rules,output=cicfile)
+
+    with open(cicfile,"w") as fo:
+        fo.write(json.dumps(obj,indent=4))
         #fo.write(json.dumps(design.maglib["JNWTR_RPPO2"]._lay.toJson(),indent=4))
 
 

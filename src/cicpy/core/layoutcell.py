@@ -1360,7 +1360,7 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
-    def addPowerStrap(self, name:str, includeInstances:str, location:str, excludeInstances:str="", widthmult:int=1, includeGroups:str="", align:str="center"):
+    def addPowerStrap(self, name:str, includeInstances:str, location:str, excludeInstances:str="", widthmult:int=1, includeGroups:str="", align:str="center", terminals=None):
         """Connect a power net to its ring with a narrow strap on the ring's
         own layer, cut down to the pin.
 
@@ -1400,11 +1400,31 @@ class LayoutCell(Cell):
         graph = self.nodeGraph.get(name)
         if graph is None:
             return
-        rects = self.getNodeAccessRects(
-            name, "M1", includeInstances=includeInstances,
-            excludeInstances=excludeInstances, includeGroups=includeGroups)
-        if len(rects) == 0:
-            rects = graph.getRectangles(excludeInstances, includeInstances, "")
+        if terminals:
+            #- Strap only the named terminals. With a library that rings its
+            #- devices, the body pin is the one worth strapping: it sits in
+            #- the guard column, so the strap runs up inside the guard and
+            #- crosses nothing, and one of them carries the whole guard
+            #- network to the ring. The sources are already on the guard,
+            #- see addPowerGuardConnection.
+            rects = []
+            for port in getattr(graph, "ports", []):
+                inst = getattr(port, "parent", None)
+                if inst is None or not inst.isInstance():
+                    continue
+                if getattr(port, "childName", "") not in terminals:
+                    continue
+                if not self._instance_matches_route_scope(inst, includeInstances=includeInstances, excludeInstances=excludeInstances):
+                    continue
+                rr = port.get("M1") if hasattr(port, "get") else None
+                if rr is not None:
+                    rects.append(rr)
+        else:
+            rects = self.getNodeAccessRects(
+                name, "M1", includeInstances=includeInstances,
+                excludeInstances=excludeInstances, includeGroups=includeGroups)
+            if len(rects) == 0:
+                rects = graph.getRectangles(excludeInstances, includeInstances, "")
         if len(rects) == 0:
             self.log.error(f"addPowerStrap: no access rectangles on {name}")
             return

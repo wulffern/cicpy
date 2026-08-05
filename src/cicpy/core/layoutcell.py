@@ -1360,6 +1360,139 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
+    def addPowerStrap(self, name:str, includeInstances:str, location:str, excludeInstances:str="", widthmult:int=1, includeGroups:str="", align:str="center"):
+        """Connect a power net to its ring with a narrow strap on the ring's
+        own layer, cut down to the pin.
+
+        This is the counterpart to :meth:`addPowerConnection` for libraries
+        whose cells put their pins on the lowest layer and leave the metal
+        above empty. ``addPowerConnection`` copies the pin rectangle and
+        stretches it to the ring on the *pin's* layer, with the via at the
+        ring: from the source of an upper device that drags the pin's layer
+        down across the drain and gate of everything below it. It is what
+        shorted the VCP ladder in lelo_temp and it shorts a whole row of
+        REY_ATR_SKY130A. Its geometry cannot be changed, every JNWATR design
+        in the wild depends on it, so the correct behaviour lives here.
+
+        Three things are different, and all three are needed:
+
+        * the strap is on the ring's layer, not the pin's,
+        * the via sits on the pin, not up at the ring,
+        * the strap is one routing width, not the full width of the pin. A
+          pin can be wider than the device pitch and overlap its neighbours
+          in x, so a pin-wide strap blocks the column that a signal needs
+          for its own via stack even when it shorts nothing.
+        """
+        self.log.info(
+            f"addPowerStrap(name={name}, includeInstances={includeInstances}, location={location}, excludeInstances={excludeInstances}, widthmult={widthmult})"
+        )
+        if name not in self.nodeGraph:
+            return
+        router_key = None
+        if f"power_{name}" in self.named_rects:
+            router_key = f"power_{name}"
+        elif f"rail_{name}" in self.named_rects:
+            router_key = f"rail_{name}"
+        else:
+            self.log.error(f"addPowerStrap: no ring or rail for {name}")
+            return
+
+        graph = self.nodeGraph.get(name)
+        if graph is None:
+            return
+        rects = self.getNodeAccessRects(
+            name, "M1", includeInstances=includeInstances,
+            excludeInstances=excludeInstances, includeGroups=includeGroups)
+        if len(rects) == 0:
+            rects = graph.getRectangles(excludeInstances, includeInstances, "")
+        if len(rects) == 0:
+            self.log.error(f"addPowerStrap: no access rectangles on {name}")
+            return
+
+        routering = self.named_rects[router_key]
+        rrect = routering.get(location)
+        strapLayer = rrect.layer
+        width = Rules.getInstance().get(strapLayer, "width") * widthmult
+
+        from .cut import Cut
+        vertical = location in ("top", "bottom")
+        for r in rects:
+            ct = None
+            if r.layer != strapLayer:
+                ct = self._fittedCut(r, strapLayer)
+                if ct is None:
+                    self.log.error(
+                        f"addPowerStrap: no cut from {r.layer} to {strapLayer} fits the {name} pin")
+                    continue
+
+            #- the strap starts at the pin, so the via under it is covered,
+            #- and stays inside the pin's own footprint rather than reaching
+            #- over a neighbour. ``align`` decides where inside: a power pin
+            #- can be wide enough to sit under a neighbouring signal pin's
+            #- via stack, and a centred strap then lands a fraction of a
+            #- micron from that stack's pad on the same layer. Pushing the
+            #- strap to the far edge of its own pin buys that clearance
+            #- without moving anything
+            if vertical:
+                w = min(width, r.width())
+                if align == "left":
+                    x1 = int(r.x1)
+                elif align == "right":
+                    x1 = int(r.x2 - w)
+                else:
+                    x1 = int(r.centerX() - w//2)
+                cy = int(r.centerY())
+                #- the cut follows the strap, otherwise an aligned strap
+                #- leaves its own via uncovered out in the middle of the pin
+                if ct:
+                    cx = min(max(int(x1 + w//2 - ct.width()//2), int(r.x1)),
+                             int(r.x2 - ct.width()))
+                    ct.moveTo(cx, int(cy - ct.height()//2))
+                if location == "top":
+                    y1, y2 = cy, int(rrect.y2)
+                else:
+                    y1, y2 = int(rrect.y1), cy
+                strap = Rect(strapLayer, x1, y1, int(w), int(y2 - y1))
+            else:
+                h = min(width, r.height())
+                if align == "left":
+                    y1 = int(r.y1)
+                elif align == "right":
+                    y1 = int(r.y2 - h)
+                else:
+                    y1 = int(r.centerY() - h//2)
+                cx = int(r.centerX())
+                if ct:
+                    cy = min(max(int(y1 + h//2 - ct.height()//2), int(r.y1)),
+                             int(r.y2 - ct.height()))
+                    ct.moveTo(int(cx - ct.width()//2), cy)
+                if location == "right":
+                    x1, x2 = cx, int(rrect.x2)
+                else:
+                    x1, x2 = int(rrect.x1), cx
+                strap = Rect(strapLayer, x1, y1, int(x2 - x1), int(h))
+            strap.net = name
+
+            routering.add(strap)
+            if ct:
+                routering.add(ct)
+
+    def _fittedCut(self, rect, toLayer):
+        """Largest cut between ``rect``'s layer and ``toLayer`` that fits
+        inside ``rect``. A via wider than the pin it lands on reaches over
+        whatever is next to it, which for a tightly packed transistor cell
+        is another terminal."""
+        from .cut import Cut
+        best = None
+        for h, v in ((2, 2), (1, 2), (2, 1), (1, 1)):
+            ct = Cut.getInstance(rect.layer, toLayer, h, v)
+            if ct is None:
+                continue
+            if ct.width() <= rect.width() and ct.height() <= rect.height():
+                if best is None or (ct.width() * ct.height()) > (best.width() * best.height()):
+                    best = ct
+        return best
+
     def addRouteConnection(self, path:str, includeInstances:str, layer:str, location:str, options:str, routeTypeOverride:str="", excludeInstances:str="", includeGroups:str=""):
         self.log.info(f"addRouteConnection(path={path}, includeInstances={includeInstances}, layer={layer}, location={location}, options={options}, routeTypeOverride={routeTypeOverride}, excludeInstances={excludeInstances}, includeGroups={includeGroups})")
         routeType = "-|--"

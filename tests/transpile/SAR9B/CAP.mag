@@ -1,0 +1,45 @@
+magic
+tech tech
+magscale 1 2
+timestamp 1785880800
+<< checkpaint >>
+rect 0 0 344 69
+<< po >>
+rect 9 28 267 40
+rect 150 29 160 39
+rect 124 29 134 39
+rect 9 63 267 75
+rect 150 64 160 74
+rect 124 64 134 74
+rect 9 26 335 43
+rect 167 29 177 39
+rect 141 29 151 39
+rect 9 60 335 77
+rect 167 64 177 74
+rect 141 64 151 74
+rect -9 26 43 43
+rect -5 29 5 39
+rect -31 29 -21 39
+rect 43 26 77 43
+rect 43 26 60 43
+rect 95 26 318 43
+rect 318 26 353 43
+rect 318 26 335 43
+rect 60 43 77 60
+rect 335 43 353 60
+rect 335 43 353 60
+rect 26 60 267 77
+rect 284 60 353 77
+rect 322 64 332 74
+rect 296 64 306 74
+rect -9 28 353 40
+rect -9 28 353 40
+rect -9 63 353 75
+<< labels >>
+flabel po s 335 43 353 60 0 FreeSans 400 0 0 0 B
+port 1 nsew signal bidirectional
+flabel po s -9 28 353 40 0 FreeSans 400 0 0 0 A
+port 2 nsew signal bidirectional
+<< properties >>
+string FIXED_BBOX 0 0 344 69
+<< end >>

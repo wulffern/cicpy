@@ -1,0 +1,832 @@
+magic
+tech tech
+magscale 1 2
+timestamp 1785880800
+<< checkpaint >>
+rect 24 0 3336 10195
+<< po >>
+rect 544 639 556 10183
+rect 544 639 556 10183
+rect 556 667 600 677
+rect 556 1132 600 1142
+rect 556 853 600 863
+rect 556 1039 600 1049
+rect 556 946 600 956
+rect 556 760 600 770
+rect 556 4860 600 4870
+rect 556 5325 600 5335
+rect 556 5046 600 5056
+rect 556 5232 600 5242
+rect 556 5139 600 5149
+rect 556 4953 600 4963
+rect 556 6058 600 6068
+rect 556 6523 600 6533
+rect 556 6244 600 6254
+rect 556 6430 600 6440
+rect 556 6337 600 6347
+rect 556 6151 600 6161
+rect 556 9652 600 9662
+rect 556 10117 600 10127
+rect 556 9838 600 9848
+rect 556 10024 600 10034
+rect 556 9931 600 9941
+rect 556 9745 600 9755
+rect 504 40 516 10183
+rect 504 40 516 10183
+rect 516 68 600 78
+rect 516 533 600 543
+rect 516 254 600 264
+rect 516 440 600 450
+rect 516 347 600 357
+rect 516 161 600 171
+rect 516 4261 600 4271
+rect 516 4726 600 4736
+rect 516 4447 600 4457
+rect 516 4633 600 4643
+rect 516 4540 600 4550
+rect 516 4354 600 4364
+rect 516 5459 600 5469
+rect 516 5924 600 5934
+rect 516 5645 600 5655
+rect 516 5831 600 5841
+rect 516 5738 600 5748
+rect 516 5552 600 5562
+rect 516 9053 600 9063
+rect 516 9518 600 9528
+rect 516 9239 600 9249
+rect 516 9425 600 9435
+rect 516 9332 600 9342
+rect 516 9146 600 9156
+rect 464 3634 476 10183
+rect 464 3634 476 10183
+rect 476 3662 600 3672
+rect 476 4127 600 4137
+rect 476 3848 600 3858
+rect 476 4034 600 4044
+rect 476 3941 600 3951
+rect 476 3755 600 3765
+rect 476 8454 600 8464
+rect 476 8919 600 8929
+rect 476 8640 600 8650
+rect 476 8826 600 8836
+rect 476 8733 600 8743
+rect 476 8547 600 8557
+rect 424 1238 436 10183
+rect 424 1238 436 10183
+rect 436 1266 600 1276
+rect 436 1731 600 1741
+rect 436 1452 600 1462
+rect 436 1638 600 1648
+rect 436 1545 600 1555
+rect 436 1359 600 1369
+rect 436 6657 600 6667
+rect 436 7122 600 7132
+rect 436 6843 600 6853
+rect 436 7029 600 7039
+rect 436 6936 600 6946
+rect 436 6750 600 6760
+rect 384 7827 396 10183
+rect 384 7827 396 10183
+rect 396 7855 600 7865
+rect 396 8320 600 8330
+rect 396 8041 600 8051
+rect 396 8227 600 8237
+rect 396 8134 600 8144
+rect 396 7948 600 7958
+rect 344 1837 356 10183
+rect 344 1837 356 10183
+rect 356 1865 600 1875
+rect 356 2330 600 2340
+rect 356 2051 600 2061
+rect 356 2237 600 2247
+rect 356 2144 600 2154
+rect 356 1958 600 1968
+rect 304 2529 316 10183
+rect 304 2529 316 10183
+rect 316 2557 600 2567
+rect 264 2436 276 10183
+rect 264 2436 276 10183
+rect 276 2464 600 2474
+rect 276 2929 600 2939
+rect 276 2650 600 2660
+rect 276 2836 600 2846
+rect 276 2743 600 2753
+rect 224 7228 236 10183
+rect 224 7228 236 10183
+rect 236 7256 600 7266
+rect 236 7721 600 7731
+rect 236 7442 600 7452
+rect 236 7628 600 7638
+rect 184 7507 196 10183
+rect 184 7507 196 10183
+rect 196 7535 600 7545
+rect 144 3314 156 10183
+rect 144 3314 156 10183
+rect 156 3342 600 3352
+rect 104 3407 116 10183
+rect 104 3407 116 10183
+rect 116 3435 600 3445
+rect 64 3221 76 10183
+rect 64 3221 76 10183
+rect 76 3249 600 3259
+rect 24 3500 36 10183
+rect 24 3500 36 10183
+rect 36 3528 600 3538
+rect 600 3035 610 3101
+rect 600 3050 610 3060
+rect 600 3076 610 3086
+rect 600 3035 610 3101
+rect 600 3063 726 3073
+rect 600 3128 610 3194
+rect 600 3143 610 3153
+rect 600 3169 610 3179
+rect 600 3128 610 3194
+rect 600 3156 726 3166
+rect 600 7321 610 7387
+rect 600 7336 610 7346
+rect 600 7362 610 7372
+rect 600 7321 610 7387
+rect 600 7349 726 7359
+rect 726 0 3326 10
+rect 726 9584 736 10195
+use CAP32C_CV XC1 
+transform 1 0 600 0 1 0
+box 600 0 3336 599
+use CAP32C_CV XC256a<7> 
+transform 1 0 600 0 1 599
+box 600 599 3336 1198
+use CAP32C_CV XC128b<3> 
+transform 1 0 600 0 1 1198
+box 600 1198 3336 1797
+use CAP32C_CV XC64a<0> 
+transform 1 0 600 0 1 1797
+box 600 1797 3336 2396
+use CAP32C_CV XC32a<0> 
+transform 1 0 600 0 1 2396
+box 600 2396 3336 2995
+use CAP32C_CV XCS 
+transform 1 0 600 0 1 2995
+box 600 2995 3336 3594
+use CAP32C_CV XC128a<1> 
+transform 1 0 600 0 1 3594
+box 600 3594 3336 4193
+use CAP32C_CV XC256b<5> 
+transform 1 0 600 0 1 4193
+box 600 4193 3336 4792
+use CAP32C_CV XC256a<5> 
+transform 1 0 600 0 1 4792
+box 600 4792 3336 5391
+use CAP32C_CV XC256b<2> 
+transform 1 0 600 0 1 5391
+box 600 5391 3336 5990
+use CAP32C_CV XC256a<2> 
+transform 1 0 600 0 1 5990
+box 600 5990 3336 6589
+use CAP32C_CV XC128b<2> 
+transform 1 0 600 0 1 6589
+box 600 6589 3336 7188
+use CAP32C_CV X16ab 
+transform 1 0 600 0 1 7188
+box 600 7188 3336 7787
+use CAP32C_CV XC64b<1> 
+transform 1 0 600 0 1 7787
+box 600 7787 3336 8386
+use CAP32C_CV XC128a<0> 
+transform 1 0 600 0 1 8386
+box 600 8386 3336 8985
+use CAP32C_CV XC256b<0> 
+transform 1 0 600 0 1 8985
+box 600 8985 3336 9584
+use CAP32C_CV XC0 
+transform 1 0 600 0 1 9584
+box 600 9584 3336 10183
+use cut_M1M3_2x1 xcut0 
+transform 1 0 600 0 1 667
+box 600 667 666 677
+use cut_M2M3_1x2 xcut1 
+transform 1 0 545 0 1 639
+box 545 639 555 705
+use cut_M1M3_2x1 xcut2 
+transform 1 0 600 0 1 1132
+box 600 1132 666 1142
+use cut_M2M3_1x2 xcut3 
+transform 1 0 545 0 1 1104
+box 545 1104 555 1170
+use cut_M1M3_2x1 xcut4 
+transform 1 0 600 0 1 853
+box 600 853 666 863
+use cut_M2M3_1x2 xcut5 
+transform 1 0 545 0 1 825
+box 545 825 555 891
+use cut_M1M3_2x1 xcut6 
+transform 1 0 600 0 1 1039
+box 600 1039 666 1049
+use cut_M2M3_1x2 xcut7 
+transform 1 0 545 0 1 1011
+box 545 1011 555 1077
+use cut_M1M3_2x1 xcut8 
+transform 1 0 600 0 1 946
+box 600 946 666 956
+use cut_M2M3_1x2 xcut9 
+transform 1 0 545 0 1 918
+box 545 918 555 984
+use cut_M1M3_2x1 xcut10 
+transform 1 0 600 0 1 760
+box 600 760 666 770
+use cut_M2M3_1x2 xcut11 
+transform 1 0 545 0 1 732
+box 545 732 555 798
+use cut_M1M3_2x1 xcut12 
+transform 1 0 600 0 1 4860
+box 600 4860 666 4870
+use cut_M2M3_1x2 xcut13 
+transform 1 0 545 0 1 4832
+box 545 4832 555 4898
+use cut_M1M3_2x1 xcut14 
+transform 1 0 600 0 1 5325
+box 600 5325 666 5335
+use cut_M2M3_1x2 xcut15 
+transform 1 0 545 0 1 5297
+box 545 5297 555 5363
+use cut_M1M3_2x1 xcut16 
+transform 1 0 600 0 1 5046
+box 600 5046 666 5056
+use cut_M2M3_1x2 xcut17 
+transform 1 0 545 0 1 5018
+box 545 5018 555 5084
+use cut_M1M3_2x1 xcut18 
+transform 1 0 600 0 1 5232
+box 600 5232 666 5242
+use cut_M2M3_1x2 xcut19 
+transform 1 0 545 0 1 5204
+box 545 5204 555 5270
+use cut_M1M3_2x1 xcut20 
+transform 1 0 600 0 1 5139
+box 600 5139 666 5149
+use cut_M2M3_1x2 xcut21 
+transform 1 0 545 0 1 5111
+box 545 5111 555 5177
+use cut_M1M3_2x1 xcut22 
+transform 1 0 600 0 1 4953
+box 600 4953 666 4963
+use cut_M2M3_1x2 xcut23 
+transform 1 0 545 0 1 4925
+box 545 4925 555 4991
+use cut_M1M3_2x1 xcut24 
+transform 1 0 600 0 1 6058
+box 600 6058 666 6068
+use cut_M2M3_1x2 xcut25 
+transform 1 0 545 0 1 6030
+box 545 6030 555 6096
+use cut_M1M3_2x1 xcut26 
+transform 1 0 600 0 1 6523
+box 600 6523 666 6533
+use cut_M2M3_1x2 xcut27 
+transform 1 0 545 0 1 6495
+box 545 6495 555 6561
+use cut_M1M3_2x1 xcut28 
+transform 1 0 600 0 1 6244
+box 600 6244 666 6254
+use cut_M2M3_1x2 xcut29 
+transform 1 0 545 0 1 6216
+box 545 6216 555 6282
+use cut_M1M3_2x1 xcut30 
+transform 1 0 600 0 1 6430
+box 600 6430 666 6440
+use cut_M2M3_1x2 xcut31 
+transform 1 0 545 0 1 6402
+box 545 6402 555 6468
+use cut_M1M3_2x1 xcut32 
+transform 1 0 600 0 1 6337
+box 600 6337 666 6347
+use cut_M2M3_1x2 xcut33 
+transform 1 0 545 0 1 6309
+box 545 6309 555 6375
+use cut_M1M3_2x1 xcut34 
+transform 1 0 600 0 1 6151
+box 600 6151 666 6161
+use cut_M2M3_1x2 xcut35 
+transform 1 0 545 0 1 6123
+box 545 6123 555 6189
+use cut_M1M3_2x1 xcut36 
+transform 1 0 600 0 1 9652
+box 600 9652 666 9662
+use cut_M2M3_1x2 xcut37 
+transform 1 0 545 0 1 9624
+box 545 9624 555 9690
+use cut_M1M3_2x1 xcut38 
+transform 1 0 600 0 1 10117
+box 600 10117 666 10127
+use cut_M2M3_1x2 xcut39 
+transform 1 0 545 0 1 10089
+box 545 10089 555 10155
+use cut_M1M3_2x1 xcut40 
+transform 1 0 600 0 1 9838
+box 600 9838 666 9848
+use cut_M2M3_1x2 xcut41 
+transform 1 0 545 0 1 9810
+box 545 9810 555 9876
+use cut_M1M3_2x1 xcut42 
+transform 1 0 600 0 1 10024
+box 600 10024 666 10034
+use cut_M2M3_1x2 xcut43 
+transform 1 0 545 0 1 9996
+box 545 9996 555 10062
+use cut_M1M3_2x1 xcut44 
+transform 1 0 600 0 1 9931
+box 600 9931 666 9941
+use cut_M2M3_1x2 xcut45 
+transform 1 0 545 0 1 9903
+box 545 9903 555 9969
+use cut_M1M3_2x1 xcut46 
+transform 1 0 600 0 1 9745
+box 600 9745 666 9755
+use cut_M2M3_1x2 xcut47 
+transform 1 0 545 0 1 9717
+box 545 9717 555 9783
+use cut_M1M3_2x1 xcut48 
+transform 1 0 600 0 1 68
+box 600 68 666 78
+use cut_M2M3_1x2 xcut49 
+transform 1 0 505 0 1 40
+box 505 40 515 106
+use cut_M1M3_2x1 xcut50 
+transform 1 0 600 0 1 533
+box 600 533 666 543
+use cut_M2M3_1x2 xcut51 
+transform 1 0 505 0 1 505
+box 505 505 515 571
+use cut_M1M3_2x1 xcut52 
+transform 1 0 600 0 1 254
+box 600 254 666 264
+use cut_M2M3_1x2 xcut53 
+transform 1 0 505 0 1 226
+box 505 226 515 292
+use cut_M1M3_2x1 xcut54 
+transform 1 0 600 0 1 440
+box 600 440 666 450
+use cut_M2M3_1x2 xcut55 
+transform 1 0 505 0 1 412
+box 505 412 515 478
+use cut_M1M3_2x1 xcut56 
+transform 1 0 600 0 1 347
+box 600 347 666 357
+use cut_M2M3_1x2 xcut57 
+transform 1 0 505 0 1 319
+box 505 319 515 385
+use cut_M1M3_2x1 xcut58 
+transform 1 0 600 0 1 161
+box 600 161 666 171
+use cut_M2M3_1x2 xcut59 
+transform 1 0 505 0 1 133
+box 505 133 515 199
+use cut_M1M3_2x1 xcut60 
+transform 1 0 600 0 1 4261
+box 600 4261 666 4271
+use cut_M2M3_1x2 xcut61 
+transform 1 0 505 0 1 4233
+box 505 4233 515 4299
+use cut_M1M3_2x1 xcut62 
+transform 1 0 600 0 1 4726
+box 600 4726 666 4736
+use cut_M2M3_1x2 xcut63 
+transform 1 0 505 0 1 4698
+box 505 4698 515 4764
+use cut_M1M3_2x1 xcut64 
+transform 1 0 600 0 1 4447
+box 600 4447 666 4457
+use cut_M2M3_1x2 xcut65 
+transform 1 0 505 0 1 4419
+box 505 4419 515 4485
+use cut_M1M3_2x1 xcut66 
+transform 1 0 600 0 1 4633
+box 600 4633 666 4643
+use cut_M2M3_1x2 xcut67 
+transform 1 0 505 0 1 4605
+box 505 4605 515 4671
+use cut_M1M3_2x1 xcut68 
+transform 1 0 600 0 1 4540
+box 600 4540 666 4550
+use cut_M2M3_1x2 xcut69 
+transform 1 0 505 0 1 4512
+box 505 4512 515 4578
+use cut_M1M3_2x1 xcut70 
+transform 1 0 600 0 1 4354
+box 600 4354 666 4364
+use cut_M2M3_1x2 xcut71 
+transform 1 0 505 0 1 4326
+box 505 4326 515 4392
+use cut_M1M3_2x1 xcut72 
+transform 1 0 600 0 1 5459
+box 600 5459 666 5469
+use cut_M2M3_1x2 xcut73 
+transform 1 0 505 0 1 5431
+box 505 5431 515 5497
+use cut_M1M3_2x1 xcut74 
+transform 1 0 600 0 1 5924
+box 600 5924 666 5934
+use cut_M2M3_1x2 xcut75 
+transform 1 0 505 0 1 5896
+box 505 5896 515 5962
+use cut_M1M3_2x1 xcut76 
+transform 1 0 600 0 1 5645
+box 600 5645 666 5655
+use cut_M2M3_1x2 xcut77 
+transform 1 0 505 0 1 5617
+box 505 5617 515 5683
+use cut_M1M3_2x1 xcut78 
+transform 1 0 600 0 1 5831
+box 600 5831 666 5841
+use cut_M2M3_1x2 xcut79 
+transform 1 0 505 0 1 5803
+box 505 5803 515 5869
+use cut_M1M3_2x1 xcut80 
+transform 1 0 600 0 1 5738
+box 600 5738 666 5748
+use cut_M2M3_1x2 xcut81 
+transform 1 0 505 0 1 5710
+box 505 5710 515 5776
+use cut_M1M3_2x1 xcut82 
+transform 1 0 600 0 1 5552
+box 600 5552 666 5562
+use cut_M2M3_1x2 xcut83 
+transform 1 0 505 0 1 5524
+box 505 5524 515 5590
+use cut_M1M3_2x1 xcut84 
+transform 1 0 600 0 1 9053
+box 600 9053 666 9063
+use cut_M2M3_1x2 xcut85 
+transform 1 0 505 0 1 9025
+box 505 9025 515 9091
+use cut_M1M3_2x1 xcut86 
+transform 1 0 600 0 1 9518
+box 600 9518 666 9528
+use cut_M2M3_1x2 xcut87 
+transform 1 0 505 0 1 9490
+box 505 9490 515 9556
+use cut_M1M3_2x1 xcut88 
+transform 1 0 600 0 1 9239
+box 600 9239 666 9249
+use cut_M2M3_1x2 xcut89 
+transform 1 0 505 0 1 9211
+box 505 9211 515 9277
+use cut_M1M3_2x1 xcut90 
+transform 1 0 600 0 1 9425
+box 600 9425 666 9435
+use cut_M2M3_1x2 xcut91 
+transform 1 0 505 0 1 9397
+box 505 9397 515 9463
+use cut_M1M3_2x1 xcut92 
+transform 1 0 600 0 1 9332
+box 600 9332 666 9342
+use cut_M2M3_1x2 xcut93 
+transform 1 0 505 0 1 9304
+box 505 9304 515 9370
+use cut_M1M3_2x1 xcut94 
+transform 1 0 600 0 1 9146
+box 600 9146 666 9156
+use cut_M2M3_1x2 xcut95 
+transform 1 0 505 0 1 9118
+box 505 9118 515 9184
+use cut_M1M3_2x1 xcut96 
+transform 1 0 600 0 1 3662
+box 600 3662 666 3672
+use cut_M2M3_1x2 xcut97 
+transform 1 0 465 0 1 3634
+box 465 3634 475 3700
+use cut_M1M3_2x1 xcut98 
+transform 1 0 600 0 1 4127
+box 600 4127 666 4137
+use cut_M2M3_1x2 xcut99 
+transform 1 0 465 0 1 4099
+box 465 4099 475 4165
+use cut_M1M3_2x1 xcut100 
+transform 1 0 600 0 1 3848
+box 600 3848 666 3858
+use cut_M2M3_1x2 xcut101 
+transform 1 0 465 0 1 3820
+box 465 3820 475 3886
+use cut_M1M3_2x1 xcut102 
+transform 1 0 600 0 1 4034
+box 600 4034 666 4044
+use cut_M2M3_1x2 xcut103 
+transform 1 0 465 0 1 4006
+box 465 4006 475 4072
+use cut_M1M3_2x1 xcut104 
+transform 1 0 600 0 1 3941
+box 600 3941 666 3951
+use cut_M2M3_1x2 xcut105 
+transform 1 0 465 0 1 3913
+box 465 3913 475 3979
+use cut_M1M3_2x1 xcut106 
+transform 1 0 600 0 1 3755
+box 600 3755 666 3765
+use cut_M2M3_1x2 xcut107 
+transform 1 0 465 0 1 3727
+box 465 3727 475 3793
+use cut_M1M3_2x1 xcut108 
+transform 1 0 600 0 1 8454
+box 600 8454 666 8464
+use cut_M2M3_1x2 xcut109 
+transform 1 0 465 0 1 8426
+box 465 8426 475 8492
+use cut_M1M3_2x1 xcut110 
+transform 1 0 600 0 1 8919
+box 600 8919 666 8929
+use cut_M2M3_1x2 xcut111 
+transform 1 0 465 0 1 8891
+box 465 8891 475 8957
+use cut_M1M3_2x1 xcut112 
+transform 1 0 600 0 1 8640
+box 600 8640 666 8650
+use cut_M2M3_1x2 xcut113 
+transform 1 0 465 0 1 8612
+box 465 8612 475 8678
+use cut_M1M3_2x1 xcut114 
+transform 1 0 600 0 1 8826
+box 600 8826 666 8836
+use cut_M2M3_1x2 xcut115 
+transform 1 0 465 0 1 8798
+box 465 8798 475 8864
+use cut_M1M3_2x1 xcut116 
+transform 1 0 600 0 1 8733
+box 600 8733 666 8743
+use cut_M2M3_1x2 xcut117 
+transform 1 0 465 0 1 8705
+box 465 8705 475 8771
+use cut_M1M3_2x1 xcut118 
+transform 1 0 600 0 1 8547
+box 600 8547 666 8557
+use cut_M2M3_1x2 xcut119 
+transform 1 0 465 0 1 8519
+box 465 8519 475 8585
+use cut_M1M3_2x1 xcut120 
+transform 1 0 600 0 1 1266
+box 600 1266 666 1276
+use cut_M2M3_1x2 xcut121 
+transform 1 0 425 0 1 1238
+box 425 1238 435 1304
+use cut_M1M3_2x1 xcut122 
+transform 1 0 600 0 1 1731
+box 600 1731 666 1741
+use cut_M2M3_1x2 xcut123 
+transform 1 0 425 0 1 1703
+box 425 1703 435 1769
+use cut_M1M3_2x1 xcut124 
+transform 1 0 600 0 1 1452
+box 600 1452 666 1462
+use cut_M2M3_1x2 xcut125 
+transform 1 0 425 0 1 1424
+box 425 1424 435 1490
+use cut_M1M3_2x1 xcut126 
+transform 1 0 600 0 1 1638
+box 600 1638 666 1648
+use cut_M2M3_1x2 xcut127 
+transform 1 0 425 0 1 1610
+box 425 1610 435 1676
+use cut_M1M3_2x1 xcut128 
+transform 1 0 600 0 1 1545
+box 600 1545 666 1555
+use cut_M2M3_1x2 xcut129 
+transform 1 0 425 0 1 1517
+box 425 1517 435 1583
+use cut_M1M3_2x1 xcut130 
+transform 1 0 600 0 1 1359
+box 600 1359 666 1369
+use cut_M2M3_1x2 xcut131 
+transform 1 0 425 0 1 1331
+box 425 1331 435 1397
+use cut_M1M3_2x1 xcut132 
+transform 1 0 600 0 1 6657
+box 600 6657 666 6667
+use cut_M2M3_1x2 xcut133 
+transform 1 0 425 0 1 6629
+box 425 6629 435 6695
+use cut_M1M3_2x1 xcut134 
+transform 1 0 600 0 1 7122
+box 600 7122 666 7132
+use cut_M2M3_1x2 xcut135 
+transform 1 0 425 0 1 7094
+box 425 7094 435 7160
+use cut_M1M3_2x1 xcut136 
+transform 1 0 600 0 1 6843
+box 600 6843 666 6853
+use cut_M2M3_1x2 xcut137 
+transform 1 0 425 0 1 6815
+box 425 6815 435 6881
+use cut_M1M3_2x1 xcut138 
+transform 1 0 600 0 1 7029
+box 600 7029 666 7039
+use cut_M2M3_1x2 xcut139 
+transform 1 0 425 0 1 7001
+box 425 7001 435 7067
+use cut_M1M3_2x1 xcut140 
+transform 1 0 600 0 1 6936
+box 600 6936 666 6946
+use cut_M2M3_1x2 xcut141 
+transform 1 0 425 0 1 6908
+box 425 6908 435 6974
+use cut_M1M3_2x1 xcut142 
+transform 1 0 600 0 1 6750
+box 600 6750 666 6760
+use cut_M2M3_1x2 xcut143 
+transform 1 0 425 0 1 6722
+box 425 6722 435 6788
+use cut_M1M3_2x1 xcut144 
+transform 1 0 600 0 1 7855
+box 600 7855 666 7865
+use cut_M2M3_1x2 xcut145 
+transform 1 0 385 0 1 7827
+box 385 7827 395 7893
+use cut_M1M3_2x1 xcut146 
+transform 1 0 600 0 1 8320
+box 600 8320 666 8330
+use cut_M2M3_1x2 xcut147 
+transform 1 0 385 0 1 8292
+box 385 8292 395 8358
+use cut_M1M3_2x1 xcut148 
+transform 1 0 600 0 1 8041
+box 600 8041 666 8051
+use cut_M2M3_1x2 xcut149 
+transform 1 0 385 0 1 8013
+box 385 8013 395 8079
+use cut_M1M3_2x1 xcut150 
+transform 1 0 600 0 1 8227
+box 600 8227 666 8237
+use cut_M2M3_1x2 xcut151 
+transform 1 0 385 0 1 8199
+box 385 8199 395 8265
+use cut_M1M3_2x1 xcut152 
+transform 1 0 600 0 1 8134
+box 600 8134 666 8144
+use cut_M2M3_1x2 xcut153 
+transform 1 0 385 0 1 8106
+box 385 8106 395 8172
+use cut_M1M3_2x1 xcut154 
+transform 1 0 600 0 1 7948
+box 600 7948 666 7958
+use cut_M2M3_1x2 xcut155 
+transform 1 0 385 0 1 7920
+box 385 7920 395 7986
+use cut_M1M3_2x1 xcut156 
+transform 1 0 600 0 1 1865
+box 600 1865 666 1875
+use cut_M2M3_1x2 xcut157 
+transform 1 0 345 0 1 1837
+box 345 1837 355 1903
+use cut_M1M3_2x1 xcut158 
+transform 1 0 600 0 1 2330
+box 600 2330 666 2340
+use cut_M2M3_1x2 xcut159 
+transform 1 0 345 0 1 2302
+box 345 2302 355 2368
+use cut_M1M3_2x1 xcut160 
+transform 1 0 600 0 1 2051
+box 600 2051 666 2061
+use cut_M2M3_1x2 xcut161 
+transform 1 0 345 0 1 2023
+box 345 2023 355 2089
+use cut_M1M3_2x1 xcut162 
+transform 1 0 600 0 1 2237
+box 600 2237 666 2247
+use cut_M2M3_1x2 xcut163 
+transform 1 0 345 0 1 2209
+box 345 2209 355 2275
+use cut_M1M3_2x1 xcut164 
+transform 1 0 600 0 1 2144
+box 600 2144 666 2154
+use cut_M2M3_1x2 xcut165 
+transform 1 0 345 0 1 2116
+box 345 2116 355 2182
+use cut_M1M3_2x1 xcut166 
+transform 1 0 600 0 1 1958
+box 600 1958 666 1968
+use cut_M2M3_1x2 xcut167 
+transform 1 0 345 0 1 1930
+box 345 1930 355 1996
+use cut_M1M3_2x1 xcut168 
+transform 1 0 600 0 1 2557
+box 600 2557 666 2567
+use cut_M2M3_1x2 xcut169 
+transform 1 0 305 0 1 2529
+box 305 2529 315 2595
+use cut_M1M3_2x1 xcut170 
+transform 1 0 600 0 1 2464
+box 600 2464 666 2474
+use cut_M2M3_1x2 xcut171 
+transform 1 0 265 0 1 2436
+box 265 2436 275 2502
+use cut_M1M3_2x1 xcut172 
+transform 1 0 600 0 1 2929
+box 600 2929 666 2939
+use cut_M2M3_1x2 xcut173 
+transform 1 0 265 0 1 2901
+box 265 2901 275 2967
+use cut_M1M3_2x1 xcut174 
+transform 1 0 600 0 1 2650
+box 600 2650 666 2660
+use cut_M2M3_1x2 xcut175 
+transform 1 0 265 0 1 2622
+box 265 2622 275 2688
+use cut_M1M3_2x1 xcut176 
+transform 1 0 600 0 1 2836
+box 600 2836 666 2846
+use cut_M2M3_1x2 xcut177 
+transform 1 0 265 0 1 2808
+box 265 2808 275 2874
+use cut_M1M3_2x1 xcut178 
+transform 1 0 600 0 1 2743
+box 600 2743 666 2753
+use cut_M2M3_1x2 xcut179 
+transform 1 0 265 0 1 2715
+box 265 2715 275 2781
+use cut_M1M3_2x1 xcut180 
+transform 1 0 600 0 1 7256
+box 600 7256 666 7266
+use cut_M2M3_1x2 xcut181 
+transform 1 0 225 0 1 7228
+box 225 7228 235 7294
+use cut_M1M3_2x1 xcut182 
+transform 1 0 600 0 1 7721
+box 600 7721 666 7731
+use cut_M2M3_1x2 xcut183 
+transform 1 0 225 0 1 7693
+box 225 7693 235 7759
+use cut_M1M3_2x1 xcut184 
+transform 1 0 600 0 1 7442
+box 600 7442 666 7452
+use cut_M2M3_1x2 xcut185 
+transform 1 0 225 0 1 7414
+box 225 7414 235 7480
+use cut_M1M3_2x1 xcut186 
+transform 1 0 600 0 1 7628
+box 600 7628 666 7638
+use cut_M2M3_1x2 xcut187 
+transform 1 0 225 0 1 7600
+box 225 7600 235 7666
+use cut_M1M3_2x1 xcut188 
+transform 1 0 600 0 1 7535
+box 600 7535 666 7545
+use cut_M2M3_1x2 xcut189 
+transform 1 0 185 0 1 7507
+box 185 7507 195 7573
+use cut_M1M3_2x1 xcut190 
+transform 1 0 600 0 1 3342
+box 600 3342 666 3352
+use cut_M2M3_1x2 xcut191 
+transform 1 0 145 0 1 3314
+box 145 3314 155 3380
+use cut_M1M3_2x1 xcut192 
+transform 1 0 600 0 1 3435
+box 600 3435 666 3445
+use cut_M2M3_1x2 xcut193 
+transform 1 0 105 0 1 3407
+box 105 3407 115 3473
+use cut_M1M3_2x1 xcut194 
+transform 1 0 600 0 1 3249
+box 600 3249 666 3259
+use cut_M2M3_1x2 xcut195 
+transform 1 0 65 0 1 3221
+box 65 3221 75 3287
+use cut_M1M3_2x1 xcut196 
+transform 1 0 600 0 1 3528
+box 600 3528 666 3538
+use cut_M2M3_1x2 xcut197 
+transform 1 0 25 0 1 3500
+box 25 3500 35 3566
+<< labels >>
+flabel po s 544 639 556 10183 0 FreeSans 400 0 0 0 CP<13>
+port 1 nsew signal bidirectional
+flabel po s 504 40 516 10183 0 FreeSans 400 0 0 0 CP<12>
+port 2 nsew signal bidirectional
+flabel po s 464 3634 476 10183 0 FreeSans 400 0 0 0 CP<11>
+port 3 nsew signal bidirectional
+flabel po s 424 1238 436 10183 0 FreeSans 400 0 0 0 CP<10>
+port 4 nsew signal bidirectional
+flabel po s 384 7827 396 10183 0 FreeSans 400 0 0 0 CP<9>
+port 5 nsew signal bidirectional
+flabel po s 344 1837 356 10183 0 FreeSans 400 0 0 0 CP<8>
+port 6 nsew signal bidirectional
+flabel po s 304 2529 316 10183 0 FreeSans 400 0 0 0 CP<7>
+port 7 nsew signal bidirectional
+flabel po s 264 2436 276 10183 0 FreeSans 400 0 0 0 CP<6>
+port 8 nsew signal bidirectional
+flabel po s 224 7228 236 10183 0 FreeSans 400 0 0 0 CP<5>
+port 9 nsew signal bidirectional
+flabel po s 184 7507 196 10183 0 FreeSans 400 0 0 0 CP<4>
+port 10 nsew signal bidirectional
+flabel po s 144 3314 156 10183 0 FreeSans 400 0 0 0 CP<3>
+port 11 nsew signal bidirectional
+flabel po s 104 3407 116 10183 0 FreeSans 400 0 0 0 CP<2>
+port 12 nsew signal bidirectional
+flabel po s 64 3221 76 10183 0 FreeSans 400 0 0 0 CP<1>
+port 13 nsew signal bidirectional
+flabel po s 24 3500 36 10183 0 FreeSans 400 0 0 0 CP<0>
+port 14 nsew signal bidirectional
+flabel po s 726 0 3326 10 0 FreeSans 400 0 0 0 AVSS
+port 16 nsew signal bidirectional
+flabel po s 726 9584 736 10195 0 FreeSans 400 0 0 0 CTOP
+port 15 nsew signal bidirectional
+<< properties >>
+string FIXED_BBOX 24 0 3336 10195
+<< end >>

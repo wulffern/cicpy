@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-JR1G6C914F"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-JR1G6C914F');
+</script>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Routes | cicpy</title>
+<meta name="generator" content="Jekyll v3.9.2" />
+<meta property="og:title" content="Routes" />
+<meta name="author" content="Carsten Wulff" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Custom IC Creator Python" />
+<meta property="og:description" content="Custom IC Creator Python" />
+<link rel="canonical" href="http://0.0.0.0:4000/cicpy/routes.html" />
+<meta property="og:url" content="http://0.0.0.0:4000/cicpy/routes.html" />
+<meta property="og:site_name" content="cicpy" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Routes" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","author":{"@type":"Person","name":"Carsten Wulff"},"description":"Custom IC Creator Python","headline":"Routes","url":"http://0.0.0.0:4000/cicpy/routes.html"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="stylesheet" href="/cicpy/assets/css/style.css"><link type="application/atom+xml" rel="alternate" href="http://0.0.0.0:4000/cicpy/feed.xml" title="cicpy" />
+
+<script>
+  
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    },
+    svg: {
+      fontCache: 'global'
+    }
+  };
+  </script>
+  
+    <script type="text/javascript" id="MathJax-script" async
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js">
+  </script></head>
+<body><header class="site-header">
+
+  <div class="wrapper"><a class="site-title" rel="author" href="/cicpy/">cicpy</a><nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"/>
+            </svg>
+          </span>
+        </label>
+
+        <div class="trigger"><a class="page-link" href="/cicpy/">cicpy</a><a class="page-link" href="/cicpy/jcell.html">jcell</a><a class="page-link" href="/cicpy/layout.html">Layout Flow</a><a class="page-link" href="/cicpy/minecraft.html">minecraft</a><a class="page-link" href="/cicpy/routes.html">Routes</a><a class="page-link" href="/cicpy/sch2mag.html">sch2mag</a><a class="page-link" href="/cicpy/svg.html">svg</a><a class="page-link" href="/cicpy/transpile.html">transpile</a></div>
+      </nav></div>
+</header>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <article class="post">
+
+  <header class="post-header">
+    <h1 class="post-title">Routes</h1>
+  </header>
+
+  <div class="post-content">
+    <h1 id="routes">Routes</h1>
+
+<p>Preferred routing APIs in <code class="language-plaintext highlighter-rouge">cicpy</code>:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">addConnectivityRoute(...)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">addOrthogonalConnectivityRoute(...)</code></li>
+</ul>
+
+<p>These are the APIs the examples below use. <code class="language-plaintext highlighter-rouge">addDirectedRoute(...)</code> still exists, but it is a lower-level escape hatch and is not the default path for normal layout generation.</p>
+
+<p>The examples below are generated from:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">tests/routes/route_examples.spi</code></li>
+  <li><code class="language-plaintext highlighter-rouge">tests/routes/build_route_examples.py</code></li>
+</ul>
+
+<p>Flow used by the examples:</p>
+<ul>
+  <li>parse a tiny SPICE file with one subckt per route demo</li>
+  <li>build a <code class="language-plaintext highlighter-rouge">LayoutCell</code> from each subckt</li>
+  <li>call <code class="language-plaintext highlighter-rouge">place()</code> so the instances create a real <code class="language-plaintext highlighter-rouge">nodeGraph</code></li>
+  <li>route by net name with <code class="language-plaintext highlighter-rouge">addConnectivityRoute(...)</code> or <code class="language-plaintext highlighter-rouge">addOrthogonalConnectivityRoute(...)</code></li>
+  <li>render the result with <code class="language-plaintext highlighter-rouge">SvgPrinter</code></li>
+</ul>
+
+<p>The transistor used in every example is the real <code class="language-plaintext highlighter-rouge">NCHDL</code> cell from the SVG regression data. Routes land on actual <code class="language-plaintext highlighter-rouge">G</code>, <code class="language-plaintext highlighter-rouge">S</code>, or <code class="language-plaintext highlighter-rouge">D</code> terminals.</p>
+
+<h2 id="preferred-apis">Preferred APIs</h2>
+
+<h3 id="addconnectivityroute"><code class="language-plaintext highlighter-rouge">addConnectivityRoute(...)</code></h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">layout</span><span class="p">.</span><span class="n">addConnectivityRoute</span><span class="p">(</span><span class="n">layer</span><span class="p">,</span> <span class="n">regex</span><span class="p">,</span> <span class="n">routeType</span><span class="p">,</span> <span class="n">options</span><span class="p">,</span> <span class="n">cuts</span><span class="p">,</span> <span class="n">excludeInstances</span><span class="p">,</span> <span class="n">includeInstances</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Arguments:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">layer</code>: routing layer used by the route object</li>
+  <li><code class="language-plaintext highlighter-rouge">regex</code>: regular expression matched against <code class="language-plaintext highlighter-rouge">nodeGraphList</code> net names</li>
+  <li><code class="language-plaintext highlighter-rouge">routeType</code>: one of the route strings documented below</li>
+  <li><code class="language-plaintext highlighter-rouge">options</code>: comma-separated route options</li>
+  <li><code class="language-plaintext highlighter-rouge">cuts</code>: accepted by the API but currently not consumed directly by <code class="language-plaintext highlighter-rouge">Route</code>; cut count is instead parsed from <code class="language-plaintext highlighter-rouge">options</code></li>
+  <li><code class="language-plaintext highlighter-rouge">excludeInstances</code>: regex used to drop instance names from the candidate rectangle set</li>
+  <li><code class="language-plaintext highlighter-rouge">includeInstances</code>: regex used to keep only a subset of instance names</li>
+</ul>
+
+<p>Example:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">layout</span><span class="p">.</span><span class="n">addConnectivityRoute</span><span class="p">(</span><span class="s">"M3"</span><span class="p">,</span> <span class="sa">r</span><span class="s">"^G$"</span><span class="p">,</span> <span class="s">"-"</span><span class="p">,</span> <span class="s">"nolabel"</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s">""</span><span class="p">,</span> <span class="s">""</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="addorthogonalconnectivityroute"><code class="language-plaintext highlighter-rouge">addOrthogonalConnectivityRoute(...)</code></h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">layout</span><span class="p">.</span><span class="n">addOrthogonalConnectivityRoute</span><span class="p">(</span>
+    <span class="n">verticalLayer</span><span class="p">,</span>
+    <span class="n">horizontalLayer</span><span class="p">,</span>
+    <span class="n">regex</span><span class="p">,</span>
+    <span class="n">options</span><span class="p">,</span>
+    <span class="n">cuts</span><span class="p">,</span>
+    <span class="n">excludeInstances</span><span class="p">,</span>
+    <span class="n">includeInstances</span><span class="p">,</span>
+    <span class="n">accessLayer</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<p>Arguments:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">verticalLayer</code>: layer used for the trunk</li>
+  <li><code class="language-plaintext highlighter-rouge">horizontalLayer</code>: layer used for branches</li>
+  <li><code class="language-plaintext highlighter-rouge">regex</code>: net regex matched against <code class="language-plaintext highlighter-rouge">nodeGraphList</code></li>
+  <li><code class="language-plaintext highlighter-rouge">options</code>: currently accepted for API symmetry; route-label suppression uses <code class="language-plaintext highlighter-rouge">nolabel</code></li>
+  <li><code class="language-plaintext highlighter-rouge">cuts</code>: currently stored but not used to size the cuts; the implementation uses <code class="language-plaintext highlighter-rouge">1x2</code> or <code class="language-plaintext highlighter-rouge">2x1</code></li>
+  <li><code class="language-plaintext highlighter-rouge">excludeInstances</code>: regex for dropping instances</li>
+  <li><code class="language-plaintext highlighter-rouge">includeInstances</code>: regex for limiting candidate instances</li>
+  <li><code class="language-plaintext highlighter-rouge">accessLayer</code>: terminal access layer collected with <code class="language-plaintext highlighter-rouge">instance.getTerminalAccess(...)</code>; defaults to <code class="language-plaintext highlighter-rouge">verticalLayer</code></li>
+</ul>
+
+<p>Behavior:</p>
+<ul>
+  <li>collects terminal access rectangles on <code class="language-plaintext highlighter-rouge">accessLayer</code></li>
+  <li>finds a free vertical trunk track on <code class="language-plaintext highlighter-rouge">verticalLayer</code></li>
+  <li>creates horizontal branches on <code class="language-plaintext highlighter-rouge">horizontalLayer</code></li>
+  <li>uses <code class="language-plaintext highlighter-rouge">1x2</code> for vertical access rectangles and <code class="language-plaintext highlighter-rouge">2x1</code> for horizontal access rectangles</li>
+  <li>places a <code class="language-plaintext highlighter-rouge">1x2</code> trunk cut between branch and trunk</li>
+</ul>
+
+<p>Example:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">layout</span><span class="p">.</span><span class="n">addOrthogonalConnectivityRoute</span><span class="p">(</span><span class="s">"M2"</span><span class="p">,</span> <span class="s">"M3"</span><span class="p">,</span> <span class="sa">r</span><span class="s">"^D$"</span><span class="p">,</span> <span class="s">"nolabel"</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s">""</span><span class="p">,</span> <span class="s">""</span><span class="p">,</span> <span class="n">accessLayer</span><span class="o">=</span><span class="s">"M1"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h2 id="route-types">Route types</h2>
+
+<h3 id="straight--">Straight <code class="language-plaintext highlighter-rouge">-</code></h3>
+
+<p>Connects one instance terminal to one other instance terminal with horizontal metal on one layer.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>make <span class="nb">test </span><span class="nv">PYTHON</span><span class="o">=</span>/opt/eda/python3/bin//python3
+</code></pre></div></div>
+
+<p><img src="/cicpy/assets/ROUTE_STRAIGHT.svg" alt="" /></p>
+
+<h3 id="straight-with-layer-transition">Straight with layer transition</h3>
+
+<p>A straight route can also add start/end cuts when the source rectangles are on another layer.
+This example routes on <code class="language-plaintext highlighter-rouge">M3</code> from <code class="language-plaintext highlighter-rouge">NCHDL:D</code> and uses <code class="language-plaintext highlighter-rouge">fillvcut</code> plus start/end cut offsets.</p>
+
+<p><img src="/cicpy/assets/ROUTE_STRAIGHT_WITH_CUTS.svg" alt="" /></p>
+
+<h3 id="straight-with-horizontal-fill-cuts">Straight with horizontal fill cuts</h3>
+
+<p>This example uses <code class="language-plaintext highlighter-rouge">fillhcut</code> on <code class="language-plaintext highlighter-rouge">NCHDL:G</code>.</p>
+
+<p><img src="/cicpy/assets/ROUTE_STRAIGHT_WITH_FILLHCUT.svg" alt="" /></p>
+
+<h3 id="left----">Left <code class="language-plaintext highlighter-rouge">-|--</code></h3>
+
+<p>Routes one-to-many on shared net <code class="language-plaintext highlighter-rouge">D</code> from two left-column instances to one right-column instance.</p>
+
+<p><img src="/cicpy/assets/ROUTE_LEFT.svg" alt="" /></p>
+
+<h3 id="right----">Right <code class="language-plaintext highlighter-rouge">--|-</code></h3>
+
+<p>Routes one-to-many on shared net <code class="language-plaintext highlighter-rouge">S</code> from one left-column instance to two right-column instances.</p>
+
+<p><img src="/cicpy/assets/ROUTE_RIGHT.svg" alt="" /></p>
+
+<h3 id="vertical-">Vertical <code class="language-plaintext highlighter-rouge">||</code></h3>
+
+<p>Creates a straight vertical connection between stacked <code class="language-plaintext highlighter-rouge">NCHDL:D</code> terminals.</p>
+
+<p><img src="/cicpy/assets/ROUTE_VERTICAL.svg" alt="" /></p>
+
+<h3 id="vertical-with-antenna">Vertical with antenna</h3>
+
+<p>With <code class="language-plaintext highlighter-rouge">antenna</code>, the vertical trunk is promoted two routing layers up when there is enough height, with <code class="language-plaintext highlighter-rouge">1x2</code> cuts at the two ends.
+If there is not enough height, it falls back to the normal vertical trunk.</p>
+
+<p><img src="/cicpy/assets/ROUTE_VERTICAL_ANTENNA.svg" alt="" /></p>
+
+<h3 id="u-left--">U left <code class="language-plaintext highlighter-rouge">|-</code></h3>
+
+<p>Builds a vertical trunk to the left of stacked <code class="language-plaintext highlighter-rouge">NCHDL:D</code> terminals and reconnects both ends back into it.</p>
+
+<p><img src="/cicpy/assets/ROUTE_U_LEFT.svg" alt="" /></p>
+
+<h3 id="u-right--">U right <code class="language-plaintext highlighter-rouge">-|</code></h3>
+
+<p>Builds a vertical trunk to the right of stacked <code class="language-plaintext highlighter-rouge">NCHDL:D</code> terminals and reconnects both ends back into it.</p>
+
+<p><img src="/cicpy/assets/ROUTE_U_RIGHT.svg" alt="" /></p>
+
+<h3 id="u-top---">U top <code class="language-plaintext highlighter-rouge">--|</code></h3>
+
+<p>Builds a horizontal bar above two <code class="language-plaintext highlighter-rouge">NCHDL:G</code> terminals and drops vertical stubs down to them.</p>
+
+<p><img src="/cicpy/assets/ROUTE_U_TOP.svg" alt="" /></p>
+
+<h3 id="u-bottom---">U bottom <code class="language-plaintext highlighter-rouge">|--</code></h3>
+
+<p>Builds a horizontal bar below two <code class="language-plaintext highlighter-rouge">NCHDL:G</code> terminals and rises vertical stubs up to them.</p>
+
+<p><img src="/cicpy/assets/ROUTE_U_BOTTOM.svg" alt="" /></p>
+
+<h3 id="left-down-left-up">Left-down-left-up</h3>
+
+<p>Enabled with route type <code class="language-plaintext highlighter-rouge">-|--</code> plus option <code class="language-plaintext highlighter-rouge">leftdownleftup</code>.
+This is a specialized two-level detour shape.</p>
+
+<p><img src="/cicpy/assets/ROUTE_LEFT_DOWN_LEFT_UP.svg" alt="" /></p>
+
+<h3 id="left-up-left-down">Left-up-left-down</h3>
+
+<p>Enabled with route type <code class="language-plaintext highlighter-rouge">-|--</code> plus option <code class="language-plaintext highlighter-rouge">leftupleftdown</code>.
+This is the mirrored specialized two-level detour.</p>
+
+<p><img src="/cicpy/assets/ROUTE_LULD.svg" alt="" /></p>
+
+<h3 id="strap">Strap</h3>
+
+<p>Enabled with option <code class="language-plaintext highlighter-rouge">strap</code>.</p>
+<ul>
+  <li>default: horizontal one-to-many straps from one anchor terminal to several peers</li>
+  <li>add <code class="language-plaintext highlighter-rouge">vertical</code> to strap vertically instead</li>
+</ul>
+
+<p>Horizontal strap:</p>
+
+<p><img src="/cicpy/assets/ROUTE_STRAP_HORIZONTAL.svg" alt="" /></p>
+
+<p>Vertical strap:</p>
+
+<p><img src="/cicpy/assets/ROUTE_STRAP_VERTICAL.svg" alt="" /></p>
+
+<h3 id="orthogonal-connectivity-route">Orthogonal connectivity route</h3>
+
+<p>This is the preferred two-layer routing API for a vertical trunk plus horizontal branches.
+The demo uses shared net <code class="language-plaintext highlighter-rouge">D</code> and collects <code class="language-plaintext highlighter-rouge">M1</code> device access before routing on <code class="language-plaintext highlighter-rouge">M2</code> and <code class="language-plaintext highlighter-rouge">M3</code>.</p>
+
+<p><img src="/cicpy/assets/ROUTE_ORTHOGONAL.svg" alt="" /></p>
+
+<h2 id="options">Options</h2>
+
+<p><code class="language-plaintext highlighter-rouge">options</code> is a comma-separated string. Current <code class="language-plaintext highlighter-rouge">Route</code> parsing in <code class="language-plaintext highlighter-rouge">cicpy</code> supports these names.</p>
+
+<h3 id="working-options">Working options</h3>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">onTopB</code>, <code class="language-plaintext highlighter-rouge">onTopT</code>, <code class="language-plaintext highlighter-rouge">onTopL</code>, <code class="language-plaintext highlighter-rouge">onTopR</code>
+Used mainly by <code class="language-plaintext highlighter-rouge">addRouteConnection(...)</code> to choose which rectangle becomes the start rectangle.</li>
+  <li><code class="language-plaintext highlighter-rouge">offsethigh</code>, <code class="language-plaintext highlighter-rouge">offsetlow</code>
+Offsets the start-side horizontal stub by one route width.</li>
+  <li><code class="language-plaintext highlighter-rouge">offsethighend</code>, <code class="language-plaintext highlighter-rouge">offsetlowend</code>
+Offsets the stop-side horizontal stub by one route width.</li>
+  <li><code class="language-plaintext highlighter-rouge">trackN</code>
+Moves the left/right trunk by <code class="language-plaintext highlighter-rouge">N * ROUTE.horizontalgrid</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">routeWidth=&lt;rule&gt;</code>
+Uses another width rule from the technology file instead of <code class="language-plaintext highlighter-rouge">width</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">startLayer=&lt;layer&gt;</code>, <code class="language-plaintext highlighter-rouge">stopLayer=&lt;layer&gt;</code>
+Forces the copied start/stop rectangles onto a specific layer before route generation.</li>
+  <li><code class="language-plaintext highlighter-rouge">trimstartleft</code>, <code class="language-plaintext highlighter-rouge">trimstartright</code>, <code class="language-plaintext highlighter-rouge">trimendleft</code>, <code class="language-plaintext highlighter-rouge">trimendright</code>
+Trims the source rectangles before building left/right routes.</li>
+  <li><code class="language-plaintext highlighter-rouge">leftdownleftup</code>, <code class="language-plaintext highlighter-rouge">leftupleftdown</code>
+Selects the specialized detour routes shown above.</li>
+  <li><code class="language-plaintext highlighter-rouge">strap</code>
+Uses strap routing instead of the normal left/right/straight logic.</li>
+  <li><code class="language-plaintext highlighter-rouge">vertical</code>
+Only meaningful together with <code class="language-plaintext highlighter-rouge">strap</code>; switches strap routing to vertical.</li>
+  <li><code class="language-plaintext highlighter-rouge">noSpace</code>
+Removes the default space between the source geometry and the left/right trunk.</li>
+  <li><code class="language-plaintext highlighter-rouge">novert</code>
+Disables the trunk segment in left/right routes.</li>
+  <li><code class="language-plaintext highlighter-rouge">fillhcut</code>
+Forces horizontal <code class="language-plaintext highlighter-rouge">2x1</code> cuts on horizontal access rectangles.</li>
+  <li><code class="language-plaintext highlighter-rouge">fillvcut</code>
+Forces vertical <code class="language-plaintext highlighter-rouge">1x2</code> cuts on vertical access rectangles.</li>
+  <li><code class="language-plaintext highlighter-rouge">antenna</code>
+Promotes tall vertical routes two layers up when legal.</li>
+  <li><code class="language-plaintext highlighter-rouge">nolabel</code>
+Suppresses route net-name text in the output.</li>
+</ul>
+
+<h3 id="classic-cut-options">Classic cut options</h3>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">nostartcut</code>, <code class="language-plaintext highlighter-rouge">noendcut</code></li>
+  <li><code class="language-plaintext highlighter-rouge">startoffsetcuthigh</code>, <code class="language-plaintext highlighter-rouge">startoffsetcutlow</code></li>
+  <li><code class="language-plaintext highlighter-rouge">endoffsetcuthigh</code>, <code class="language-plaintext highlighter-rouge">endoffsetcutlow</code></li>
+  <li><code class="language-plaintext highlighter-rouge">&lt;N&gt;startcuts</code>, <code class="language-plaintext highlighter-rouge">&lt;N&gt;startvcuts</code></li>
+  <li><code class="language-plaintext highlighter-rouge">&lt;N&gt;endcuts</code>, <code class="language-plaintext highlighter-rouge">&lt;N&gt;endvcuts</code></li>
+  <li><code class="language-plaintext highlighter-rouge">&lt;N&gt;cuts</code>, <code class="language-plaintext highlighter-rouge">&lt;N&gt;vcuts</code></li>
+</ul>
+
+<p>Current constraint:</p>
+<ul>
+  <li>all generated cuts are normalized to <code class="language-plaintext highlighter-rouge">1x2</code> or <code class="language-plaintext highlighter-rouge">2x1</code></li>
+  <li><code class="language-plaintext highlighter-rouge">1x1</code> is not used</li>
+</ul>
+
+<h2 id="lower-level-escape-hatch">Lower-level escape hatch</h2>
+
+<h3 id="adddirectedroute"><code class="language-plaintext highlighter-rouge">addDirectedRoute(...)</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">addDirectedRoute(...)</code> still exists for explicit path routing, but it is not the default API for these docs.
+Use it when routing must be driven by a specific instance-path expression instead of a shared net in <code class="language-plaintext highlighter-rouge">nodeGraph</code>.</p>
+
+  </div>
+
+</article>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/cicpy/"></data>
+
+  <div class="wrapper">
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col">
+        <p class="feed-subscribe">
+          <a href="http://0.0.0.0:4000/cicpy/feed.xml">
+            <svg class="svg-icon orange">
+              <use xlink:href="/cicpy/assets/minima-social-icons.svg#rss"></use>
+            </svg><span>Subscribe</span>
+          </a>
+        </p>
+        <ul class="contact-list">
+          <li class="p-name">Carsten Wulff</li>
+          <li><a class="u-email" href="mailto:carsten@wulff.no">carsten@wulff.no</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <p>Custom IC Creator Python</p>
+      </div>
+    </div>
+
+    <div class="social-links"><ul class="social-media-list"></ul>
+</div>
+
+  </div>
+
+</footer>
+</body>
+
+</html>

@@ -1,0 +1,38 @@
+ Netlist File
+ TGPD_CV
+ AVSS
+MN0/D
+MN0/B
+MN1/S
+MN1/B
+MN2/B
+MP0/B
+MP1_DMY/B
+MP2/B
+
+ C
+MN0/G
+MN1/G
+MP0/G
+MP2/G
+
+ CN
+MN0/S
+MN2/G
+MP0/S
+
+ B
+MN1/D
+MN2/S
+MP1_DMY/D
+MP2/S
+
+ A
+MN2/D
+MP2/D
+
+ AVDD
+MP0/D
+MP1_DMY/G
+MP1_DMY/S
+

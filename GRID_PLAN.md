@@ -1,8 +1,3 @@
----
-layout: page
-title: Keeping the output on grid
----
-
 # Keeping the output on grid
 
 ciccreator stores coordinates as integer ångström. cicpy is Python, so a

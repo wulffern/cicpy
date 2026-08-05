@@ -1,0 +1,136 @@
+magic
+tech tech
+magscale 1 2
+timestamp 1785880800
+<< checkpaint >>
+rect 0 0 688 482
+<< po >>
+rect 155 444 533 450
+rect 562 304 574 453
+rect 114 97 126 384
+rect 241 114 289 126
+rect 241 252 289 264
+rect 241 390 289 402
+rect 289 114 447 126
+rect 289 114 301 402
+rect 180 46 241 58
+rect 180 183 241 195
+rect 180 321 241 333
+rect 180 46 192 333
+rect 241 46 289 58
+rect 289 11 447 23
+rect 289 11 301 58
+rect 387 252 447 264
+rect 387 390 447 402
+rect 241 458 387 470
+rect 387 252 399 470
+rect 155 31 533 37
+rect 568 28 616 40
+rect 568 97 616 109
+rect 568 235 616 247
+rect 616 28 628 247
+rect 447 183 496 195
+rect 496 166 568 178
+rect 496 166 508 195
+rect 206 321 275 333
+rect 206 390 275 402
+rect 86 97 155 109
+rect 86 28 155 40
+rect 206 458 275 470
+rect 86 441 155 453
+rect 413 0 479 482
+rect 206 0 272 482
+rect 413 0 479 482
+rect 206 0 272 482
+use NCHDL MN0 
+transform 1 0 0 0 1 0
+box 0 0 344 69
+use NCHDL MN1 
+transform 1 0 0 0 1 69
+box 0 69 344 138
+use NCHDL MN2 
+transform 1 0 0 0 1 138
+box 0 138 344 207
+use NCHDL MN3 
+transform 1 0 0 0 1 206
+box 0 206 344 275
+use NCHDL MN4 
+transform 1 0 0 0 1 275
+box 0 275 344 344
+use NCHDL MN5 
+transform 1 0 0 0 1 344
+box 0 344 344 413
+use NCHDL MN6 
+transform 1 0 0 0 1 413
+box 0 413 344 482
+use PCHDL MP0 
+transform 1 0 344 0 1 0
+box 344 0 688 69
+use PCHDL MP1 
+transform 1 0 344 0 1 69
+box 344 69 688 138
+use PCHDL MP2 
+transform 1 0 344 0 1 138
+box 344 138 688 207
+use PCHDL MP3 
+transform 1 0 344 0 1 206
+box 344 206 688 275
+use PCHDL MP4 
+transform 1 0 344 0 1 275
+box 344 275 688 344
+use PCHDL MP5 
+transform 1 0 344 0 1 344
+box 344 344 688 413
+use PCHDL MP6 
+transform 1 0 344 0 1 413
+box 344 413 688 482
+use cut_M1M4_2x1 xcut0 
+transform 1 0 413 0 1 183
+box 413 183 479 193
+use cut_M1M4_2x1 xcut1 
+transform 1 0 533 0 1 166
+box 533 166 599 176
+use cut_M1M4_2x1 xcut2 
+transform 1 0 413 0 1 46
+box 413 46 479 56
+use cut_M1M4_2x1 xcut3 
+transform 1 0 413 0 1 80
+box 413 80 479 90
+use cut_M1M4_2x1 xcut4 
+transform 1 0 413 0 1 183
+box 413 183 479 193
+use cut_M1M4_2x1 xcut5 
+transform 1 0 413 0 1 218
+box 413 218 479 228
+use cut_M1M4_2x1 xcut6 
+transform 1 0 413 0 1 321
+box 413 321 479 331
+use cut_M1M4_2x1 xcut7 
+transform 1 0 413 0 1 355
+box 413 355 479 365
+use cut_M1M4_2x1 xcut8 
+transform 1 0 413 0 1 458
+box 413 458 479 468
+use cut_M1M4_2x1 xcut9 
+transform 1 0 206 0 1 11
+box 206 11 272 21
+<< labels >>
+flabel po s 206 321 275 333 0 FreeSans 400 0 0 0 N1
+port 5 nsew signal bidirectional
+flabel po s 206 390 275 402 0 FreeSans 400 0 0 0 N2
+port 6 nsew signal bidirectional
+flabel po s 86 97 155 109 0 FreeSans 400 0 0 0 CI
+port 1 nsew signal bidirectional
+flabel po s 86 28 155 40 0 FreeSans 400 0 0 0 CK
+port 2 nsew signal bidirectional
+flabel po s 206 458 275 470 0 FreeSans 400 0 0 0 CO
+port 3 nsew signal bidirectional
+flabel po s 86 441 155 453 0 FreeSans 400 0 0 0 VMR
+port 4 nsew signal bidirectional
+flabel po s 413 0 479 482 0 FreeSans 400 0 0 0 AVDD
+port 7 nsew signal bidirectional
+flabel po s 206 0 272 482 0 FreeSans 400 0 0 0 AVSS
+port 8 nsew signal bidirectional
+<< properties >>
+string FIXED_BBOX 0 0 688 482
+<< end >>

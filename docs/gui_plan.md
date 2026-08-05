@@ -140,12 +140,27 @@ extra routing/sizing on top.
   `instname:terminal` path semantics from C++ ciccreator so
   `addDirectedRoute("M1", net, "xn_diode1:D-xn_diode1:G")` resolves
   correctly. `routeDiodeConnected` and `routeDummyTerminals` now emit
-  `addDirectedRoute` calls; `routeParallel` / `routeMirror` use
-  `port.get(layer)` for pin discovery and keep the trunk + bundle
-  shape that backs the §1 boundary-port contract. The supported
-  routing primitives are now the only routing primitives:
+  `addDirectedRoute` calls (the dummy variant became a single M1
+  strap rect across each filler in `fa33d25`); `routeParallel` /
+  `routeMirror` use `port.get(layer)` for pin discovery and keep the
+  trunk + bundle shape that backs the §1 boundary-port contract. The
+  supported routing primitives are now the only routing primitives:
   `addConnectivityRoute`, `addOrthogonalConnectivityRoute`, and
   `addDirectedRoute`.
+- **Latest (`5708abb` / `911231f` / `3d8feeb`)** — `accessLayer`
+  deprecation and boundary-suppression fix. Removed the `accessLayer`
+  argument from `addOrthogonalConnectivityRoute` (and the cellgroup
+  wrappers + the `apply()` YAML schema): pin geometry follows the
+  device's exposed port layer and the route engine handles the cuts.
+  Removed `requireLayer` from `getNodeAccessRects`. Boundary-port
+  suppression in `_groupNodeAccessRects` is now conditional on the
+  group having internal routing (`routedNets()`) for the net —
+  without internal routing, member pins are no longer hidden behind a
+  single boundary port and the parent route engine ties every member.
+  `_make_boundary_port` keeps the source rect's actual layer instead
+  of coercing to the requested layer. **LELOTEMP_CMP went from
+  shorts=1 opens=5 → shorts=1 opens=0**; only the pre-existing
+  VDD_1V8/VSS placement short remains.
 
 ## What's next
 
@@ -368,11 +383,87 @@ isn't a parallel terminal-access path that bypasses it. Leaving
 `TerminalAccess` in the codebase invites future routing code to route
 through it again and re-introduce the bug.
 
-### 8. Acceptance / smoke tests
+### 8. accessLayer deprecation and boundary-port suppression (shipped)
+
+After §7 removed `TerminalAccess`, `accessLayer` was the remaining
+hand-fed layer hint that fought the device geometry: every sky130A
+D/G/S port lives on cicpy M2 (alias for `m1`), so callers passing
+`accessLayer="M1"` couldn't resolve without the deleted
+connected-geometry walk.
+
+**Shipped:**
+
+- `5708abb` — drop `accessLayer` argument from
+  `LayoutCell.addOrthogonalConnectivityRoute`, the `CellGroup` /
+  `StackGroup` wrappers, and the `apply()` YAML schema. Drop
+  `requireLayer` from `getNodeAccessRects` /
+  `_directNodeAccessRects`. `_make_boundary_port` keeps the source
+  rect's actual layer instead of coercing to the requested one. Pin
+  geometry follows the device port; the route engine inserts the
+  cuts. Update `LELOTEMP_CMP.py` and the four doc surfaces
+  (pycell.md, routes.md, layout.md, tests/routes/routes.md).
+- `911231f` (later reverted in `3d8feeb`) — short-lived M1 filter in
+  `addPowerConnection`. Replaced by the proper fix below.
+- `3d8feeb` — only suppress group member pins in
+  `_groupNodeAccessRects` when the group reports the net via
+  `routedNets()`. Without internal routing the boundary port stands
+  in for one rep pin and member pins must still feed the parent
+  route engine — suppression isolated them. Test stub updated:
+  `bulk_top_rects` for VSS now legitimately includes both the source
+  and bulk pins because the bulk_group has no internal VSS routing.
+
+**Verified on `LELOTEMP_CMP`:**
+
+| | shorts | opens | components |
+|---|---|---|---|
+| pre-§7 baseline (TerminalAccess) | 1 | 5 | 58 |
+| post-§7 / pre-deprecation        | 1 | 5 | 58 |
+| `5708abb` (deprecate)            | 1 | 6 | 76 |
+| `911231f` (M1 filter)            | 1 | 4 | 49 |
+| `3d8feeb` (conditional suppress) | **1** | **0** | **35** |
+
+The remaining short is a pre-existing `VDD_1V8`/`VSS` overlap from
+the placement (3050 rects, no routes attached) — separate from the
+routing surface this section cleaned up.
+
+### 9. Acceptance / smoke tests
 
 Manual smoke runs only so far. Consider a tiny PNG snapshot test for
 the layout pane on `LELOTEMP_CMP` to catch regressions in `style.py` /
 `layout_scene.py` rendering. Skip if it's more infra than payoff.
+
+### 10. Open: cell connectivity status after §8
+
+End-to-end check across the four LELOTEMP cells (IP repo, post §8):
+
+| Cell | shorts | opens | notes |
+|---|---|---|---|
+| LELOTEMP_CMP      | 0 | 0 | clean |
+| LELOTEMP_START    | 1 | 0 | `addRouteConnection(VSTART3, M4, bottom)` shorts VCP/VO/VSS/VSTART3 |
+| LELOTEMP_CASCBIAS | 0 | 6 | VSS / VBNT / VCN / VCP / VBP4 / VDD_1V8 each split |
+| LELOTEMP_CCMP     | 2 | 2 | `IBP_1U<0>` M5 trunk shorts to VSS, plus a `CMPO/VDD_1V8` placement short |
+
+§8's conditional suppression resolved LELOTEMP_CMP cleanly but loosened
+suppression for cells without internal group routing (START, CASCBIAS,
+CCMP) — more member pins surface, and `addRouteConnection` /
+`addOrthogonalConnectivityRoute` create more route geometry per net,
+which in dense areas overlaps and shorts (START's VSTART3 case) or
+fails to fully merge (the opens on CASCBIAS).
+
+Possible directions:
+
+- Apply the same conditional rule to `addRouteConnection`'s lookup
+  surface (it shares `getNodeAccessRects`); confirm whether the
+  trunks really need every member pin or whether the existing pycell
+  intent is "first matching pin wins". If the latter, an
+  options-driven "one rep pin per group" mode would match the
+  LELOTEMP_START intent without re-introducing the §8 fragmentation.
+- Audit `_make_boundary_port` keeping the source layer instead of
+  coercing — `addRouteConnection` may rely on the boundary rect being
+  on the route's verticalLayer for trunk placement.
+- Pre-existing `LELOTEMP_CMP VDD_1V8/VSS` placement short
+  (`rects=3050 routes=none`) is independent — overlap from the n-well
+  tap or power-ring geometry, separate from the routing pipeline.
 
 ## Reference files
 

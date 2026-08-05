@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-JR1G6C914F"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-JR1G6C914F');
+</script>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Layout Flow | cicpy</title>
+<meta name="generator" content="Jekyll v3.9.2" />
+<meta property="og:title" content="Layout Flow" />
+<meta name="author" content="Carsten Wulff" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Custom IC Creator Python" />
+<meta property="og:description" content="Custom IC Creator Python" />
+<link rel="canonical" href="http://0.0.0.0:4000/cicpy/layout.html" />
+<meta property="og:url" content="http://0.0.0.0:4000/cicpy/layout.html" />
+<meta property="og:site_name" content="cicpy" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Layout Flow" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","author":{"@type":"Person","name":"Carsten Wulff"},"description":"Custom IC Creator Python","headline":"Layout Flow","url":"http://0.0.0.0:4000/cicpy/layout.html"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="stylesheet" href="/cicpy/assets/css/style.css"><link type="application/atom+xml" rel="alternate" href="http://0.0.0.0:4000/cicpy/feed.xml" title="cicpy" />
+
+<script>
+  
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    },
+    svg: {
+      fontCache: 'global'
+    }
+  };
+  </script>
+  
+    <script type="text/javascript" id="MathJax-script" async
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js">
+  </script></head>
+<body><header class="site-header">
+
+  <div class="wrapper"><a class="site-title" rel="author" href="/cicpy/">cicpy</a><nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"/>
+            </svg>
+          </span>
+        </label>
+
+        <div class="trigger"><a class="page-link" href="/cicpy/">cicpy</a><a class="page-link" href="/cicpy/jcell.html">jcell</a><a class="page-link" href="/cicpy/layout.html">Layout Flow</a><a class="page-link" href="/cicpy/minecraft.html">minecraft</a><a class="page-link" href="/cicpy/routes.html">Routes</a><a class="page-link" href="/cicpy/sch2mag.html">sch2mag</a><a class="page-link" href="/cicpy/svg.html">svg</a><a class="page-link" href="/cicpy/transpile.html">transpile</a></div>
+      </nav></div>
+</header>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <article class="post">
+
+  <header class="post-header">
+    <h1 class="post-title">Layout Flow</h1>
+  </header>
+
+  <div class="post-content">
+    <h1 id="layout-flow">Layout Flow</h1>
+
+<p>This page explains how <code class="language-plaintext highlighter-rouge">cicpy sch2mag</code> actually builds layout, and where placement and routing intent is supposed to live.</p>
+
+<h2 id="entry-points">Entry Points</h2>
+
+<p>There are two main layout-generation entry points:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cicpy sch2mag &lt;LIB&gt; &lt;CELL&gt;
+cicpy spi2mag &lt;SPICE&gt; &lt;LIB&gt; &lt;CELL&gt;
+</code></pre></div></div>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">sch2mag</code> starts from a schematic-driven project and first generates a SPICE netlist.</li>
+  <li><code class="language-plaintext highlighter-rouge">spi2mag</code> starts from an existing SPICE subcircuit.</li>
+</ul>
+
+<p>Both end up building a <code class="language-plaintext highlighter-rouge">LayoutCell</code>, placing instances, running Python hooks, routing, and writing <code class="language-plaintext highlighter-rouge">.mag</code> and <code class="language-plaintext highlighter-rouge">.cic</code> output.</p>
+
+<h2 id="high-level-flow">High-Level Flow</h2>
+
+<p>For <code class="language-plaintext highlighter-rouge">sch2mag</code>, the flow is:</p>
+
+<ol>
+  <li>netlist the schematic to SPICE</li>
+  <li>load technology rules from <code class="language-plaintext highlighter-rouge">tech/cic/&lt;tech&gt;.tech</code></li>
+  <li>scan the design library path for primitive Magic cells</li>
+  <li>read the target SPICE subckt into a <code class="language-plaintext highlighter-rouge">LayoutCell</code></li>
+  <li>apply default placement from instance names and grouping</li>
+  <li>import <code class="language-plaintext highlighter-rouge">&lt;CELL&gt;.py</code> if it exists</li>
+  <li>run layout hooks from that Python file</li>
+  <li>finish routing and paint</li>
+  <li>write <code class="language-plaintext highlighter-rouge">&lt;CELL&gt;.mag</code></li>
+  <li>write <code class="language-plaintext highlighter-rouge">&lt;CELL&gt;.cic</code></li>
+  <li>optionally run route-short and full connectivity checks</li>
+</ol>
+
+<p>The key point is that the flow is schematic-driven, but not schematic-only. The schematic provides devices, nets, and grouping names. The Python file provides physical intent.</p>
+
+<h2 id="inputs">Inputs</h2>
+
+<p>A practical <code class="language-plaintext highlighter-rouge">sch2mag</code> run uses:</p>
+
+<ul>
+  <li>a SPICE netlist for the target cell</li>
+  <li>primitive layout libraries under the design tree</li>
+  <li>a technology rules file</li>
+  <li>an optional custom Python cell file named <code class="language-plaintext highlighter-rouge">&lt;CELL&gt;.py</code></li>
+</ul>
+
+<p>Typical project structure:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">design/&lt;LIB&gt;/&lt;CELL&gt;.sch</code></li>
+  <li><code class="language-plaintext highlighter-rouge">design/&lt;LIB&gt;/&lt;CELL&gt;.py</code></li>
+  <li><code class="language-plaintext highlighter-rouge">design/&lt;primitive_lib&gt;/...</code></li>
+  <li><code class="language-plaintext highlighter-rouge">tech/cic/&lt;tech&gt;.tech</code></li>
+</ul>
+
+<h2 id="default-placement">Default Placement</h2>
+
+<p>Before any custom Python runs, <code class="language-plaintext highlighter-rouge">cicpy</code> derives a first placement from the instance list.</p>
+
+<p>The default model relies heavily on naming:</p>
+
+<ul>
+  <li>the non-numeric instance prefix becomes the placement group</li>
+  <li>similarly named bus instances naturally stack together</li>
+  <li>group order and stack composition are therefore strongly affected by schematic naming</li>
+</ul>
+
+<p>That is why good schematic instance naming matters. If placement is wrong, the first fix is often to rename instances so the automatic grouping matches the intended physical columns.</p>
+
+<h2 id="custom-python-hooks">Custom Python Hooks</h2>
+
+<p>If <code class="language-plaintext highlighter-rouge">design/&lt;LIB&gt;/&lt;CELL&gt;.py</code> exists, <code class="language-plaintext highlighter-rouge">sch2mag</code> imports it and uses its hook functions.</p>
+
+<p>The supported hook functions are:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">beforePlace(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">afterPlace(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">beforeRoute(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">afterRoute(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">beforePaint(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">afterPaint(layout)</code></li>
+</ul>
+
+<p>Not every cell uses every hook.</p>
+
+<p>The execution order is:</p>
+
+<ol>
+  <li><code class="language-plaintext highlighter-rouge">beforePlace(layout)</code></li>
+  <li>default <code class="language-plaintext highlighter-rouge">place()</code></li>
+  <li><code class="language-plaintext highlighter-rouge">afterPlace(layout)</code></li>
+  <li>internal dummy-route materialization and tile-map setup</li>
+  <li><code class="language-plaintext highlighter-rouge">beforeRoute(layout)</code></li>
+  <li>default <code class="language-plaintext highlighter-rouge">route()</code></li>
+  <li><code class="language-plaintext highlighter-rouge">afterRoute(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">beforePaint(layout)</code></li>
+  <li>late paint/post-processing stage</li>
+  <li><code class="language-plaintext highlighter-rouge">afterPaint(layout)</code></li>
+  <li><code class="language-plaintext highlighter-rouge">addAllPorts()</code></li>
+</ol>
+
+<h3 id="beforeplacelayout"><code class="language-plaintext highlighter-rouge">beforePlace(layout)</code></h3>
+
+<p>Use this for coarse global controls such as:</p>
+
+<ul>
+  <li>disabling default power paint with <code class="language-plaintext highlighter-rouge">layout.noPowerRoute = True</code></li>
+  <li>tuning group spacing with <code class="language-plaintext highlighter-rouge">layout.place_xspace</code>, <code class="language-plaintext highlighter-rouge">layout.place_yspace</code></li>
+  <li>changing group wrap behavior with <code class="language-plaintext highlighter-rouge">layout.place_groupbreak</code></li>
+</ul>
+
+<p>This hook should set broad layout policy, not hand-place individual routes.</p>
+
+<h3 id="afterplacelayout"><code class="language-plaintext highlighter-rouge">afterPlace(layout)</code></h3>
+
+<p>Use this to reshape the physical organization after the default placement exists.</p>
+
+<p>Typical work here:</p>
+
+<ul>
+  <li>create <code class="language-plaintext highlighter-rouge">CellGroup</code>s</li>
+  <li>create functional stacks with <code class="language-plaintext highlighter-rouge">group.addStack(...)</code></li>
+  <li>abut groups with <code class="language-plaintext highlighter-rouge">abutTop</code>, <code class="language-plaintext highlighter-rouge">abutBottom</code>, <code class="language-plaintext highlighter-rouge">abutLeft</code>, <code class="language-plaintext highlighter-rouge">abutRight</code></li>
+  <li>add taps with <code class="language-plaintext highlighter-rouge">stack.addTaps()</code></li>
+  <li>add dummy devices or route dummy devices</li>
+  <li>update bounding boxes after structural edits</li>
+</ul>
+
+<p>This is where analog floorplan intent usually belongs.</p>
+
+<h3 id="beforeroutelayout"><code class="language-plaintext highlighter-rouge">beforeRoute(layout)</code></h3>
+
+<p>Use this for explicit routing and supply hookup.</p>
+
+<p>Typical calls are:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">layout</span><span class="p">.</span><span class="n">addRouteRing</span><span class="p">(...)</span>
+<span class="n">layout</span><span class="p">.</span><span class="n">addPowerConnection</span><span class="p">(...)</span>
+<span class="n">layout</span><span class="p">.</span><span class="n">addRouteConnection</span><span class="p">(...)</span>
+<span class="n">layout</span><span class="p">.</span><span class="n">addConnectivityRoute</span><span class="p">(...)</span>
+<span class="n">layout</span><span class="p">.</span><span class="n">addOrthogonalConnectivityRoute</span><span class="p">(...)</span>
+</code></pre></div></div>
+
+<p>This hook should express routing intent using the routing APIs, not by stamping arbitrary geometry unless there is no API for the job.</p>
+
+<h3 id="afterroutelayout"><code class="language-plaintext highlighter-rouge">afterRoute(layout)</code></h3>
+
+<p>Use this for changes that depend on the normal routing pass already being finished.</p>
+
+<p>Typical uses:</p>
+
+<ul>
+  <li>inspect or adjust route results</li>
+  <li>add small post-route geometry</li>
+  <li>add cleanup that should not affect route discovery itself</li>
+</ul>
+
+<p>If something can be expressed directly through the normal routing APIs, prefer <code class="language-plaintext highlighter-rouge">beforeRoute(...)</code>.</p>
+
+<h3 id="beforepaintlayout"><code class="language-plaintext highlighter-rouge">beforePaint(layout)</code></h3>
+
+<p>Use this for late-stage work after routing but before the final paint/post-processing phase completes.</p>
+
+<p>Typical uses:</p>
+
+<ul>
+  <li>prepare geometry for late finishing</li>
+  <li>do final state adjustments after route creation</li>
+  <li>stage cleanup that should happen after the route graph is already settled</li>
+</ul>
+
+<p>This is a less common hook than <code class="language-plaintext highlighter-rouge">beforePlace</code>, <code class="language-plaintext highlighter-rouge">afterPlace</code>, and <code class="language-plaintext highlighter-rouge">beforeRoute</code>.</p>
+
+<h3 id="afterpaintlayout"><code class="language-plaintext highlighter-rouge">afterPaint(layout)</code></h3>
+
+<p>Use this for the final structural adjustments before ports are added.</p>
+
+<p>Typical uses:</p>
+
+<ul>
+  <li>normalize origins</li>
+  <li>final cleanup</li>
+  <li>last-step geometry adjustments that should happen after placement and routing are complete</li>
+</ul>
+
+<h2 id="placement-apis">Placement APIs</h2>
+
+<p>The most common physical-organization APIs are:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">group</span> <span class="o">=</span> <span class="n">layout</span><span class="p">.</span><span class="n">makeCellGroup</span><span class="p">(</span><span class="s">"name"</span><span class="p">)</span>
+<span class="n">stack</span> <span class="o">=</span> <span class="n">group</span><span class="p">.</span><span class="n">addStack</span><span class="p">(</span><span class="s">"stack_name"</span><span class="p">,</span> <span class="n">instances</span><span class="p">)</span>
+<span class="n">stack</span><span class="p">.</span><span class="n">addTaps</span><span class="p">()</span>
+<span class="n">group</span><span class="p">.</span><span class="n">abutRight</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">space</span><span class="o">=</span><span class="p">...)</span>
+<span class="n">group</span><span class="p">.</span><span class="n">abutTop</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">space</span><span class="o">=</span><span class="p">...)</span>
+<span class="n">group</span><span class="p">.</span><span class="n">fillDummyTransistors</span><span class="p">(...)</span>
+</code></pre></div></div>
+
+<p>These APIs let a cell be described in terms of physical branches and matched stacks, rather than individual coordinates.</p>
+
+<h2 id="routing-apis">Routing APIs</h2>
+
+<p>The two normal routing APIs are:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">layout</span><span class="p">.</span><span class="n">addConnectivityRoute</span><span class="p">(</span><span class="n">layer</span><span class="p">,</span> <span class="n">regex</span><span class="p">,</span> <span class="n">routeType</span><span class="p">,</span> <span class="n">options</span><span class="p">,</span> <span class="n">cuts</span><span class="p">,</span> <span class="n">excludeInstances</span><span class="p">,</span> <span class="n">includeInstances</span><span class="p">)</span>
+<span class="n">layout</span><span class="p">.</span><span class="n">addOrthogonalConnectivityRoute</span><span class="p">(</span><span class="n">verticalLayer</span><span class="p">,</span> <span class="n">horizontalLayer</span><span class="p">,</span> <span class="n">regex</span><span class="p">,</span> <span class="n">options</span><span class="p">,</span> <span class="n">cuts</span><span class="p">,</span> <span class="n">excludeInstances</span><span class="p">,</span> <span class="n">includeInstances</span><span class="p">,</span> <span class="n">accessLayer</span><span class="o">=</span><span class="bp">None</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Use them as the default choice.</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">addConnectivityRoute(...)</code> is the standard net-driven router for straight, L, U, and vertical routes.</li>
+  <li><code class="language-plaintext highlighter-rouge">addOrthogonalConnectivityRoute(...)</code> is better when the flow must follow explicit vertical/horizontal layer policy.</li>
+</ul>
+
+<p>In analog sky130-style flows, that often means:</p>
+
+<ul>
+  <li>M2 vertical trunks</li>
+  <li>M3 horizontal branches</li>
+  <li>M4 vertical trunks for higher-level routes</li>
+</ul>
+
+<h2 id="terminal-access-and-cuts">Terminal Access And Cuts</h2>
+
+<p>A recurring rule in <code class="language-plaintext highlighter-rouge">cicpy</code> is that terminal access should come from the primitive device layout, not from guessed landing bars.</p>
+
+<p>Preferred pattern:</p>
+
+<ul>
+  <li>use legal device access geometry already exposed by the primitive cell</li>
+  <li>route into that access</li>
+  <li>let the router place cuts</li>
+</ul>
+
+<p>Current cut policy in this work:</p>
+
+<ul>
+  <li>prefer only <code class="language-plaintext highlighter-rouge">1x2</code> or <code class="language-plaintext highlighter-rouge">2x1</code> cuts</li>
+  <li>flatten cut geometry for Magic output when that is more robust than cut-cell references</li>
+</ul>
+
+<h2 id="outputs">Outputs</h2>
+
+<p>The main generated files are:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">&lt;CELL&gt;.mag</code>: Magic layout</li>
+  <li><code class="language-plaintext highlighter-rouge">&lt;CELL&gt;.cic</code>: JSON layout artifact</li>
+</ul>
+
+<p>Important detail:</p>
+
+<ul>
+  <li>the top-level <code class="language-plaintext highlighter-rouge">.cic</code> produced by <code class="language-plaintext highlighter-rouge">sch2mag</code> usually contains the target cell and generated cut cells</li>
+  <li>referenced primitive library cells are typically not embedded in that same file</li>
+</ul>
+
+<p>So for commands such as <code class="language-plaintext highlighter-rouge">cicpy svg</code>, include dependent library <code class="language-plaintext highlighter-rouge">.cic</code> files explicitly:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cicpy svg top.cic tech/cic/sky130A.tech TOP <span class="se">\</span>
+  <span class="nt">--I</span> analog_lib.cic <span class="se">\</span>
+  <span class="nt">--I</span> digital_lib.cic
+</code></pre></div></div>
+
+<p>That <code class="language-plaintext highlighter-rouge">--I</code> mechanism exists specifically so top-level generated cells can be rendered or inspected together with their referenced library cells.</p>
+
+<h2 id="debug-flow">Debug Flow</h2>
+
+<p>Fast iteration:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cicpy sch2mag &lt;LIB&gt; &lt;CELL&gt;
+</code></pre></div></div>
+
+<p>Deeper connectivity check:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cicpy sch2mag <span class="nt">--check-connectivity</span> &lt;LIB&gt; &lt;CELL&gt;
+</code></pre></div></div>
+
+<p>Use the fast route-short report first. Use <code class="language-plaintext highlighter-rouge">--check-connectivity</code> when the question is opens or split nets rather than obvious shorts.</p>
+
+<h2 id="where-changes-should-go">Where Changes Should Go</h2>
+
+<p>The usual fix order is:</p>
+
+<ol>
+  <li>fix schematic instance naming if grouping is wrong</li>
+  <li>fix stack/group structure in <code class="language-plaintext highlighter-rouge">afterPlace(...)</code></li>
+  <li>fix routing intent in <code class="language-plaintext highlighter-rouge">beforeRoute(...)</code></li>
+  <li>only then add narrow custom geometry if the APIs still cannot express the requirement</li>
+</ol>
+
+<p>That keeps the layout generator understandable and avoids burying physical intent in ad hoc geometry.</p>
+
+<h2 id="concrete-example">Concrete Example</h2>
+
+<p><code class="language-plaintext highlighter-rouge">LELOTEMP_CMP</code> is a good example of this flow in practice:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">beforePlace(...)</code> disables default power routing and tightens placement spacing</li>
+  <li><code class="language-plaintext highlighter-rouge">afterPlace(...)</code> builds NMOS and PMOS groups, creates functional stacks, abuts them, and adds taps</li>
+  <li><code class="language-plaintext highlighter-rouge">beforeRoute(...)</code> adds power rings, supply hookups, and connectivity-driven signal routes</li>
+  <li><code class="language-plaintext highlighter-rouge">sch2mag --check-connectivity</code> is then used when route geometry looks correct but opens or splits still need to be checked</li>
+</ul>
+
+  </div>
+
+</article>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/cicpy/"></data>
+
+  <div class="wrapper">
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col">
+        <p class="feed-subscribe">
+          <a href="http://0.0.0.0:4000/cicpy/feed.xml">
+            <svg class="svg-icon orange">
+              <use xlink:href="/cicpy/assets/minima-social-icons.svg#rss"></use>
+            </svg><span>Subscribe</span>
+          </a>
+        </p>
+        <ul class="contact-list">
+          <li class="p-name">Carsten Wulff</li>
+          <li><a class="u-email" href="mailto:carsten@wulff.no">carsten@wulff.no</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <p>Custom IC Creator Python</p>
+      </div>
+    </div>
+
+    <div class="social-links"><ul class="social-media-list"></ul>
+</div>
+
+  </div>
+
+</footer>
+</body>
+
+</html>

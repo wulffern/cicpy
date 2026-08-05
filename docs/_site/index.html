@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-JR1G6C914F"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-JR1G6C914F');
+</script>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>cicpy | Custom IC Creator Python</title>
+<meta name="generator" content="Jekyll v3.9.2" />
+<meta property="og:title" content="cicpy" />
+<meta name="author" content="Carsten Wulff" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Custom IC Creator Python" />
+<meta property="og:description" content="Custom IC Creator Python" />
+<link rel="canonical" href="http://0.0.0.0:4000/cicpy/" />
+<meta property="og:url" content="http://0.0.0.0:4000/cicpy/" />
+<meta property="og:site_name" content="cicpy" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="cicpy" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","author":{"@type":"Person","name":"Carsten Wulff"},"description":"Custom IC Creator Python","headline":"cicpy","name":"cicpy","url":"http://0.0.0.0:4000/cicpy/"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="stylesheet" href="/cicpy/assets/css/style.css"><link type="application/atom+xml" rel="alternate" href="http://0.0.0.0:4000/cicpy/feed.xml" title="cicpy" />
+
+<script>
+  
+  MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    },
+    svg: {
+      fontCache: 'global'
+    }
+  };
+  </script>
+  
+    <script type="text/javascript" id="MathJax-script" async
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js">
+  </script></head>
+<body><header class="site-header">
+
+  <div class="wrapper">
+<a class="site-title" rel="author" href="/cicpy/">cicpy</a><nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger">
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewbox="0 0 18 15" width="18px" height="15px">
+              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"></path>
+            </svg>
+          </span>
+        </label>
+
+        <div class="trigger">
+<a class="page-link" href="/cicpy/">cicpy</a><a class="page-link" href="/cicpy/jcell.html">jcell</a><a class="page-link" href="/cicpy/layout.html">Layout Flow</a><a class="page-link" href="/cicpy/minecraft.html">minecraft</a><a class="page-link" href="/cicpy/routes.html">Routes</a><a class="page-link" href="/cicpy/sch2mag.html">sch2mag</a><a class="page-link" href="/cicpy/svg.html">svg</a><a class="page-link" href="/cicpy/transpile.html">transpile</a>
+</div>
+      </nav>
+</div>
+</header>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <div class="home">
+<h1 class="page-heading">cicpy</h1>
+<h1 id="cicpy">cicpy</h1>
+
+<p><code class="language-plaintext highlighter-rouge">cicpy</code> is the Python frontend around ciccreator data and layout flows.</p>
+
+<p>It can:</p>
+<ul>
+  <li>translate <code class="language-plaintext highlighter-rouge">.cic</code> data into other formats</li>
+  <li>generate Magic and Xschem output</li>
+  <li>place stacks and devices</li>
+  <li>generate SVG and other derived views</li>
+</ul>
+
+<h2 id="install-latest-and-greatest">Install latest and greatest</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone https://github.com/wulffern/cicpy
+<span class="nb">cd </span>cicpy
+python3 <span class="nt">-m</span> pip <span class="nb">install</span> <span class="nt">-e</span> <span class="nb">.</span>
+</code></pre></div></div>
+
+<h2 id="root-workflow">Root workflow</h2>
+
+<p>The project now has root-level test and docs commands similar to <code class="language-plaintext highlighter-rouge">cicsim</code>.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>make <span class="nb">test
+</span>make docs
+make build
+</code></pre></div></div>
+
+<h2 id="docs">Docs</h2>
+
+<ul>
+  <li><a href="/cicpy/layout">Layout flow</a></li>
+  <li><a href="/cicpy/routes">Routing examples</a></li>
+  <li><a href="/cicpy/jcell">jcell test</a></li>
+  <li><a href="/cicpy/svg">svg test</a></li>
+  <li><a href="/cicpy/transpile">transpile test</a></li>
+  <li><a href="/cicpy/minecraft">minecraft test</a></li>
+  <li><a href="/cicpy/sch2mag">sch2mag test</a></li>
+</ul>
+
+<h2 id="commands">Commands</h2>
+
+<ul>
+  <li>
+<code class="language-plaintext highlighter-rouge">transpile</code>: translate a <code class="language-plaintext highlighter-rouge">.cic</code> design into Magic, Xschem, SKILL, Verilog, and SPICE-family outputs. Supports extra library inputs through <code class="language-plaintext highlighter-rouge">--I</code>. See <a href="/cicpy/transpile">transpile</a>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">jcell</code>: extract one named cell from a <code class="language-plaintext highlighter-rouge">.cic</code> file as JSON. Supports extra library inputs through <code class="language-plaintext highlighter-rouge">--I</code>. See <a href="/cicpy/jcell">jcell</a>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">place</code> [Deprecated]: place devices from a <code class="language-plaintext highlighter-rouge">.cic</code> design using one of the built-in placement patterns. Supports extra library inputs through <code class="language-plaintext highlighter-rouge">--I</code>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">minecraft</code>: emit a Minecraft build script from one layout cell in a <code class="language-plaintext highlighter-rouge">.cic</code> design. Supports extra library inputs through <code class="language-plaintext highlighter-rouge">--I</code>. See <a href="/cicpy/minecraft">minecraft</a>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">svg</code>: render a <code class="language-plaintext highlighter-rouge">.cic</code> design library into SVG views. Supports extra library inputs through <code class="language-plaintext highlighter-rouge">--I</code>. See <a href="/cicpy/svg">svg</a>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">sch2mag</code>: read a schematic-driven project, place and route it, then write <code class="language-plaintext highlighter-rouge">.mag</code> and <code class="language-plaintext highlighter-rouge">.cic</code> layout output. See <a href="/cicpy/sch2mag">sch2mag</a>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">spi2mag</code>: read a SPICE subcircuit and placed-cell library, then write <code class="language-plaintext highlighter-rouge">.mag</code> and <code class="language-plaintext highlighter-rouge">.cic</code> layout output. This is the SPICE-driven counterpart to <code class="language-plaintext highlighter-rouge">sch2mag</code>.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">orc</code> [Deprecated]: expand ORC recipes into grouped <code class="language-plaintext highlighter-rouge">.json</code> and <code class="language-plaintext highlighter-rouge">.spi</code> output files.</li>
+  <li>
+<code class="language-plaintext highlighter-rouge">filter</code> [Deprecated]: currently a parse-only placeholder command that loads a <code class="language-plaintext highlighter-rouge">.cic</code> file, optionally merges included libraries through <code class="language-plaintext highlighter-rouge">--I</code>, and exits.</li>
+</ul>
+
+<h2 id="library-includes">Library Includes</h2>
+
+<p>Commands that read <code class="language-plaintext highlighter-rouge">.cic</code> data can load extra library files with <code class="language-plaintext highlighter-rouge">--I</code>.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cicpy svg top.cic tech/cic/sky130A.tech TOP <span class="se">\</span>
+  <span class="nt">--I</span> analog_lib.cic <span class="se">\</span>
+  <span class="nt">--I</span> digital_lib.cic
+</code></pre></div></div>
+
+<p>Use <code class="language-plaintext highlighter-rouge">--I</code> when the top-level <code class="language-plaintext highlighter-rouge">.cic</code> only contains one generated cell and references child cells stored in separate library <code class="language-plaintext highlighter-rouge">.cic</code> files.</p>
+
+<p>For command help:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cicpy <span class="nt">--help</span>
+cicpy &lt;<span class="nb">command</span><span class="o">&gt;</span> <span class="nt">--help</span>
+</code></pre></div></div>
+
+<h1 id="custom-ic-creator-python">Custom IC Creator Python</h1>
+
+<h1 id="why">Why</h1>
+<p>This is a script package I use transpile from the output of ciccreator to other
+formats.</p>
+
+<h1 id="changelog">Changelog</h1>
+<p>| Version | Status             | Comment                                                    |
+|:——–|:——————-|:———————————————————–|
+| 0.0.1   | <img class="emoji" title=":white_check_mark:" alt=":white_check_mark:" src="https://github.githubassets.com/images/icons/emoji/unicode/2705.png" height="20" width="20"> | First version of cicspy                                    |
+| 0.1.5   | <img class="emoji" title=":white_check_mark:" alt=":white_check_mark:" src="https://github.githubassets.com/images/icons/emoji/unicode/2705.png" height="20" width="20"> | First release to pypi                                      |
+| 0.1.8   | <img class="emoji" title=":white_check_mark:" alt=":white_check_mark:" src="https://github.githubassets.com/images/icons/emoji/unicode/2705.png" height="20" width="20"> | Added cicspi dependency and reorged to include subpackages |</p>
+
+<h1 id="install-this-module">Install this module</h1>
+<p>If you want to follow the latest and greatest</p>
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone https://github.com/wulffern/cicpy
+<span class="nb">cd </span>cicpy
+python3 <span class="nt">-m</span> pip <span class="nb">install</span>  <span class="nt">-e</span> <span class="nb">.</span> 
+</code></pre></div></div>
+
+<p>If you want something that does not change that often</p>
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python3 <span class="nt">-m</span> pip <span class="nb">install </span>cicpy 
+
+</code></pre></div></div>
+
+<h1 id="commands-1">Commands</h1>
+
+<p>For the latest help, check <code class="language-plaintext highlighter-rouge">cicpy --help</code>, and <code class="language-plaintext highlighter-rouge">cicpy &lt;command&gt; --help</code></p>
+
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Usage: cicpy <span class="o">[</span>OPTIONS] COMMAND <span class="o">[</span>ARGS]...
+
+  Python toolbox <span class="k">for </span>Custom Integrated Circuit Creator <span class="o">(</span>ciccreator<span class="o">)</span><span class="nb">.</span>
+
+Options:
+  <span class="nt">--help</span>  Show this message and exit.
+
+Commands:
+  jcell      Extract a cell from .cic
+  minecraft  Make a mincraft script <span class="k">*</span>.mc from <span class="k">*</span>.cic
+  place      Place a bunch of transistors according to pattern
+  svg        Make an SVG
+  transpile  Translate .cic file into another file format...
+</code></pre></div></div>
+
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Usage: cicpy transpile <span class="o">[</span>OPTIONS] CICFILE TECHFILE LIBRARY
+
+  Translate .cic file into another file format <span class="o">(</span>SKILL,SPECTRE,SPICE<span class="o">)</span>
+
+Options:
+  <span class="nt">--layskill</span>      Write Skill Layout file
+  <span class="nt">--schskill</span>      Write Skill Schematic file
+  <span class="nt">--winfo</span>         Write Info file <span class="o">[</span>ALPHA]
+  <span class="nt">--rinfo</span> TEXT    Read Info file <span class="o">[</span>ALPHA]
+  <span class="nt">--verilog</span>       Write verilog file <span class="o">[</span>EXPERIMENTAL]
+  <span class="nt">--spice</span>         Write spice file
+  <span class="nt">--xschem</span>        Write xschem schematics
+  <span class="nt">--magic</span>         Write magic layout
+  <span class="nt">--smash</span> TEXT    List of transistors to smash schematic hierarchy
+  <span class="nt">--exclude</span> TEXT  Regex of cells to ignore
+  <span class="nt">--help</span>          Show this message and exit.
+
+</code></pre></div></div>
+
+
+
+
+  </div>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/cicpy/"></data>
+
+  <div class="wrapper">
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col">
+        <p class="feed-subscribe">
+          <a href="http://0.0.0.0:4000/cicpy/feed.xml">
+            <svg class="svg-icon orange">
+              <use xlink:href="/cicpy/assets/minima-social-icons.svg#rss"></use>
+            </svg><span>Subscribe</span>
+          </a>
+        </p>
+        <ul class="contact-list">
+          <li class="p-name">Carsten Wulff</li>
+          <li><a class="u-email" href="mailto:carsten@wulff.no">carsten@wulff.no</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <p>Custom IC Creator Python</p>
+      </div>
+    </div>
+
+    <div class="social-links">
+<ul class="social-media-list"></ul>
+</div>
+
+  </div>
+
+</footer>
+</body>
+
+</html>

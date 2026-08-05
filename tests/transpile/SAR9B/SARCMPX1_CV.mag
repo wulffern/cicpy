@@ -1,0 +1,156 @@
+magic
+tech tech
+magscale 1 2
+timestamp 1785880800
+<< checkpaint >>
+rect 0 0 688 3027
+<< po >>
+rect 447 974 496 986
+rect 496 1886 568 1898
+rect 496 1336 568 1348
+rect 496 974 508 1898
+rect 447 1869 496 1881
+rect 496 923 568 935
+rect 496 1060 568 1072
+rect 496 923 508 1881
+rect 120 441 169 453
+rect 120 648 169 660
+rect 169 441 181 660
+rect 120 1955 169 1967
+rect 120 2161 169 2173
+rect 169 1955 181 2173
+rect 60 510 120 522
+rect 60 579 120 591
+rect 60 1611 120 1623
+rect 60 2505 120 2517
+rect 60 510 72 2517
+rect 120 2505 169 2517
+rect 169 2591 241 2603
+rect 169 2505 181 2603
+rect 60 97 120 109
+rect 60 2092 120 2104
+rect 60 2574 120 2586
+rect 60 97 72 2586
+rect 120 2574 169 2586
+rect 169 2729 241 2741
+rect 169 2574 181 2741
+rect 180 2832 241 2844
+rect 120 2643 180 2655
+rect 180 2643 192 2844
+rect 447 2935 496 2947
+rect 496 2712 568 2724
+rect 496 2712 508 2947
+rect 180 871 241 883
+rect 180 1903 241 1915
+rect 180 871 192 1915
+rect 86 2780 155 2792
+rect 86 2918 155 2930
+rect 86 2849 155 2861
+rect 206 1353 275 1365
+rect 206 1078 275 1090
+rect 86 441 155 453
+rect 86 1955 155 1967
+rect 413 0 479 3027
+rect 206 0 272 3027
+rect 413 0 479 3027
+rect 206 0 272 3027
+use TAPCELL_CV XA0 
+transform 1 0 0 0 1 0
+box 0 0 688 69
+use SARKICKHX1_CV XA1 
+transform 1 0 0 0 1 69
+box 0 69 688 551
+use SARCMPHX1_CV XA2 
+transform 1 0 0 0 1 550
+box 0 550 688 1032
+use IVX4_CV XA2a 
+transform 1 0 0 0 1 1032
+box 0 1032 688 1307
+use IVX4_CV XA3a 
+transform 1 0 0 0 1 1307
+box 0 1307 688 1582
+use SARCMPHX1_CV XA3 
+transform 1 0 0 0 1 1582
+box 0 1582 688 2064
+use SARKICKHX1_CV XA4 
+transform 1 0 0 0 1 2064
+box 0 2064 688 2546
+use IVX1_CV XA9 
+transform 1 0 0 0 1 2546
+box 0 2546 688 2615
+use NDX1_CV XA10 
+transform 1 0 0 0 1 2614
+box 0 2614 688 2752
+use NRX1_CV XA11 
+transform 1 0 0 0 1 2752
+box 0 2752 688 2890
+use IVX1_CV XA12 
+transform 1 0 0 0 1 2890
+box 0 2890 688 2959
+use TAPCELL_CV XA13 
+transform 1 0 0 0 1 2958
+box 0 2958 688 3027
+use cut_M1M2_2x1 xcut0 
+transform 1 0 413 0 1 1869
+box 413 1869 479 1879
+use cut_M1M2_2x1 xcut1 
+transform 1 0 533 0 1 923
+box 533 923 599 933
+use cut_M1M2_2x1 xcut2 
+transform 1 0 533 0 1 1060
+box 533 1060 599 1070
+use cut_M1M2_2x1 xcut3 
+transform 1 0 89 0 1 441
+box 89 441 155 451
+use cut_M1M2_2x1 xcut4 
+transform 1 0 89 0 1 648
+box 89 648 155 658
+use cut_M1M2_2x1 xcut5 
+transform 1 0 89 0 1 1955
+box 89 1955 155 1965
+use cut_M1M2_2x1 xcut6 
+transform 1 0 89 0 1 2161
+box 89 2161 155 2171
+use cut_M1M2_2x1 xcut7 
+transform 1 0 86 0 1 97
+box 86 97 152 107
+use cut_M1M2_2x1 xcut8 
+transform 1 0 86 0 1 2092
+box 86 2092 152 2102
+use cut_M1M2_2x1 xcut9 
+transform 1 0 86 0 1 2574
+box 86 2574 152 2584
+use cut_M1M2_2x1 xcut10 
+transform 1 0 86 0 1 2574
+box 86 2574 152 2584
+use cut_M1M2_2x1 xcut11 
+transform 1 0 206 0 1 2729
+box 206 2729 272 2739
+use cut_M1M4_2x1 xcut12 
+transform 1 0 206 0 1 46
+box 206 46 272 56
+use cut_M1M4_2x1 xcut13 
+transform 1 0 206 0 1 3004
+box 206 3004 272 3014
+<< labels >>
+flabel po s 86 2780 155 2792 0 FreeSans 400 0 0 0 CK_SAMPLE
+port 6 nsew signal bidirectional
+flabel po s 86 2918 155 2930 0 FreeSans 400 0 0 0 CK_CMP
+port 5 nsew signal bidirectional
+flabel po s 86 2849 155 2861 0 FreeSans 400 0 0 0 DONE
+port 7 nsew signal bidirectional
+flabel po s 206 1353 275 1365 0 FreeSans 400 0 0 0 CNO
+port 4 nsew signal bidirectional
+flabel po s 206 1078 275 1090 0 FreeSans 400 0 0 0 CPO
+port 3 nsew signal bidirectional
+flabel po s 86 441 155 453 0 FreeSans 400 0 0 0 CPI
+port 1 nsew signal bidirectional
+flabel po s 86 1955 155 1967 0 FreeSans 400 0 0 0 CNI
+port 2 nsew signal bidirectional
+flabel po s 413 0 479 3027 0 FreeSans 400 0 0 0 AVDD
+port 8 nsew signal bidirectional
+flabel po s 206 0 272 3027 0 FreeSans 400 0 0 0 AVSS
+port 9 nsew signal bidirectional
+<< properties >>
+string FIXED_BBOX 0 0 688 3027
+<< end >>

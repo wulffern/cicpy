@@ -1,0 +1,38 @@
+magic
+tech tech
+magscale 1 2
+timestamp 1785880800
+<< checkpaint >>
+rect 0 0 688 69
+<< po >>
+rect 447 46 496 58
+rect 496 28 568 40
+rect 496 28 508 58
+rect 155 31 533 37
+rect 206 46 275 58
+rect 413 0 479 69
+rect 206 0 272 69
+rect 413 0 479 69
+rect 206 0 272 69
+use NCHDL MN0 
+transform 1 0 0 0 1 0
+box 0 0 344 69
+use PCHDL MP0 
+transform 1 0 344 0 1 0
+box 344 0 688 69
+use cut_M1M4_2x1 xcut0 
+transform 1 0 413 0 1 11
+box 413 11 479 21
+use cut_M1M4_2x1 xcut1 
+transform 1 0 206 0 1 11
+box 206 11 272 21
+<< labels >>
+flabel po s 206 46 275 58 0 FreeSans 400 0 0 0 Y
+port 1 nsew signal bidirectional
+flabel po s 413 0 479 69 0 FreeSans 400 0 0 0 AVDD
+port 2 nsew signal bidirectional
+flabel po s 206 0 272 69 0 FreeSans 400 0 0 0 AVSS
+port 3 nsew signal bidirectional
+<< properties >>
+string FIXED_BBOX 0 0 688 69
+<< end >>

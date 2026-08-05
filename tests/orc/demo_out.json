@@ -1,0 +1,9 @@
+{
+    "cells": [
+        {
+            "class": "Layout::LayoutDigitalCell",
+            "name": "ORC_TOP",
+            "description": "Minimal ORC top cell"
+        }
+    ]
+}

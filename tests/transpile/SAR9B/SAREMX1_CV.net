@@ -1,0 +1,56 @@
+ Netlist File
+ SAREMX1_CV
+ N3
+MN0/D
+MN1/D
+MN2/S
+
+ EN
+MN0/G
+
+ AM
+MN0/S
+MN3/G
+MP0/S
+MP3/G
+
+ AVSS
+MN0/B
+MN1/S
+MN1/B
+MN2/D
+MN2/B
+MN3/S
+MN3/B
+MP0/B
+MP1/B
+MP2/B
+MP3/B
+
+ B
+MN1/G
+MP1/G
+
+ A
+MN2/G
+MP2/G
+
+ ENO
+MN3/D
+MP1/S
+
+ AVDD
+MP0/D
+MP3/D
+
+ RST_N
+MP0/G
+
+ N2
+MP1/D
+MP2/S
+
+ N1
+MP2/D
+MP3/S
+

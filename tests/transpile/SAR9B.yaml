@@ -1,0 +1,1232 @@
+ALGIC001_SAR9B_CV:
+  function: ''
+  portorder:
+  - D<9>
+  - CN<5>
+  - CN<7>
+  - CN<9>
+  - CN<11>
+  - CP<13>
+  - D<6>
+  - D<5>
+  - D<4>
+  - D<3>
+  - D<2>
+  - D<1>
+  - D<7>
+  - D<8>
+  - CP<6>
+  - CP<4>
+  - CP<8>
+  - CP<10>
+  - CP<12>
+  - CN<12>
+  - CN<10>
+  - CN<8>
+  - CN<6>
+  - CN<4>
+  - CN<3>
+  - CN<2>
+  - CN<1>
+  - CN<0>
+  - AVSS
+  - AVDD
+  - VREF
+  - CK_SAMPLE_BSSW
+  - DONE
+  - SAR_IP
+  - SAR_IN
+  - SARN
+  - SARP
+  - EN
+  - CK_SAMPLE
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CK_SAMPLE:
+      direction: inputOutput
+      type: analog
+    CK_SAMPLE_BSSW:
+      direction: inputOutput
+      type: analog
+    CN<0>:
+      direction: inputOutput
+      type: digital
+    CN<10>:
+      direction: inputOutput
+      type: digital
+    CN<11>:
+      direction: inputOutput
+      type: digital
+    CN<12>:
+      direction: inputOutput
+      type: digital
+    CN<1>:
+      direction: inputOutput
+      type: digital
+    CN<2>:
+      direction: inputOutput
+      type: digital
+    CN<3>:
+      direction: inputOutput
+      type: digital
+    CN<4>:
+      direction: inputOutput
+      type: digital
+    CN<5>:
+      direction: inputOutput
+      type: digital
+    CN<6>:
+      direction: inputOutput
+      type: digital
+    CN<7>:
+      direction: inputOutput
+      type: digital
+    CN<8>:
+      direction: inputOutput
+      type: digital
+    CN<9>:
+      direction: inputOutput
+      type: digital
+    CP<10>:
+      direction: inputOutput
+      type: digital
+    CP<12>:
+      direction: inputOutput
+      type: digital
+    CP<13>:
+      direction: inputOutput
+      type: digital
+    CP<4>:
+      direction: inputOutput
+      type: digital
+    CP<6>:
+      direction: inputOutput
+      type: digital
+    CP<8>:
+      direction: inputOutput
+      type: digital
+    D<1>:
+      direction: inputOutput
+      type: digital
+    D<2>:
+      direction: inputOutput
+      type: digital
+    D<3>:
+      direction: inputOutput
+      type: digital
+    D<4>:
+      direction: inputOutput
+      type: digital
+    D<5>:
+      direction: inputOutput
+      type: digital
+    D<6>:
+      direction: inputOutput
+      type: digital
+    D<7>:
+      direction: inputOutput
+      type: digital
+    D<8>:
+      direction: inputOutput
+      type: digital
+    D<9>:
+      direction: inputOutput
+      type: digital
+    DONE:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    SARN:
+      direction: inputOutput
+      type: analog
+    SARP:
+      direction: inputOutput
+      type: analog
+    SAR_IN:
+      direction: inputOutput
+      type: analog
+    SAR_IP:
+      direction: inputOutput
+      type: analog
+    VREF:
+      direction: inputOutput
+      type: analog
+ALGIC001_SAR9B_CV_NOROUTE:
+  function: ''
+  portorder:
+  - D<9>
+  - CN<5>
+  - CN<7>
+  - CN<9>
+  - CN<11>
+  - CP<13>
+  - D<6>
+  - D<5>
+  - D<4>
+  - D<3>
+  - D<2>
+  - D<1>
+  - D<7>
+  - D<8>
+  - CP<6>
+  - CP<4>
+  - CP<8>
+  - CP<10>
+  - CP<12>
+  - CN<12>
+  - CN<10>
+  - CN<8>
+  - CN<6>
+  - CN<4>
+  - CN<3>
+  - CN<2>
+  - CN<1>
+  - CN<0>
+  - SAR_IP
+  - SAR_IN
+  - SARN
+  - SARP
+  - DONE
+  - EN
+  - CK_SAMPLE
+  - CK_SAMPLE_BSSW
+  - VREF
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CK_SAMPLE:
+      direction: inputOutput
+      type: analog
+    CK_SAMPLE_BSSW:
+      direction: inputOutput
+      type: analog
+    CN<0>:
+      direction: inputOutput
+      type: digital
+    CN<10>:
+      direction: inputOutput
+      type: digital
+    CN<11>:
+      direction: inputOutput
+      type: digital
+    CN<12>:
+      direction: inputOutput
+      type: digital
+    CN<1>:
+      direction: inputOutput
+      type: digital
+    CN<2>:
+      direction: inputOutput
+      type: digital
+    CN<3>:
+      direction: inputOutput
+      type: digital
+    CN<4>:
+      direction: inputOutput
+      type: digital
+    CN<5>:
+      direction: inputOutput
+      type: digital
+    CN<6>:
+      direction: inputOutput
+      type: digital
+    CN<7>:
+      direction: inputOutput
+      type: digital
+    CN<8>:
+      direction: inputOutput
+      type: digital
+    CN<9>:
+      direction: inputOutput
+      type: digital
+    CP<10>:
+      direction: inputOutput
+      type: digital
+    CP<12>:
+      direction: inputOutput
+      type: digital
+    CP<13>:
+      direction: inputOutput
+      type: digital
+    CP<4>:
+      direction: inputOutput
+      type: digital
+    CP<6>:
+      direction: inputOutput
+      type: digital
+    CP<8>:
+      direction: inputOutput
+      type: digital
+    D<1>:
+      direction: inputOutput
+      type: digital
+    D<2>:
+      direction: inputOutput
+      type: digital
+    D<3>:
+      direction: inputOutput
+      type: digital
+    D<4>:
+      direction: inputOutput
+      type: digital
+    D<5>:
+      direction: inputOutput
+      type: digital
+    D<6>:
+      direction: inputOutput
+      type: digital
+    D<7>:
+      direction: inputOutput
+      type: digital
+    D<8>:
+      direction: inputOutput
+      type: digital
+    D<9>:
+      direction: inputOutput
+      type: digital
+    DONE:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    SARN:
+      direction: inputOutput
+      type: analog
+    SARP:
+      direction: inputOutput
+      type: analog
+    SAR_IN:
+      direction: inputOutput
+      type: analog
+    SAR_IP:
+      direction: inputOutput
+      type: analog
+    VREF:
+      direction: inputOutput
+      type: analog
+CAP:
+  function: ''
+  portorder:
+  - B
+  - A
+  ports:
+    A:
+      direction: input
+      type: digital
+    B:
+      direction: input
+      type: digital
+CAP32C_CV:
+  function: ''
+  portorder:
+  - CTOP
+  - AVSS
+  - C1A
+  - C1B
+  - C2
+  - C4
+  - C8
+  - C16
+  ports:
+    AVSS:
+      direction: input
+      type: ground
+    C16:
+      direction: inputOutput
+      type: analog
+    C1A:
+      direction: inputOutput
+      type: analog
+    C1B:
+      direction: inputOutput
+      type: analog
+    C2:
+      direction: inputOutput
+      type: analog
+    C4:
+      direction: inputOutput
+      type: analog
+    C8:
+      direction: inputOutput
+      type: analog
+    CTOP:
+      direction: inputOutput
+      type: analog
+CAPR:
+  function: ''
+  portorder:
+  - B
+  - A
+  ports:
+    A:
+      direction: input
+      type: digital
+    B:
+      direction: input
+      type: digital
+CAPX1_CV:
+  function: ''
+  portorder:
+  - A
+  - B
+  ports:
+    A:
+      direction: input
+      type: digital
+    B:
+      direction: input
+      type: digital
+CDAC9_CV:
+  function: ''
+  portorder:
+  - CP<13>
+  - CP<12>
+  - CP<11>
+  - CP<10>
+  - CP<9>
+  - CP<8>
+  - CP<7>
+  - CP<6>
+  - CP<5>
+  - CP<4>
+  - CP<3>
+  - CP<2>
+  - CP<1>
+  - CP<0>
+  - AVSS
+  - CTOP
+  ports:
+    AVSS:
+      direction: input
+      type: ground
+    CP<0>:
+      direction: inputOutput
+      type: digital
+    CP<10>:
+      direction: inputOutput
+      type: digital
+    CP<11>:
+      direction: inputOutput
+      type: digital
+    CP<12>:
+      direction: inputOutput
+      type: digital
+    CP<13>:
+      direction: inputOutput
+      type: digital
+    CP<1>:
+      direction: inputOutput
+      type: digital
+    CP<2>:
+      direction: inputOutput
+      type: digital
+    CP<3>:
+      direction: inputOutput
+      type: digital
+    CP<4>:
+      direction: inputOutput
+      type: digital
+    CP<5>:
+      direction: inputOutput
+      type: digital
+    CP<6>:
+      direction: inputOutput
+      type: digital
+    CP<7>:
+      direction: inputOutput
+      type: digital
+    CP<8>:
+      direction: inputOutput
+      type: digital
+    CP<9>:
+      direction: inputOutput
+      type: digital
+    CTOP:
+      direction: inputOutput
+      type: analog
+DMOS:
+  function: ''
+  portorder:
+  - G
+  - S
+  - B
+  - D
+  ports:
+    B:
+      direction: input
+      type: digital
+    D:
+      direction: input
+      type: digital
+    G:
+      direction: inputOutput
+      type: analog
+    S:
+      direction: inputOutput
+      type: analog
+DMOS_BULK:
+  function: ''
+  portorder:
+  - G
+  - S
+  - B
+  - D
+  ports:
+    B:
+      direction: input
+      type: digital
+    D:
+      direction: input
+      type: digital
+    G:
+      direction: inputOutput
+      type: analog
+    S:
+      direction: inputOutput
+      type: analog
+IVX1_CV:
+  function: ''
+  portorder:
+  - A
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    Y:
+      direction: output
+      type: digital
+IVX2_CV:
+  function: ''
+  portorder:
+  - A
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    Y:
+      direction: output
+      type: digital
+IVX4_CV:
+  function: ''
+  portorder:
+  - A
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    Y:
+      direction: output
+      type: digital
+NDX1_CV:
+  function: ''
+  portorder:
+  - A
+  - B
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    B:
+      direction: input
+      type: digital
+    Y:
+      direction: output
+      type: digital
+NRX1_CV:
+  function: ''
+  portorder:
+  - A
+  - B
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    B:
+      direction: input
+      type: digital
+    Y:
+      direction: output
+      type: digital
+RM1:
+  function: ''
+  portorder:
+  - A
+  - B
+  ports:
+    A:
+      direction: input
+      type: digital
+    B:
+      direction: input
+      type: digital
+RM4:
+  function: ''
+  portorder:
+  - A
+  - B
+  ports:
+    A:
+      direction: input
+      type: digital
+    B:
+      direction: input
+      type: digital
+SARBSSWCTRL_CV:
+  function: ''
+  portorder:
+  - GNG
+  - TIE_H
+  - C
+  - GN
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    C:
+      direction: input
+      type: digital
+    GN:
+      direction: inputOutput
+      type: analog
+    GNG:
+      direction: inputOutput
+      type: analog
+    TIE_H:
+      direction: inputOutput
+      type: analog
+SARBSSW_CV:
+  function: ''
+  portorder:
+  - VI
+  - TIE_L
+  - CK
+  - CKN
+  - VO1
+  - VO2
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CK:
+      direction: inputOutput
+      type: analog
+    CKN:
+      direction: inputOutput
+      type: analog
+    TIE_L:
+      direction: inputOutput
+      type: analog
+    VI:
+      direction: inputOutput
+      type: analog
+    VO1:
+      direction: inputOutput
+      type: analog
+    VO2:
+      direction: inputOutput
+      type: analog
+SARCEX1_CV:
+  function: ''
+  portorder:
+  - A
+  - B
+  - RST
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    B:
+      direction: input
+      type: digital
+    RST:
+      direction: inputOutput
+      type: analog
+    Y:
+      direction: output
+      type: digital
+SARCMPHX1_CV:
+  function: ''
+  portorder:
+  - N1
+  - N2
+  - CI
+  - CK
+  - CO
+  - VMR
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CI:
+      direction: inputOutput
+      type: analog
+    CK:
+      direction: inputOutput
+      type: analog
+    CO:
+      direction: inputOutput
+      type: analog
+    N1:
+      direction: inputOutput
+      type: analog
+    N2:
+      direction: inputOutput
+      type: analog
+    VMR:
+      direction: inputOutput
+      type: analog
+SARCMPX1_CV:
+  function: ''
+  portorder:
+  - CK_SAMPLE
+  - CK_CMP
+  - DONE
+  - CNO
+  - CPO
+  - CPI
+  - CNI
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CK_CMP:
+      direction: inputOutput
+      type: analog
+    CK_SAMPLE:
+      direction: inputOutput
+      type: analog
+    CNI:
+      direction: inputOutput
+      type: analog
+    CNO:
+      direction: inputOutput
+      type: analog
+    CPI:
+      direction: inputOutput
+      type: analog
+    CPO:
+      direction: inputOutput
+      type: analog
+    DONE:
+      direction: inputOutput
+      type: analog
+SARDIGEX2_CV:
+  function: ''
+  portorder:
+  - CMP_OP
+  - RST_N
+  - EN
+  - CMP_ON
+  - ENO
+  - CN1
+  - CP1
+  - CP0
+  - CN0
+  - CEIN
+  - CEO
+  - CKS
+  - DONE
+  - VREF
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CEIN:
+      direction: inputOutput
+      type: analog
+    CEO:
+      direction: inputOutput
+      type: analog
+    CKS:
+      direction: inputOutput
+      type: analog
+    CMP_ON:
+      direction: inputOutput
+      type: analog
+    CMP_OP:
+      direction: inputOutput
+      type: analog
+    CN0:
+      direction: inputOutput
+      type: analog
+    CN1:
+      direction: inputOutput
+      type: analog
+    CP0:
+      direction: inputOutput
+      type: analog
+    CP1:
+      direction: inputOutput
+      type: analog
+    DONE:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    ENO:
+      direction: inputOutput
+      type: analog
+    RST_N:
+      direction: inputOutput
+      type: analog
+    VREF:
+      direction: inputOutput
+      type: analog
+SARDIGEX4_CV:
+  function: ''
+  portorder:
+  - CMP_OP
+  - RST_N
+  - EN
+  - CMP_ON
+  - ENO
+  - CN1
+  - CP1
+  - CP0
+  - CN0
+  - CEIN
+  - CEO
+  - CKS
+  - DONE
+  - VREF
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CEIN:
+      direction: inputOutput
+      type: analog
+    CEO:
+      direction: inputOutput
+      type: analog
+    CKS:
+      direction: inputOutput
+      type: analog
+    CMP_ON:
+      direction: inputOutput
+      type: analog
+    CMP_OP:
+      direction: inputOutput
+      type: analog
+    CN0:
+      direction: inputOutput
+      type: analog
+    CN1:
+      direction: inputOutput
+      type: analog
+    CP0:
+      direction: inputOutput
+      type: analog
+    CP1:
+      direction: inputOutput
+      type: analog
+    DONE:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    ENO:
+      direction: inputOutput
+      type: analog
+    RST_N:
+      direction: inputOutput
+      type: analog
+    VREF:
+      direction: inputOutput
+      type: analog
+SARDIGX1_CV:
+  function: ''
+  portorder:
+  - CMP_OP
+  - RST_N
+  - EN
+  - CMP_ON
+  - ENO
+  - CN1
+  - CP1
+  - CP0
+  - CN0
+  - VREF
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CMP_ON:
+      direction: inputOutput
+      type: analog
+    CMP_OP:
+      direction: inputOutput
+      type: analog
+    CN0:
+      direction: inputOutput
+      type: analog
+    CN1:
+      direction: inputOutput
+      type: analog
+    CP0:
+      direction: inputOutput
+      type: analog
+    CP1:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    ENO:
+      direction: inputOutput
+      type: analog
+    RST_N:
+      direction: inputOutput
+      type: analog
+    VREF:
+      direction: inputOutput
+      type: analog
+SAREMX1_CV:
+  function: ''
+  portorder:
+  - A
+  - B
+  - RST_N
+  - EN
+  - ENO
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    B:
+      direction: input
+      type: digital
+    EN:
+      direction: inputOutput
+      type: analog
+    ENO:
+      direction: inputOutput
+      type: analog
+    RST_N:
+      direction: inputOutput
+      type: analog
+SARKICKHX1_CV:
+  function: ''
+  portorder:
+  - CK
+  - CKN
+  - CI
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CI:
+      direction: inputOutput
+      type: analog
+    CK:
+      direction: inputOutput
+      type: analog
+    CKN:
+      direction: inputOutput
+      type: analog
+SARLTX1_CV:
+  function: ''
+  portorder:
+  - A
+  - RST_N
+  - EN
+  - LCK_N
+  - CHL
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CHL:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    LCK_N:
+      direction: inputOutput
+      type: analog
+    RST_N:
+      direction: inputOutput
+      type: analog
+SARMRYX1_CV:
+  function: ''
+  portorder:
+  - CMP_OP
+  - RST_N
+  - EN
+  - CMP_ON
+  - CHL_OP
+  - CHL_ON
+  - ENO
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    CHL_ON:
+      direction: inputOutput
+      type: analog
+    CHL_OP:
+      direction: inputOutput
+      type: analog
+    CMP_ON:
+      direction: inputOutput
+      type: analog
+    CMP_OP:
+      direction: inputOutput
+      type: analog
+    EN:
+      direction: inputOutput
+      type: analog
+    ENO:
+      direction: inputOutput
+      type: analog
+    RST_N:
+      direction: inputOutput
+      type: analog
+SWX2_CV:
+  function: ''
+  portorder:
+  - A
+  - Y
+  - VREF
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVSS:
+      direction: input
+      type: ground
+    VREF:
+      direction: inputOutput
+      type: analog
+    Y:
+      direction: output
+      type: digital
+SWX4_CV:
+  function: ''
+  portorder:
+  - A
+  - Y
+  - VREF
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVSS:
+      direction: input
+      type: ground
+    VREF:
+      direction: inputOutput
+      type: analog
+    Y:
+      direction: output
+      type: digital
+TAPCELLB_CV:
+  function: ''
+  portorder:
+  - AVSS
+  - AVDD
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+TAPCELL_CV:
+  function: ''
+  portorder:
+  - TAP
+  ports:
+    TAP:
+      direction: inputOutput
+      type: analog
+TGPD_CV:
+  function: ''
+  portorder:
+  - C
+  - B
+  - A
+  - AVDD
+  - AVSS
+  ports:
+    A:
+      direction: input
+      type: digital
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    B:
+      direction: input
+      type: digital
+    C:
+      direction: input
+      type: digital
+TIEH_CV:
+  function: ''
+  portorder:
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    Y:
+      direction: output
+      type: digital
+TIEL_CV:
+  function: ''
+  portorder:
+  - Y
+  - AVDD
+  - AVSS
+  ports:
+    AVDD:
+      direction: input
+      type: power
+    AVSS:
+      direction: input
+      type: ground
+    Y:
+      direction: output
+      type: digital

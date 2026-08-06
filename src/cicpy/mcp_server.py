@@ -396,6 +396,43 @@ def connectivity(workdir: str, library: str, cell: str) -> str:
     return "\n".join(out)
 
 
+@mcp.tool()
+def checkroutes(cicfile: str, techfile: str, cell: str, includes: list[str] | None = None) -> str:
+    """Check a cell in an existing .cic for shorts and opens.
+
+    The same analysis as `connectivity`, but reading a .cic that is
+    already on disk rather than re-running placement. Use this for a
+    ciccreator library, where sch2mag would replace the layout instead
+    of judging it, and for any case where the layout under test must not
+    be touched.
+
+    A leaf cell that carries no substrate tap reports its supply rails
+    as split: that is the library design, not a defect, and the tap cell
+    joins them at the assembly.
+
+    Args:
+        cicfile: Path to the .cic holding the layout.
+        techfile: Path to the technology file.
+        cell: The cell to check.
+        includes: Other .cic files the design references.
+    """
+    cmd = ["cicpy", "checkroutes", cicfile, techfile, cell]
+    for inc in (includes or []):
+        cmd += ["--I", inc]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    shorts, opens = _parse_connectivity(proc.stdout + proc.stderr)
+    out = [f"{cell}: {len(shorts)} shorts, {len(opens)} opens"]
+    if shorts:
+        out.append("shorts:")
+        out += ["  " + s for s in shorts]
+    if opens:
+        out.append("opens:")
+        out += ["  " + o for o in opens]
+    if not shorts and not opens:
+        out.append("clean")
+    return "\n".join(out)
+
+
 def main():
     mcp.run()
 

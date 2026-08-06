@@ -495,6 +495,45 @@ def _report_connectivity(lcell):
 
 
 
+@cli.command("checkroutes")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("cell")
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+@click.option("--layer",default="",help="Only anchor nets on this layer")
+def checkroutes(ctx,cicfile,techfile,cell,includes,layer):
+    """Check a cell in a .cic for shorts and opens.
+
+    The same geometric connectivity analysis the layout GUI shows and
+    that spi2mag --check-connectivity runs, but reading a .cic that is
+    already on disk instead of re-running placement. That makes it
+    usable on a ciccreator library, where re-placing the cell would
+    replace the layout being checked rather than judge it.
+    """
+    cic.Rules(techfile)
+    design = load_design(cicfile, includes)
+
+    if(cell not in design.cells):
+        log.error(f"Could not find cell {cell} in {cicfile}")
+        raise SystemExit(2)
+
+    lcell = design.cells[cell]
+    if(not hasattr(lcell,"checkConnectivity")):
+        log.error(f"{cell} is a {lcell.__class__.__name__}, which carries no connectivity")
+        raise SystemExit(2)
+
+    result = lcell.checkConnectivity(layer)
+    shorts = result.get("shorts",[])
+    opens = result.get("opens",[])
+
+    _report_connectivity(lcell)
+
+    if(shorts or opens):
+        raise SystemExit(1)
+    log.info(f"{cell}: no shorts, no opens")
+
+
 @cli.command("gui")
 @click.pass_context
 @click.argument("cicfile")

@@ -1954,6 +1954,86 @@ class LayoutCell(Cell):
         r.route()
         return r
 
+    def addTrackRoute(self, net, layers=None, viaCost=None, cuts=1):
+        """Search for a path for one net instead of being told where it goes.
+
+        The route language names a corridor; this looks for a free one.
+        Use it for the net that will not fit anywhere obvious, and keep
+        the declarative routes for the ones that do: a stated route is
+        easier to read later than a found one.
+
+        Returns the Route that was added, or None when no path exists,
+        in which case nothing is drawn and the reason is logged.
+        """
+        from .trackrouter import TrackRouter
+        from .route import Route
+
+        router = TrackRouter(self, layers=layers, via_cost=viaCost)
+        router._collect()
+
+        #- Every access rect this net has. getNodeAccessRects answers with
+        #- the same physical pins whatever layer it is asked about, so
+        #- ask once and take each rect's own layer: asking per layer
+        #- produced goals on layers where the rect does not exist, and
+        #- the search dutifully failed to reach them
+        anchors = []
+        seen = set()
+        for r in self.getNodeAccessRects(net, ""):
+            layer = getattr(r, "layer", "")
+            if layer not in router.layer_index:
+                continue
+            key = (layer, r.x1, r.y1, r.x2, r.y2)
+            if key in seen:
+                continue
+            seen.add(key)
+            anchors.append((r, layer))
+        if len(anchors) < 2:
+            self.log.warning(
+                f"addTrackRoute({net}): {len(anchors)} access rects, nothing to join")
+            return None
+
+        #- Join the pins one at a time, each to everything already
+        #- connected, which is what makes a multi pin net a tree rather
+        #- than a set of independent paths
+        connected = router._nodes_for_rect(anchors[0][0], anchors[0][1])
+        all_rects = []
+        all_vias = []
+        for rect, layer in anchors[1:]:
+            goals = router._nodes_for_rect(rect, layer)
+            if not goals or not connected:
+                continue
+            path = router.search(connected, goals, net)
+            if path is None:
+                self.log.warning(
+                    f"addTrackRoute({net}): no path to a pin on {layer}")
+                continue
+            rects, vias = router._path_to_rects(path, net)
+            if not router.validate(rects, net) or not router.validate_vias(vias, net):
+                continue
+            all_rects.extend(rects)
+            all_vias.extend(vias)
+            connected.extend(path)
+
+        if not all_rects:
+            self.log.warning(f"addTrackRoute({net}): found no path at all")
+            return None
+
+        ro = Route(net, router.layers[0].name, [], [], "", "-")
+        for r in all_rects:
+            ro.add(r)
+        for a, b in all_vias:
+            la = router.layers[a[2]].name
+            lb = router.layers[b[2]].name
+            cut = Cut.getInstance(la, lb, cuts, cuts)
+            if cut:
+                cut.moveCenter(a[0] * router.pitch, a[1] * router.pitch)
+                ro.add(cut)
+        self._annotateRoute(ro, "addTrackRoute", {"net": net})
+        self.add(ro)
+        self.log.info(
+            f"addTrackRoute({net}): {len(all_rects)} rects, {len(all_vias)} vias")
+        return ro
+
     def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, includeGroups=""):
         self.log.info(
             f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, includeGroups={includeGroups})"

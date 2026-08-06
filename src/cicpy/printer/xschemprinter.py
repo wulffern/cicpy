@@ -487,6 +487,39 @@ E {}
 
         pass
 
+
+    def _offsetProperty(self,val,odev,prop):
+        """Apply a device model's parameter offset, if the tech declares one.
+
+        Mirrors SpicePrinter._offsetProperty so the schematic and the
+        netlist state the same model value. sky130's res_high_po is the
+        case in hand: magic extracts it as l=l+0.16, so a schematic that
+        prints the drawn length disagrees with the layout by exactly
+        that much.
+        """
+        pmap = odev.get("propertymap",{}).get(prop)
+        if(not pmap or "offset" not in pmap):
+            return val
+        try:
+            return round(float(val) + float(pmap["offset"]),6)
+        except (TypeError,ValueError):
+            return val
+
+    def _offsetPropertyByName(self,val,odev,cicname):
+        """Same as _offsetProperty, but keyed by the cic property name.
+
+        propertymap is keyed by the spice parameter ("l"), while the
+        cell carries the cic name ("length"), so the lookup has to go
+        through the map's "name" field.
+        """
+        for pmap in odev.get("propertymap",{}).values():
+            if(pmap.get("name") == cicname and "offset" in pmap):
+                try:
+                    return round(float(val) + float(pmap["offset"]),6)
+                except (TypeError,ValueError):
+                    return val
+        return val
+
     def printSpiceDevice(self,o):
 
         odev = self.rules.device(o.deviceName)
@@ -518,7 +551,7 @@ spiceprefix=X
                     nprop = odev["propertymap"][prop]["name"]
                     ss = odev["propertymap"][prop]["str"]
 
-            props += nprop + "=" + str(o.properties[prop]) + ss + " "
+            props += nprop + "=" + str(self._offsetProperty(o.properties[prop],odev,prop)) + ss + " "
 
 
         dstr= dstr.replace("(sym)",sym) \
@@ -664,10 +697,16 @@ m=1}
         port1 = odev["ports"][1]
 
 
+        #- The model length can differ from the drawn length; see
+        #- _offsetProperty. The netlist applies the same offset through
+        #- the propertymap, so schematic and layout state one number
+        length = self._offsetPropertyByName(o.properties["length"],odev,"length")
+        width = self._offsetPropertyByName(o.properties["width"],odev,"width")
+
         dstr= dstr.replace("(sym)",sym) \
             .replace("(model)",model) \
-            .replace("(length)",str(o.properties["length"])) \
-            .replace("(width)",str(o.properties["width"])) \
+            .replace("(length)",str(length)) \
+            .replace("(width)",str(width)) \
             .replace("(instName)",o.name) \
             .replace("(x1)",str(self.ix1)) \
             .replace("(y1)",str(self.iy1))

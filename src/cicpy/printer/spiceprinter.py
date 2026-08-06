@@ -1,5 +1,6 @@
 from .designprinter import DesignPrinter
 import re
+import logging
 
 
 class SpicePrinter(DesignPrinter):
@@ -190,6 +191,26 @@ class SpicePrinter(DesignPrinter):
 
         pass
 
+    def _offsetProperty(self,val,pmap):
+        """Apply the device model's offset to a drawn value.
+
+        A PDK model can define its parameter against something other
+        than the drawn geometry. sky130's res_high_po is extracted by
+        magic as l=l+0.16, because the model length runs to the middle
+        of the contact interface rather than the edge of the silicide
+        block. The schematic has to state the same number or LVS
+        reports a property error, so the tech file carries the offset
+        on the device and it is applied here, once, on the way out.
+        """
+        if("offset" not in pmap):
+            return val
+        try:
+            return round(float(val) + float(pmap["offset"]),6)
+        except (TypeError,ValueError):
+            log = logging.getLogger("SpicePrinter")
+            log.warning(f"Could not offset property value '{val}'")
+            return val
+
     def spiceProperties(self,odev,o):
 
         propss = ""
@@ -199,9 +220,11 @@ class SpicePrinter(DesignPrinter):
 
             #- Go through propertymap and find all parameters
             for key in odev["propertymap"]:
+                pmap = odev["propertymap"][key]
                 ddict[key] = dict()
-                ddict[key]["val"] = o.properties[odev["propertymap"][key]["name"]]
-                ddict[key]["str"] = odev["propertymap"][key]["str"]
+                ddict[key]["val"] = self._offsetProperty(
+                    o.properties[pmap["name"]], pmap)
+                ddict[key]["str"] = pmap["str"]
 
             #- If a parameter is used in a string, then replace it
             for key in ddict:

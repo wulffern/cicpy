@@ -199,8 +199,19 @@ class Cell(Rect):
 
 
         for child in self.children:
-            if(self.ignoreBoundaryRouting and 
-                (not(child.isInstance()) or not(child.isCut()) ) ):
+            #- ignoreBoundaryRouting keeps routing out of the bounding
+            #- box, so a ring drawn around the cell does not become part
+            #- of the cell it rings.
+            #-
+            #- cIcCore::Cell::updateBoundingRect writes this as
+            #-   (!cr->isInstance() || cr->isCut())
+            #- because there every child is an instance or a route. Here
+            #- a LayoutCell's children are CellGroups, so keeping only
+            #- instances keeps nothing and the box comes out INT_MAX.
+            #- Say what is meant instead: routing does not count.
+            #- The port had not(isInstance()) or not(isCut()), true for
+            #- every plain instance, which emptied the box either way
+            if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
                 continue
             cx1 = child.x1
             cx2 = child.x2
@@ -223,6 +234,20 @@ class Cell(Rect):
         r.setPoint2(x2,y2)
 
         return r
+
+    @staticmethod
+    def _isBoundaryRouting(child):
+        """Is this child routing rather than content?
+
+        Routes, route rings and the cuts they place. Used by
+        updateBoundingRect when ignoreBoundaryRouting is set.
+        """
+        if(child.isRoute() or child.isCut()):
+            return True
+        for base in (child.__class__,) + child.__class__.__mro__:
+            if(base.__name__ == "RouteRing"):
+                return True
+        return False
 
     @staticmethod
     def calcBoundingRectFromList(children, ignoreBoundaryRouting=False):

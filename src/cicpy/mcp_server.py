@@ -355,9 +355,16 @@ def _parse_connectivity(log_text):
         m = re.search(r"WARNING: (?:ROUTE )?SHORT (component=\S+ nets=\S+.*)", l)
         if m and "ROUTE SHORT" not in l:
             shorts.append(re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
-        m = re.search(r"WARNING: OPEN (net=\S+ split_components=[^\x1b]+)", l)
+        #- both kinds of open. Matching only split_components dropped
+        #- every net whose pins reach nothing at all -- the commonest
+        #- kind, and the one that reads as "almost done" when counted
+        #- wrong: 13 opens were reported as 4
+        m = re.search(r"WARNING: OPEN (net=\S+ (?:split_components|unmatched_anchors)=[^\x1b]+)", l)
         if m:
             opens.append(re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
+        m = re.search(r"WARNING: {2}(BRIDGE [^\x1b]+)", l)
+        if m and shorts:
+            shorts.append("  " + re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
     return shorts, opens
 
 

@@ -2056,6 +2056,12 @@ class LayoutCell(Cell):
                 self.add(c)
 
     def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances, includeGroups=""):
+        #- named channels work here too. They did not, and the failure
+        #- was silent: the option string was passed through untouched,
+        #- so vchannel/vtrack looked accepted and every route in a column
+        #- still took the spine its own pins implied. Five ladder nets
+        #- asked for five tracks and landed on one.
+        options = self._resolveChannelOptions(options)
         self.log.info(f"addConnectivityRoute(layer={layer}, regex={regex}, routeType={routeType}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, includeGroups={includeGroups})")
         prefer_anymetal = bool(re.search(r"anymetal(,|\s+|$)", options or ""))
         for node in list(self.nodeGraphList):

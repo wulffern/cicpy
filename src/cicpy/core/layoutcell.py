@@ -777,12 +777,97 @@ class LayoutCell(Cell):
         if ra != rb:
             parent[rb] = ra
 
+    def _shortBridges(self, indices, adjacency, shapes, limit=8):
+        """Where two nets actually touch, rectangle by rectangle.
+
+        A shorted component says *that* two nets are joined. This says
+        *where*. Every rectangle that carries a net of its own is a seed;
+        a breadth first sweep from all seeds at once labels the rest with
+        whichever net reaches it first, so a wire with no net attribution
+        of its own — a via pad, a piece of a guard — belongs to whatever
+        it hangs off. Any adjacency whose two ends carry different labels
+        is then a place the short is made, and cutting all of them would
+        separate the nets.
+
+        The labels of unattributed metal are a guess, so the *rectangles*
+        reported are exact and the *net named on each side* is the nearest
+        attribution rather than a proof. That is still the difference
+        between a coordinate to look at and six hundred rectangles.
+        """
+        from collections import deque
+
+        label = {}
+        queue = deque()
+        for idx in indices:
+            net = getattr(shapes[idx], "net", "")
+            if net and not self._ignoreConnectivityNet(net):
+                label[idx] = net
+                queue.append(idx)
+        if not queue:
+            return []
+
+        while queue:
+            i = queue.popleft()
+            for j in adjacency.get(i, ()):
+                if j in label:
+                    continue
+                label[j] = label[i]
+                queue.append(j)
+
+        bridges = []
+        seen = set()
+        for i in indices:
+            li = label.get(i)
+            if li is None:
+                continue
+            for j in adjacency.get(i, ()):
+                lj = label.get(j)
+                if lj is None or lj == li or j < i:
+                    continue
+                a, b = shapes[i], shapes[j]
+                key = (li, lj, a.layer, b.layer,
+                       int(a.x1), int(a.y1), int(b.x1), int(b.y1))
+                if key in seen:
+                    continue
+                seen.add(key)
+                bridges.append({
+                    "nets": sorted((li, lj)),
+                    "a": {
+                        "layer": a.layer,
+                        "rect": [int(a.x1), int(a.y1), int(a.x2), int(a.y2)],
+                        "route": self._getRouteSource(a),
+                    },
+                    "b": {
+                        "layer": b.layer,
+                        "rect": [int(b.x1), int(b.y1), int(b.x2), int(b.y2)],
+                        "route": self._getRouteSource(b),
+                    },
+                })
+        #- the same pair of nets can meet in many places; show a few of
+        #- each rather than eight instances of one
+        bridges.sort(key=lambda x: (x["nets"], x["a"]["rect"]))
+        out, per_pair = [], defaultdict(int)
+        for bridge in bridges:
+            pair = tuple(bridge["nets"])
+            if per_pair[pair] >= 2:
+                continue
+            per_pair[pair] += 1
+            out.append(bridge)
+            if len(out) >= limit:
+                break
+        return out
+
     def checkConnectivity(self, target_layer=""):
         shapes = [
             rect for rect in self._collectPhysicalRects()
             if self._isConnectivityPropagationLayer(getattr(rect, "layer", ""))
         ]
         parent = list(range(len(shapes)))
+        #- keep the edges, not just the union. A short report that says
+        #- which nets ended up in one component tells you nothing about
+        #- where they meet, and a component of six hundred rectangles is
+        #- not something you find the bridge in by eye
+        adjacency = defaultdict(list)
 
         for i in range(len(shapes)):
             for j in range(i + 1, len(shapes)):
@@ -790,11 +875,16 @@ class LayoutCell(Cell):
                     continue
                 if not self._layersConnectForConnectivity(shapes[i].layer, shapes[j].layer):
                     continue
+                adjacency[i].append(j)
+                adjacency[j].append(i)
                 self._unionRoots(parent, i, j)
 
         components = defaultdict(list)
+        component_indices = defaultdict(list)
         for idx, rect in enumerate(shapes):
-            components[self._findRoot(parent, idx)].append(rect)
+            root = self._findRoot(parent, idx)
+            components[root].append(rect)
+            component_indices[root].append(idx)
 
         anchors = self._collectNetAnchorRects(target_layer)
         net_components = defaultdict(set)
@@ -859,6 +949,8 @@ class LayoutCell(Cell):
                     "rect_count": len(rects),
                     "bounds": bounds,
                     "routes": route_sources,
+                    "bridges": self._shortBridges(
+                        component_indices[comp_id], adjacency, shapes),
                 })
 
         opens = []
@@ -949,7 +1041,24 @@ class LayoutCell(Cell):
                 f"bounds=({bounds.x1},{bounds.y1})-({bounds.x2},{bounds.y2}) rects={short['rect_count']} "
                 f"routes={route_desc}"
             )
+            for bridge in short.get("bridges", ()):
+                self.log.warning("  " + self.describeBridge(bridge))
         return result["shorts"]
+
+    @staticmethod
+    def describeBridge(bridge):
+        """One line naming the two rectangles a short is made across."""
+        def side(s):
+            text = (f"{s['layer']} ({s['rect'][0]},{s['rect'][1]})-"
+                    f"({s['rect'][2]},{s['rect'][3]})")
+            route = s.get("route")
+            if route:
+                where = route.get("debug_callsite", "")
+                text += f" [{route.get('name','')} {route.get('options','')}"
+                text += f" at {where}]" if where else "]"
+            return text
+        return (f"BRIDGE {'|'.join(bridge['nets'])}: "
+                f"{side(bridge['a'])} touches {side(bridge['b'])}")
 
     def reportOpens(self, target_layer=""):
         result = self.checkConnectivity(target_layer)
@@ -1241,14 +1350,18 @@ class LayoutCell(Cell):
         ``None`` on parse / lookup / construction failure.
         """
         self.log.info(f"addDirectedRoute(layer={layer}, net={net}, route={route}, options={options})")
-        # route is of form: startRegex + routeType symbols + stopRegex
-        m = re.match(r"^([^-\|<>]*)([-\|<>]+)([^-\|<>]*)$", route)
+        # route is of form: startRegex + routeType symbols + stopRegex.
+        # A bus index is written xnd1<0>, and < and > are also route type
+        # characters, so the endpoints have to be masked before the split
+        # or every bussed instance fails to parse.
+        masked = re.sub(r"<\d+(?::\d+)?>", lambda mm: "\x00" * len(mm.group(0)), route)
+        m = re.match(r"^([^-\|<>]*)([-\|<>]+)([^-\|<>]*)$", masked)
         if not m:
             self.log.error(f"Could not parse route command '{route}'")
             return None
-        startRegex = m.group(1)
-        routeType = m.group(2)
-        stopRegex = m.group(3)
+        startRegex = route[m.start(1):m.end(1)]
+        routeType = route[m.start(2):m.end(2)]
+        stopRegex = route[m.start(3):m.end(3)]
         start = self.findAllRectangles(startRegex, layer)
         stop = self.findAllRectangles(stopRegex, layer)
         if len(start) > 0 and len(stop) > 0:

@@ -484,6 +484,8 @@ def _report_connectivity(lcell):
             f"bounds=({bounds.x1},{bounds.y1})-({bounds.x2},{bounds.y2}) rects={short['rect_count']} "
             f"routes={_format_route_desc(short)}"
         )
+        for bridge in short.get("bridges", ()):
+            log.warning("  " + cic.LayoutCell.describeBridge(bridge))
 
     for open_net in opens:
         if open_net["type"] == "split":

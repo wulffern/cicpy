@@ -766,6 +766,30 @@ class StackGroup(CellGroup):
                     return net
         return None
 
+    def _terminal_rects(self, inst, terminal, layer):
+        """The geometry of one *terminal* of one instance, on ``layer``.
+
+        Keyed by terminal, not by net: two terminals of a diode
+        connected device share a net and the net keyed lookups cannot
+        separate them.
+        """
+        graph = getattr(self.layout, "nodeGraph", None)
+        if graph is None:
+            return []
+        out = []
+        for node in graph.values():
+            for port in getattr(node, "ports", []):
+                if getattr(port, "parent", None) is not inst:
+                    continue
+                if getattr(port, "childName", "") != terminal:
+                    continue
+                rect = port.get(layer) if hasattr(port, "get") else None
+                if rect is not None:
+                    #- a copy: Route stretches the rectangles it is given,
+                    #- and these are the device's own pins
+                    out.append(rect.getCopy())
+        return out
+
     def _edge_port_rect(self, layer, route_rect, edge, port_height):
         if route_rect is None:
             return None
@@ -843,17 +867,28 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances=""):
-        """Tie diode-connected transistor drain and gate via addDirectedRoute.
+    def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances="", routeTypes=("-", "-|-", "--|-")):
+        """Tie drain to gate on every diode-connected device in the stack.
 
-        For each member instance whose drain and gate share a net, emits
-        ``addDirectedRoute(layer, net, f"{name}:{drain}-{name}:{gate}")``.
-        The route engine (via the path-aware ``findAllRectangles``)
-        resolves the pin rects on ``layer`` and constructs the tying
-        route. Routes are also tracked on the stack as
-        ``self.diode_routes`` and parented under the stack so JSON /
-        bounding-box walks see them.
+        A diode tie is the shortest wire in a layout: two pins of one
+        transistor, a couple of microns apart, inside the device's own
+        footprint. It belongs on the pin layer. Spending a routing layer
+        on it costs a via pair and, worse, a track through the column
+        that a net with somewhere to go could have used.
+
+        The pin rectangles come from the node graph, not from the
+        ``instance:terminal`` path grammar. On a cell built from a
+        netlist an instance's ports are keyed by *net*, and a diode
+        connected device has one net on two terminals, so the two
+        collapse to a single entry and the path form finds nothing —
+        which is why this used to report ``start=0 stop=0`` on every
+        device it was asked about. The graph keeps the terminal name,
+        so it can still tell drain from gate.
+
+        Routes are tracked on the stack as ``self.diode_routes`` and
+        parented under it so JSON and bounding box walks see them.
         """
+        from .route import Route
         for inst in self._route_instances():
             instance_name = getattr(inst, "instanceName", "")
             if not instance_name:
@@ -868,10 +903,39 @@ class StackGroup(CellGroup):
             if not drain_net or drain_net != gate_net:
                 continue
 
-            inst_re = re.escape(instance_name)
-            route_desc = f"{inst_re}:{drain}-{inst_re}:{gate}"
-            r = self.layout.addDirectedRoute(layer, drain_net, route_desc)
+            start = self._terminal_rects(inst, drain, layer)
+            stop = self._terminal_rects(inst, gate, layer)
+            if not start or not stop:
+                self.log.error(
+                    f"routeDiodeConnected: {instance_name} has no {layer} "
+                    f"geometry for {drain if not start else gate}")
+                continue
+
+            #- A straight run only works where the two pins share a band.
+            #- REYATR puts G above D by one pin height and out to the
+            #- right, so the tie has to turn a corner; a library that
+            #- lines them up gets the straight one, which is shorter and
+            #- has no jog. Try each in turn rather than making the caller
+            #- know which library they are on
+            r = None
+            for rt in routeTypes:
+                try:
+                    r = Route(drain_net, layer, start, stop, "", rt)
+                except Exception:
+                    r = None
+                    continue
+                self.layout._annotateRoute(r, "routeDiodeConnected", {
+                    "layer": layer,
+                    "net": drain_net,
+                    "route": f"{instance_name}:{drain}{rt}{instance_name}:{gate}",
+                    "options": "",
+                })
+                self.layout.add(r)
+                break
             if r is None:
+                self.log.error(
+                    f"routeDiodeConnected: no {layer} tie for {instance_name} "
+                    f"({drain}-{gate} on {drain_net}), tried {','.join(routeTypes)}")
                 continue
             self.direct_routes.append(r)
             self.diode_routes.append(r)

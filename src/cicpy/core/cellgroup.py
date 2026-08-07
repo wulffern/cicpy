@@ -744,15 +744,58 @@ class StackGroup(CellGroup):
             grouped[net] = (term, rects)
         return grouped
 
-    def _vertical_parallel_rect(self, layer, rects):
+    def _vertical_parallel_rect(self, layer, rects, align="full", step=0):
+        """A rail down a column of parallel devices, over one terminal.
+
+        ``align`` picks which part of the pin the rail sits on, and on a
+        library whose pins overlap in x that is the whole game. REYATR
+        lays the source rail over columns 10..16 of its pattern and the
+        drain run over 12..18: the two share five columns, so a rail
+        taking the full pin width for each shorts them the moment both
+        are asked for. Taking the *left* edge for one and the *right*
+        edge for the other keeps each on the part of its pin the other
+        does not have, and both stay on M1.
+
+        Which edge belongs to which terminal is the caller's to say,
+        because it is a property of the library, not of the net.
+        """
         if not rects:
             return None
         source = sorted(rects, key=lambda r: (r.y1, r.x1))[0]
         y1 = min(r.y1 for r in rects)
         y2 = max(r.y2 for r in rects)
-        rect = Rect(layer, source.x1, y1, source.width(), y2 - y1)
+
+        if align in ("left", "right"):
+            #- one routing width at the edge of the span every pin in
+            #- the column shares, not the pin width: the point of the
+            #- edge is to leave the rest of the pin to the terminal that
+            #- overlaps it.
+            #-
+            #- ``step`` walks inward from that edge by a routing pitch at
+            #- a time. A column whose devices carry several nets on one
+            #- terminal -- a series ladder, a bias stack -- cannot give
+            #- them all the edge, and railing them all at the same x is
+            #- how they short. Each net takes the next lane in.
+            rules = Rules.getInstance()
+            width = rules.get(layer, "width")
+            pitch = width + rules.get(layer, "space")
+            lo = max(r.x1 for r in rects)
+            hi = min(r.x2 for r in rects)
+            if hi - lo < width + step * pitch:
+                return None
+            x1 = lo + step * pitch if align == "left" else hi - width - step * pitch
+        else:
+            x1, width = source.x1, source.width()
+
+        rect = Rect(layer, x1, y1, width, y2 - y1)
         rect.net = getattr(source, "net", "")
         return rect
+
+    def _railsClash(self, a, b):
+        """Two column rails that would touch, spacing included."""
+        space = Rules.getInstance().get(a.layer, "space")
+        return not (a.x2 + space <= b.x1 or b.x2 + space <= a.x1
+                    or a.y2 + space <= b.y1 or b.y2 + space <= a.y1)
 
     def _terminal_net(self, inst, terminal):
         graph = getattr(self.layout, "nodeGraph", None)
@@ -884,8 +927,15 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True):
-        """Route common mirror terminals across the whole stack as one bundle."""
+    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, align="full"):
+        """Route common mirror terminals across the whole stack as one bundle.
+
+        ``align`` is passed to the rail: ``"full"`` takes the pin's own
+        width, ``"left"`` and ``"right"`` take one routing width at that
+        edge of the span the column's pins share. Use an edge when two
+        terminals of the library overlap in x, which is what stops both
+        from being railed on the same layer.
+        """
         instances = self._route_instances_excluding(excludeInstances=excludeInstances)
         if len(instances) < 2:
             return self
@@ -893,12 +943,43 @@ class StackGroup(CellGroup):
         nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
         required_rects = minRects if minRects is not None else 2
         required_rects = max(2, required_rects)
-        for net, (terminal_name, rects) in nets.items():
+        #- rails already placed in this column, so the next net can be
+        #- given a lane that clears them instead of landing on top. The
+        #- longest span goes first: it has the least room to move and
+        #- the most to lose by being pushed inward
+        placed = []
+        ordered = sorted(
+            nets.items(),
+            key=lambda kv: -(max(r.y2 for r in kv[1][1]) - min(r.y1 for r in kv[1][1])))
+        for net, (terminal_name, rects) in ordered:
             if len(rects) < required_rects:
                 continue
-            route_rect = self._vertical_parallel_rect(layer, rects)
+            #- every pin of this terminal that is NOT on this net. A rail
+            #- down the column crosses whatever shares the column, and on
+            #- this library the pins of one terminal all sit at the same
+            #- x, so a foreign pin inside the rail's span cannot be
+            #- stepped around -- it can only be refused. A column with
+            #- two nets on one terminal is not a mirror and has to be
+            #- routed a layer up
+            foreign = [r for other, (_, rs) in nets.items() if other != net
+                       for r in rs]
+            route_rect = None
+            for step in range(0, 16):
+                cand = self._vertical_parallel_rect(layer, rects, align=align, step=step)
+                if cand is None:
+                    break
+                if any(self._railsClash(cand, other) for other in placed):
+                    continue
+                if any(self._railsClash(cand, other) for other in foreign):
+                    break
+                route_rect = cand
+                break
             if route_rect is None:
+                self.log.info(
+                    f"routeMirror: no {align} rail for {net} in {self.name}, "
+                    f"the column carries other nets on {terminal_name}")
                 continue
+            placed.append(route_rect)
             route_rect.net = net
             bundle.addRouteRect(route_rect)
 

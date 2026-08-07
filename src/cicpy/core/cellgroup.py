@@ -790,6 +790,54 @@ class StackGroup(CellGroup):
                     out.append(rect.getCopy())
         return out
 
+    def _diodeStrapRects(self, d, g, layer):
+        """Metal joining two pin rectangles of one device, on one layer.
+
+        Not a route. A route aligns to pin edges and reasons about
+        tracks, which is the right thing when the wire has somewhere to
+        go; a diode tie has nowhere to go. It has to land *on* the two
+        rectangles and nothing more, so it is drawn as one or two blocks
+        that overlap them. Landing anywhere inside the pin counts.
+        """
+        w = Rules.getInstance().get(layer, "width")
+
+        ox = min(d.x2, g.x2) - max(d.x1, g.x1)
+        oy = min(d.y2, g.y2) - max(d.y1, g.y1)
+        if ox > 0 and oy > 0:
+            #- already touching, the library tied them itself
+            return []
+
+        def widen(a, b):
+            if b - a >= w:
+                return a, b
+            c = (a + b) // 2
+            return c - w // 2, c - w // 2 + w
+
+        if ox > 0:
+            x1, x2 = widen(max(d.x1, g.x1), min(d.x2, g.x2))
+            y1, y2 = min(d.y1, g.y1), max(d.y2, g.y2)
+            return [Rect(layer, x1, y1, x2 - x1, y2 - y1)]
+        if oy > 0:
+            y1, y2 = widen(max(d.y1, g.y1), min(d.y2, g.y2))
+            x1, x2 = min(d.x1, g.x1), max(d.x2, g.x2)
+            return [Rect(layer, x1, y1, x2 - x1, y2 - y1)]
+
+        #- diagonal, which is where REYATR puts them: G is a tab above
+        #- and to one side of the wide D bar. A block in the gate's own
+        #- column reaching down into the drain's band, and a short bar
+        #- along that band back into the drain
+        gx1, gx2 = widen(g.x1, g.x2)
+        dy1, dy2 = widen(d.y1, d.y2)
+        vy1, vy2 = min(dy1, g.y1), max(dy2, g.y2)
+        if gx1 >= d.x2:
+            hx1, hx2 = max(d.x1, d.x2 - w), gx2
+        else:
+            hx1, hx2 = gx1, min(d.x2, d.x1 + w)
+        return [
+            Rect(layer, hx1, dy1, hx2 - hx1, dy2 - dy1),
+            Rect(layer, gx1, vy1, gx2 - gx1, vy2 - vy1),
+        ]
+
     def _edge_port_rect(self, layer, route_rect, edge, port_height):
         if route_rect is None:
             return None
@@ -867,7 +915,7 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances="", routeTypes=("-", "-|-", "--|-")):
+    def routeDiodeConnected(self, layer="M1", drain="D", gate="G", excludeInstances=""):
         """Tie drain to gate on every diode-connected device in the stack.
 
         A diode tie is the shortest wire in a layout: two pins of one
@@ -875,6 +923,11 @@ class StackGroup(CellGroup):
         footprint. It belongs on the pin layer. Spending a routing layer
         on it costs a via pair and, worse, a track through the column
         that a net with somewhere to go could have used.
+
+        It is drawn as metal, not as a route. A route aligns to pin
+        edges; a tie only has to land on the two rectangles, and asking
+        for an edge alignment it does not need is what pushed the wire
+        outside the device and moved the cell origin with it.
 
         The pin rectangles come from the node graph, not from the
         ``instance:terminal`` path grammar. On a cell built from a
@@ -885,10 +938,11 @@ class StackGroup(CellGroup):
         device it was asked about. The graph keeps the terminal name,
         so it can still tell drain from gate.
 
-        Routes are tracked on the stack as ``self.diode_routes`` and
-        parented under it so JSON and bounding box walks see them.
+        The metal is tracked on the stack as ``self.diode_routes`` and
+        parented under it so JSON and bounding box walks see it.
         """
-        from .route import Route
+        bundle = RouteBundle(self.layout, f"{self.name}_diode",
+                             self._route_instances_excluding(excludeInstances="^xfill_"))
         for inst in self._route_instances():
             instance_name = getattr(inst, "instanceName", "")
             if not instance_name:
@@ -911,34 +965,14 @@ class StackGroup(CellGroup):
                     f"geometry for {drain if not start else gate}")
                 continue
 
-            #- A straight run only works where the two pins share a band.
-            #- REYATR puts G above D by one pin height and out to the
-            #- right, so the tie has to turn a corner; a library that
-            #- lines them up gets the straight one, which is shorter and
-            #- has no jog. Try each in turn rather than making the caller
-            #- know which library they are on
-            r = None
-            for rt in routeTypes:
-                try:
-                    r = Route(drain_net, layer, start, stop, "", rt)
-                except Exception:
-                    r = None
-                    continue
-                self.layout._annotateRoute(r, "routeDiodeConnected", {
-                    "layer": layer,
-                    "net": drain_net,
-                    "route": f"{instance_name}:{drain}{rt}{instance_name}:{gate}",
-                    "options": "",
-                })
-                self.layout.add(r)
-                break
-            if r is None:
-                self.log.error(
-                    f"routeDiodeConnected: no {layer} tie for {instance_name} "
-                    f"({drain}-{gate} on {drain_net}), tried {','.join(routeTypes)}")
-                continue
-            self.direct_routes.append(r)
-            self.diode_routes.append(r)
+            rects = self._diodeStrapRects(start[0], stop[0], layer)
+            for rect in rects:
+                rect.net = drain_net
+                bundle.addRouteRect(rect)
+                self.diode_routes.append(rect)
+        if bundle.route_rects:
+            self.route_bundles.append(bundle)
+            self.add(bundle)
         self.updateBoundingRect()
         return self
 

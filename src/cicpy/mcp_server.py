@@ -472,6 +472,140 @@ def tracks(cicfile: str, techfile: str, cell: str, layer: str = "",
     return out.strip() or "(no output)"
 
 
+#- What each route option means. The names are checked against the
+#- parser at call time, so this cannot quietly drift from the code: an
+#- option the parser gained and this table has not is reported as
+#- undocumented rather than hidden.
+ROUTE_OPTIONS = {
+    "placement": {
+        "track<n>": "Which track the trunk takes, counted from this "
+                    "net's OWN pins. Relative, so two nets in one column "
+                    "get the same place at the same number and neither "
+                    "can tell. Use a named channel instead when they clash.",
+        "branchtrack<n>": "Same idea for the horizontal branch. Collapses "
+                          "several branches onto one bar, which is what a "
+                          "diode connection wants.",
+        "verticaltrack<n>": "track<n> for orthogonal routes, trunk only.",
+        "horizontaltrack<n>": "branchtrack<n> for orthogonal routes, bar only.",
+        "hchannel=NAME,htrack=<n>": "Put the horizontal bar on track n of "
+                                    "a channel registered by addRoutingChannel. "
+                                    "Absolute in effect, portable in form: the "
+                                    "channel's coordinates come from the "
+                                    "placement, so a resize or another "
+                                    "technology still works.",
+        "vchannel=NAME,vtrack=<n>": "The same for the trunk. Both may appear "
+                                    "in one option string.",
+        "left / right / center / balanced": "Which side of its pins the trunk "
+                                            "goes. Two nets whose pins share "
+                                            "rows need opposite sides or the "
+                                            "outer one crosses the inner.",
+        "bandy<n> / trunkx<n>": "Raw coordinates. The resolved form of "
+                                "hchannel/vchannel. Never write these in a "
+                                "design, they survive neither a resize nor a "
+                                "change of technology.",
+    },
+    "attachment": {
+        "onTopLeft / onTopRight": "Which end of the access geometry the trunk "
+                                  "anchors to, left or right.",
+        "onTopTop / onTopBottom": "The same vertically.",
+        "onTopL / onTopR / onTopT / onTopB": "Older spellings of the above.",
+    },
+    "shape": {
+        "straight": "No jog, for -|- which has no alignment of its own.",
+        "strap": "A power strap rather than a signal route.",
+        "leftdownleftup / leftupleftdown": "Which way the L turns.",
+        "vertical": "Force the vertical form of a strap.",
+        "novert": "Suppress the vertical segment.",
+        "antenna": "Add the antenna diode hop, jumping a layer up and back.",
+    },
+    "offsets": {
+        "offsetlow / offsethigh": "Shift the route half a wire, to clear the "
+                                  "neighbouring track.",
+        "offsetlowend / offsethighend": "The same at the far end only.",
+        "startoffsetcutlow / startoffsetcuthigh": "Move the start cut, and the "
+                                                  "rect it lands on, half a cut.",
+        "endoffsetcutlow / endoffsetcuthigh": "The same at the end.",
+    },
+    "cuts": {
+        "nostartcut / noendcut": "Do not place the cut at that end. Use when "
+                                 "the pin is already on the route's layer.",
+        "2cuts / 2vcuts": "Cut count, for current or for reliability.",
+        "cutalignright": "Align cuts to the right edge instead of the left.",
+        "fillhcut / fillvcut": "Fill the whole access with cuts.",
+    },
+    "avoidance": {
+        "avoidblocks": "Route around blockages instead of through them.",
+        "avoidkeepouts / blockkeepouts": "Respect keepout regions.",
+        "avoidboundaries / blockboundaries": "Respect cell boundaries.",
+        "keepout": "Mark this route's own area as a keepout for later routes.",
+    },
+    "trim": {
+        "trimstartleft / trimstartright": "Cut the trunk back at the start.",
+        "trimendleft / trimendright": "The same at the end. Use to stop a bar "
+                                      "before it reaches another net's trunk.",
+    },
+    "misc": {
+        "routeWidth=<rule>": "Take the wire width from another rule, e.g. a "
+                             "capacitor's own width rather than the layer minimum.",
+        "nolabel": "Do not place the net label.",
+        "noSpace": "Do not add the spacing margin.",
+    },
+}
+
+
+@mcp.tool()
+def route_options(name: str = "") -> str:
+    """What each routing option means, and which ones lie to you.
+
+    Pass a name or a fragment to get just that one. With no argument,
+    the whole table grouped by what the option does.
+
+    Read this before guessing at an option string. The important
+    distinction it draws is relative versus placed: `track<n>` is an
+    offset from the net's own pins, so it cannot separate two nets that
+    share a column, while `hchannel`/`vchannel` name a gap the placement
+    registered and can. Use `tracks` to find out which channel track is
+    free before choosing.
+
+    Args:
+        name: An option or fragment, e.g. "track" or "offsetlow".
+    """
+    import cicpy.core.route as _route
+    parsed = set()
+    src = open(_route.__file__).read()
+    for m in re.finditer(r'_option_int\(\s*(?:self\.)?options\s*,\s*"([a-zA-Z]+)"', src):
+        parsed.add(m.group(1))
+    for m in re.finditer(r're\.search\(\s*r?"([^"]+)"\s*,\s*(?:self\.)?options', src):
+        for w in re.findall(r"[a-zA-Z][a-zA-Z0-9]+", m.group(1)):
+            if w not in ("s", "d", "w"):
+                parsed.add(w)
+
+    out = []
+    documented = set()
+    for group, entries in ROUTE_OPTIONS.items():
+        rows = []
+        for key, meaning in entries.items():
+            for part in re.findall(r"[a-zA-Z][a-zA-Z0-9]*", key):
+                documented.add(part)
+            if name and name.lower() not in key.lower() and \
+                    name.lower() not in meaning.lower():
+                continue
+            rows.append(f"  {key}\n      {meaning}")
+        if rows:
+            out.append(group + ":")
+            out.extend(rows)
+
+    if not name:
+        missing = sorted(o for o in parsed if o not in documented)
+        if missing:
+            out.append("")
+            out.append("parsed by route.py but not described above: "
+                       + ", ".join(missing))
+    if not out:
+        return f"no route option matching {name!r}"
+    return "\n".join(out)
+
+
 def main():
     mcp.run()
 

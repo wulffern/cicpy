@@ -1458,10 +1458,20 @@ class LayoutCell(Cell):
             #- via stack, and a centred strap then lands a fraction of a
             #- micron from that stack's pad on the same layer. Pushing the
             #- strap to the far edge of its own pin buys that clearance
-            #- without moving anything
+            #- without moving anything.
+            #-
+            #- None of that applies when the strap is on the pin's own
+            #- layer. There is no via to clear, and the pin already fills
+            #- its footprint on that layer, so necking down buys no room
+            #- for anyone and only adds resistance and a notch where the
+            #- narrow strap meets the wide pin. Same layer, then, the
+            #- strap matches the port
+            samelayer = ct is None
             if vertical:
-                w = min(width, r.width())
-                if align == "left":
+                w = r.width() if samelayer else min(width, r.width())
+                if samelayer:
+                    x1 = int(r.x1)
+                elif align == "left":
                     x1 = int(r.x1)
                 elif align == "right":
                     x1 = int(r.x2 - w)
@@ -1480,8 +1490,10 @@ class LayoutCell(Cell):
                     y1, y2 = int(rrect.y1), cy
                 strap = Rect(strapLayer, x1, y1, int(w), int(y2 - y1))
             else:
-                h = min(width, r.height())
-                if align == "left":
+                h = r.height() if samelayer else min(width, r.height())
+                if samelayer:
+                    y1 = int(r.y1)
+                elif align == "left":
                     y1 = int(r.y1)
                 elif align == "right":
                     y1 = int(r.y2 - h)

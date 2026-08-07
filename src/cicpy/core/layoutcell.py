@@ -1954,6 +1954,97 @@ class LayoutCell(Cell):
         r.route()
         return r
 
+    def addRoutingChannel(self, name, lo, hi, horizontal=True):
+        """Name the gap the placement opened, so routes can aim at it.
+
+        A route may not carry coordinates: the same pycell has to hold
+        for another technology and for a resize, where every number
+        moves. What does not move is the *structure* -- there is a
+        channel between these two rows, and a net crosses on the third
+        track of it. So the placement registers the gap it just made,
+        in whatever units that technology produced, and routes refer to
+        it by name and index.
+
+        The registration itself carries the only numbers, and they come
+        from the placement that just ran, so they are whatever this
+        technology produced.
+
+        Call from afterPlace with the group extents::
+
+            channel_lo = nmos.y2
+            channel_hi = pmos.y1
+            layout.addRoutingChannel("mid", channel_lo, channel_hi)
+
+        and route with ``"channel=mid,ctrack=3"``.
+        """
+        if not hasattr(self, "_routing_channels"):
+            self._routing_channels = {}
+        self._routing_channels[name] = (lo, hi, horizontal)
+        self.log.info(
+            f"addRoutingChannel({name}, {lo}, {hi}, "
+            f"{'horizontal' if horizontal else 'vertical'})")
+        return self
+
+    def routingChannel(self, name):
+        return getattr(self, "_routing_channels", {}).get(name)
+
+    def channelTrackCoord(self, name, index, layer=None):
+        """The coordinate of track `index` inside a named channel.
+
+        Tracks are counted from the low edge at the ROUTE pitch for the
+        channel's direction, so the same index means the same relative
+        position whatever the technology makes the pitch.
+        """
+        ch = self.routingChannel(name)
+        if ch is None:
+            self.log.error(f"no routing channel named {name}")
+            return None
+        lo, hi, horizontal = ch
+        rules = Rules.getInstance()
+        pitch = rules.get("ROUTE", "verticalgrid" if horizontal else "horizontalgrid")
+        n = max(1, int((hi - lo) // pitch))
+        if index >= n:
+            self.log.warning(
+                f"channel {name} has {n} tracks, asked for {index}")
+        return lo + (index + 0.5) * pitch
+
+    def _resolveChannelOptions(self, options):
+        """Turn channel names into this run's coordinates.
+
+        A route names structure, not numbers::
+
+            "hchannel=mid,htrack=5"     the bar, in the gap between rows
+            "vchannel=bias,vtrack=2"    the trunk, inside a column
+
+        and both may appear together. The numbers are computed here,
+        where the placement is known, so the pycell survives a resize
+        and a change of technology. ``channel=``/``ctrack=`` is accepted
+        as a shorthand when the channel's own direction says which one
+        is meant.
+        """
+        if not options:
+            return options
+        import re as _re
+        for prefix, tname in (("hchannel", "htrack"),
+                              ("vchannel", "vtrack"),
+                              ("channel", "ctrack")):
+            m = _re.search(prefix + r"=([A-Za-z0-9_]+)", options)
+            if not m:
+                continue
+            name = m.group(1)
+            t = _re.search(tname + r"=(-?\d+)", options)
+            index = int(t.group(1)) if t else 0
+            options = _re.sub(prefix + r"=[A-Za-z0-9_]+,?", "", options)
+            options = _re.sub(tname + r"=-?\d+,?", "", options)
+            coord = self.channelTrackCoord(name, index)
+            if coord is None:
+                continue
+            ch = self.routingChannel(name)
+            key = "bandy" if ch[2] else "trunkx"
+            options = options.strip(",")
+            options = (options + "," if options else "") + f"{key}{int(coord)}"
+        return options.strip(",")
+
     def addTrackRoute(self, net, layers=None, viaCost=None, cuts=1):
         """Search for a path for one net instead of being told where it goes.
 
@@ -2035,6 +2126,7 @@ class LayoutCell(Cell):
         return ro
 
     def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, includeGroups=""):
+        options = self._resolveChannelOptions(options)
         self.log.info(
             f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, includeGroups={includeGroups})"
         )

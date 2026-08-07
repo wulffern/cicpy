@@ -817,6 +817,10 @@ class OrthogonalLayerRoute(Route):
         self.track = 0
         self.hasBranchTrack = False
         self.branchTrack = 0
+        self.hasAbsoluteBand = False
+        self.absoluteBand = 0
+        self.hasAbsoluteTrunk = False
+        self.absoluteTrunk = 0
         self.trackDirection = +1
         self.anchorMode = "bbox"
         if re.search(r"(^|[ ,])left([ ,]|$)", self.options):
@@ -846,6 +850,18 @@ class OrthogonalLayerRoute(Route):
         if branch_track is not None:
             self.hasBranchTrack = True
             self.branchTrack = branch_track
+        #- bandy and trunkx are absolute coordinates and exist only as
+        #- the resolved form of hchannel/vchannel, which is what a
+        #- pycell writes. Do not put them in a design: a coordinate
+        #- survives neither a resize nor another technology
+        band = _option_int(self.options, "bandy")
+        if band is not None:
+            self.hasAbsoluteBand = True
+            self.absoluteBand = band
+        trunk = _option_int(self.options, "trunkx")
+        if trunk is not None:
+            self.hasAbsoluteTrunk = True
+            self.absoluteTrunk = trunk
         m = re.search(r"routeWidth=([^,\s+,$]+)", self.options)
         self.routeWidthRule = m.group(1) if m else "width"
 
@@ -1013,6 +1029,14 @@ class OrthogonalLayerRoute(Route):
     def _branch_band_y(self):
         if not self.accessRects:
             return 0
+        #- An absolute band is a y in the cell's own frame, not an
+        #- offset from this net's pins. Two nets can then be told to use
+        #- different corridors and actually get them; with the relative
+        #- form they compute the same base from their own pins and land
+        #- on each other at the same track number. Use `cicpy tracks` to
+        #- find a free one
+        if self.hasAbsoluteBand:
+            return self.absoluteBand
         if not self.hasBranchTrack:
             return None
         rules = Rules.getInstance()
@@ -1064,6 +1088,9 @@ class OrthogonalLayerRoute(Route):
             trunk_x = 0.5 * (x_left + x_right)
             if self.hasTrack:
                 trunk_x += self.track * hgrid
+        #- trunkx wins over every relative form, same reasoning as bandy
+        if self.hasAbsoluteTrunk:
+            trunk_x = self.absoluteTrunk
         trunk = self._trunk_rect(trunk_x)
 
         access_branches = []

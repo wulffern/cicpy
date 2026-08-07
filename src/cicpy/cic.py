@@ -497,6 +497,32 @@ def _report_connectivity(lcell):
 
 
 
+@cli.command("stackorder")
+@click.pass_context
+@click.argument("spicefile")
+@click.argument("cell")
+@click.option("--terminal",default="D",help="Which terminal the rail would sit on")
+@click.option("--group",default="",help="Only this column, e.g. n_load")
+@click.option("--verbose",is_flag=True,help="List the instances too")
+def stackorder(ctx,spicefile,cell,terminal,group,verbose):
+    """Which columns are interleaved, and what reordering them would buy.
+
+    A rail down a column crosses every pin it passes, so a net whose
+    pins are interleaved with another's cannot have one. That is the
+    device order, which placement decides. Ask before placing rather
+    than reading it back out of a short.
+    """
+    import cicspi
+    from cicpy.core import stackorder as so
+    sp = cicspi.SpiceParser()
+    sp.parseFile(spicefile)
+    if(cell not in sp):
+        log.error(f"Could not find {cell} in {spicefile}")
+        raise SystemExit(2)
+    rows = so.analyse(sp[cell], terminal, [group] if group else None)
+    click.echo(so.report(rows, verbose))
+
+
 @cli.command("checkroutes")
 @click.pass_context
 @click.argument("cicfile")

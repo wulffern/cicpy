@@ -397,6 +397,41 @@ def connectivity(workdir: str, library: str, cell: str) -> str:
 
 
 @mcp.tool()
+def stackorder(spicefile: str, cell: str, terminal: str = "D",
+               group: str = "", verbose: bool = False) -> str:
+    """Which columns are interleaved, and what reordering them would buy.
+
+    A rail down a column of parallel devices crosses every pin it
+    passes, so a net whose pins on that terminal are interleaved with
+    another net's cannot have one. That is decided by the order the
+    devices sit in -- placement's business, not routing's -- and it is
+    cheap to fix and expensive to discover: interleaving reads back as a
+    short or an open with no hint of the cause, one regeneration per
+    guess.
+
+    This reads the netlist, so it can be asked before the first
+    placement. Act on it with `orderByTerminalNet(<terminal>)` on the
+    stack in afterPlace, before dummy fill and taps. Not on a series
+    chain, where the order is what makes each link a neighbour of the
+    next, and not on a matched pair, where the order is the matching.
+
+    Args:
+        spicefile: The netlist, e.g. work/xsch/<CELL>.spice.
+        cell: The subcircuit to analyse.
+        terminal: Which terminal a rail would sit on: D, G, S or B.
+        group: Only this column, by netlist group name, e.g. "xnd".
+        verbose: List the instances in each column too.
+    """
+    cmd = ["cicpy", "stackorder", spicefile, cell, "--terminal", terminal]
+    if group:
+        cmd += ["--group", group]
+    if verbose:
+        cmd += ["--verbose"]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.stdout.strip() or (proc.stderr.strip() or "no output")
+
+
+@mcp.tool()
 def checkroutes(cicfile: str, techfile: str, cell: str, includes: list[str] | None = None) -> str:
     """Check a cell in an existing .cic for shorts and opens.
 

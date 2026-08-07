@@ -1078,6 +1078,50 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
+    def orderByTerminalNet(self, terminal="D"):
+        """Reorder the column so each net's pins on ``terminal`` are adjacent.
+
+        A rail down a column crosses every pin it passes, so a net whose
+        pins are interleaved with another's cannot have one. Placement
+        decides that, not routing: ``n_load_a`` came out
+        VD1 VD1 VD1 VD1 **VBP** VD1, and one device moved to the end of
+        the column is the difference between a rail and a trip up to M2
+        and back for five pins.
+
+        Grouping is stable, so a net keeps the internal order the
+        placement gave it and the nets keep the order of their first
+        appearance. Devices with no net on that terminal go last.
+
+        This buys one terminal, not all of them, and the caller chooses
+        which: ordering by drain scatters the gates. Nothing electrical
+        rides on it — the netlist is what it is and reordering a column
+        cannot change connectivity — but two kinds of stack still must
+        not be touched: a series chain, where the order is what makes
+        each link a neighbour, and a matched pair, where it is the
+        matching. Neither is detectable from here, so this is opt in and
+        calling it overrides ``preserve_order``: the call *is* the
+        statement of intent.
+        """
+        order, seen = [], {}
+        for inst in self.instances:
+            net = self._terminal_net(inst, terminal) or "￿"
+            seen.setdefault(net, []).append(inst)
+        for net in seen:
+            order.extend(seen[net])
+        if [id(i) for i in order] != [id(i) for i in self.instances]:
+            self.log.info(
+                f"orderByTerminalNet: {self.name} regrouped on {terminal} into "
+                + ", ".join(f"{n if n != chr(0xffff) else '(none)'}x{len(v)}"
+                            for n, v in seen.items()))
+        self.instances = order
+        #- the packing has to be redone from the new order, and sort()
+        #- would undo it, so hold the order while stack() runs
+        was = self.preserve_order
+        self.preserve_order = True
+        self.stack()
+        self.preserve_order = was
+        return self
+
     def sort(self):
         if self.preserve_order:
             self.updateBoundingRect()

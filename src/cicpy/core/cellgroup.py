@@ -1101,7 +1101,9 @@ class StackGroup(CellGroup):
         return self.abutTop(other, ygap)
 
     def _tap_name(self, cell_name, suffix):
-        return re.sub(r"C\d+F\d+$", suffix, cell_name)
+        #- the trailing D of a diode connected variant is not part of
+        #- the width class, and the tap does not have one
+        return re.sub(r"C\d+F\d+D?$", suffix, cell_name)
 
     def _resolve_tap_cell(self, cell_name, suffix):
         """Return the name of a tap cell that actually exists, or None.

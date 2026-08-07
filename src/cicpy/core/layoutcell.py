@@ -72,6 +72,40 @@ class LayoutCell(Cell):
 
 
 
+    #- Terminal order of a four terminal device in the netlist: D G S B.
+    DEVICE_TERMINALS = ("D", "G", "S", "B")
+
+    def _diodeVariant(self, cktInst):
+        """The diode-connected twin of this device's cell, if it applies.
+
+        A library can carry a variant that ties drain to gate inside the
+        cell, named by suffixing ``D``. In REYATR that tie is a single
+        column of M1 the pattern was already one column short of: no
+        via, no routing layer, nothing outside the abutment box. When
+        the netlist shorts a device's gate to its own drain and such a
+        cell exists, it is strictly better than anything drawn at
+        assembly time, so take it.
+
+        Returns None when the device is not diode connected, when no
+        such cell exists, or when the netlist does not give four
+        terminals in the expected order — this is a substitution, and a
+        substitution that is not certain should not happen.
+        """
+        name = getattr(cktInst, "subcktName", "")
+        if not name or name.endswith("D"):
+            return None
+        nodes = getattr(cktInst, "nodes", None) or getattr(cktInst, "pins", None)
+        if not nodes or len(nodes) != len(self.DEVICE_TERMINALS):
+            return None
+        if nodes[0] != nodes[1]:
+            return None
+        candidate = name + "D"
+        if self.parent.getLayoutCell(candidate) is None:
+            return None
+        self.log.info(
+            f"{cktInst.name}: {nodes[0]} on both D and G, using {candidate}")
+        return candidate
+
     def addInstance(self,cktInst,x:int,y:int):
         self.log.info(f"addInstance(cktInst={cktInst.name if cktInst else None}, cellName={cktInst.subcktName} x={x}, y={y})")
 
@@ -79,7 +113,8 @@ class LayoutCell(Cell):
             return None
 
         i = Instance()
-        layoutCell = self.parent.getLayoutCell(cktInst.subcktName)
+        subcktName = self._diodeVariant(cktInst) or cktInst.subcktName
+        layoutCell = self.parent.getLayoutCell(subcktName)
         if layoutCell is None and hasattr(self.parent, "generatePrimitiveLayout"):
             layoutCell = self.parent.generatePrimitiveLayout(cktInst.subcktName, cktInst)
         if layoutCell is None:

@@ -534,6 +534,54 @@ def checkroutes(ctx,cicfile,techfile,cell,includes,layer):
     log.info(f"{cell}: no shorts, no opens")
 
 
+@cli.command("tracks")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("cell")
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+@click.option("--layer",default="",help="Only this layer")
+@click.option("--band",default="",help="Only tracks whose coordinate is in LO:HI")
+@click.option("--free",default="",help="Report tracks free over the span LO:HI")
+@click.option("--verbose",is_flag=True,help="List free tracks too")
+def tracks(ctx,cicfile,techfile,cell,includes,layer,band,free,verbose):
+    """Report which routing tracks are occupied, and by what.
+
+    A route is placed with a track number that is an offset from the
+    net's own pins, so two nets in the same column land on each other at
+    the same number and neither can tell. Finding that out by drawing it
+    and reading the short report costs a regeneration per guess. This
+    answers the question directly: which corridor is free, and where.
+    """
+    cic.Rules(techfile)
+    design = load_design(cicfile, includes)
+    if(cell not in design.cells):
+        log.error(f"Could not find cell {cell} in {cicfile}")
+        raise SystemExit(2)
+
+    from cicpy.core.trackmap import TrackMap
+    tm = TrackMap(design.cells[cell]).build()
+
+    b = None
+    if(band):
+        lo,hi = band.split(":")
+        b = (float(lo), float(hi))
+
+    if(free):
+        lo,hi = free.split(":")
+        for lname in sorted(tm.tracks):
+            if(layer and lname != layer):
+                continue
+            idx = tm.free_between(lname, float(lo), float(hi),
+                                  b[0] if b else None, b[1] if b else None)
+            coords = [int(tm.tracks[lname][i].coord) for i in idx]
+            print(f"{lname}: {len(idx)} tracks free over {lo}..{hi}")
+            print("   " + ", ".join(f"t{i}@{c}" for i,c in zip(idx,coords)))
+        return
+
+    print(tm.report(layer=layer or None, band=b, verbose=verbose))
+
+
 @cli.command("gui")
 @click.pass_context
 @click.argument("cicfile")

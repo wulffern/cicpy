@@ -433,6 +433,45 @@ def checkroutes(cicfile: str, techfile: str, cell: str, includes: list[str] | No
     return "\n".join(out)
 
 
+@mcp.tool()
+def tracks(cicfile: str, techfile: str, cell: str, layer: str = "",
+           band: str = "", free: str = "",
+           includes: list[str] | None = None) -> str:
+    """Which routing tracks are occupied, and by what.
+
+    Read this *before* choosing a track number. A route is placed with a
+    track that is an offset from the net's own pins, so two nets in the
+    same column land on each other at the same number and neither can
+    tell. Finding that out by drawing it and reading the short report
+    costs a full regeneration per guess.
+
+    Args:
+        cicfile: Path to the .cic holding the layout.
+        techfile: Path to the technology file.
+        cell: The cell to inspect.
+        layer: Restrict to one layer, e.g. "M3".
+        band: "LO:HI", only tracks whose coordinate is in that range.
+              A routing channel is a band.
+        free: "LO:HI", report the tracks free *over that span* rather
+              than the ones wholly empty. This is usually the real
+              question: a track carrying a short wire at one end is
+              still usable at the other.
+        includes: Other .cic files the design references.
+    """
+    cmd = ["cicpy", "tracks", cicfile, techfile, cell]
+    if layer:
+        cmd += ["--layer", layer]
+    if band:
+        cmd += ["--band", band]
+    if free:
+        cmd += ["--free", free]
+    for inc in (includes or []):
+        cmd += ["--I", inc]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
+    return out.strip() or "(no output)"
+
+
 def main():
     mcp.run()
 

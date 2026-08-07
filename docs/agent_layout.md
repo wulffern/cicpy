@@ -232,14 +232,66 @@ nets and the python callsite that drew the offending route. For opens and
 split nets run `sch2mag --check-connectivity`, it is slower and not the
 default loop.
 
+## Look before you route
+
+A track number is an *offset from the net's own pins*:
+
+    trunk_x = anchor_right + (track + 1) * vspace + track * vwidth
+    base_y  = min(rect.centerY() for rect in self.accessRects)
+
+so two nets whose pins share a column compute nearly the same anchor and
+land on each other at the same track number, and neither can tell. The
+only way to discover that from the route language is to draw it and read
+the short report, which costs a full regeneration per guess. Do not
+route that way. Ask first:
+
+    cicpy tracks <cic> <tech> <cell> --layer M3
+    cicpy tracks <cic> <tech> <cell> --layer M3 --band 279000:363000
+    cicpy tracks <cic> <tech> <cell> --layer M4 --free 217000:609000
+
+The MCP tool `tracks` is the same thing. `--free LO:HI` is usually the
+question you actually have: a track carrying a short wire at one end is
+still usable at the other, so whole-empty tracks understate the budget.
+
+This is worth doing before the first route, not after the first short.
+LELOTEMP_OTAR spent an evening at six opens with every horizontal bar
+fighting inside the device rows, and one query showed why: the 84 um
+channel the placement had opened between the rows held 21 M3 tracks and
+all 21 were free. Nothing ever sent a bar there, because `base_y` comes
+from the net's own pins.
+
+## Aim at a channel, never at a coordinate
+
+Register the gaps the placement makes, then route to them by name and
+index. In `afterPlace`:
+
+    layout.addRoutingChannel("mid", nmos.y2, pmos.y1)
+    layout.addRoutingChannel("bias", p_bias.x1, p_bias.x2, horizontal=False)
+
+and in `beforeRoute`:
+
+    layout.addOrthogonalConnectivityRoute(
+        "M4", "M3", "^VO$", "hchannel=mid,htrack=5,vchannel=bias,vtrack=8",
+        1, "", "")
+
+`hchannel`/`htrack` place the horizontal bar, `vchannel`/`vtrack` the
+trunk, and both may appear together. The registration holds the only
+numbers and they come from the placement that just ran, so the cell
+still moves to another technology and survives a resize.
+
+Never write `bandy`/`trunkx` in a design. They exist as the resolved
+form of the above and a coordinate in a pycell outlives nothing.
+
 ## Router facts that cost a day to learn
 
-- **One net per row channel.** The router lays a horizontal bar per
-  device row and puts every bar of a channel at the same height, the
-  track option does not separate them. Two nets whose bars share a row
-  channel with overlapping x short. Keep nets column local (vertical
-  bundle rails via routeDiodeConnected/routeMirror) and make cross links
-  span as little x as possible.
+- **One net per row channel, unless you place them.** The router lays a
+  horizontal bar per device row and puts every bar of a channel at the
+  same height; the plain `track` option does not separate them, because
+  it is relative to each net's own pins. Two nets whose bars share a row
+  channel with overlapping x short. Either keep nets column local
+  (vertical bundle rails via routeDiodeConnected/routeMirror), or give
+  the crossing ones a named channel track each, which is what the
+  channel is for.
 - **routeMirror rails do not stagger.** A column with several nets on
   the same terminal puts all their rails on the same x. Until the router
   staggers rails, such columns cannot be bundle routed.
@@ -249,6 +301,16 @@ default loop.
   the connectivity check does.
 
 ## Verification beyond DRC
+
+`cicpy checkroutes <cic> <tech> <cell>` reports shorts and opens from a
+.cic that is already on disk, in about a second and without touching a
+file. Use it after every routing change. The MCP `connectivity` tool
+re-runs sch2mag, which *replaces* the layout it is asked about: right
+for an sch2mag design, wrong for a ciccreator library, and it will
+overwrite the .mag you were checking.
+
+A tap-less leaf cell reports its supply rails split. That is the library
+design, not a defect.
 
 - `make gds cdl lvs` is the full check; LVS needs the gds regenerated
   first or the extraction runs against a stale state and the result is

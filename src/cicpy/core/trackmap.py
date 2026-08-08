@@ -30,6 +30,7 @@ import logging
 from collections import defaultdict
 
 from .rules import Rules
+from .layer import Layer
 
 
 class Track:
@@ -75,16 +76,9 @@ class Track:
     #- pins. Closing it properly means attributing instance geometry,
     #- which is the same job as step 2b was for pins.
     UNATTRIBUTED = ("", "?", None)
-    #- Layers where unattributed metal must be tolerated. Only the pin
-    #- layer: a port's own metal is unattributable and unavoidable, and
-    #- blocking on it blocks a via off every pin by the pin itself.
-    #-
-    #- ABOVE it, unattributed metal is a device's internal routing and
-    #- absolutely does block. Letting it through on all layers shorted
-    #- VD2 to VS through five device-internal M2 rails -- and it did so
-    #- invisibly, because neither net had any geometry in common: the
-    #- bridge belonged to neither.
-    TOLERATE_UNATTRIBUTED_ON = ("M1",)
+    #- set from the technology by TrackMap; the class default is only
+    #- what a Track built outside one would use
+    TOLERATE_UNATTRIBUTED_ON = ()
 
     def wire_overlaps(self, net, lo, hi):
         """Foreign wire actually inside lo..hi on this track."""
@@ -135,12 +129,14 @@ class TrackMap:
     runs which way is the house convention and can be overridden.
     """
 
-    DEFAULT_DIRECTIONS = {"M2": "v", "M3": "h", "M4": "v", "M5": "h"}
-    #- M1 is not a routing layer here -- it is the pin layer, and the
-    #- house rule reserves it for power. It still has to be in the map
-    #- when pins are being modelled, because that is where every pin
-    #- is: measured on LELOTEMP_OTAR, all 213 of them.
-    PIN_DIRECTIONS = {"M1": "h"}
+    #- Nothing about the stack is written down here. The technology
+    #- knows its own layers, their order and which way each runs; a
+    #- router that hard codes "M1 is the pin layer" or "M3 is
+    #- horizontal" is a sky130 router wearing a general name.
+    #-   ROUTE.pinlayer    which layer carries pins
+    #-   ROUTE.directions  preferred direction per routing layer
+    #-   layer previous/next chain   order and via adjacency
+    #- Only the last of the three was already in the tech file.
 
     def __init__(self, layout, directions=None, extent=None, scope=None,
                  block_pins=False):
@@ -161,14 +157,78 @@ class TrackMap:
         self.scope = scope
         self.rules = Rules.getInstance()
         self.block_pins = block_pins
-        self.directions = dict(directions or self.DEFAULT_DIRECTIONS)
-        if block_pins:
-            for k, v in self.PIN_DIRECTIONS.items():
-                self.directions.setdefault(k, v)
+        self.pin_layer = self._route_str("pinlayer")
+        self.directions = dict(directions or self._tech_directions())
+        if block_pins and self.pin_layer:
+            #- the pin layer joins the map when pins are modelled: it is
+            #- not routed on, but it is where every pin is
+            self.directions.setdefault(self.pin_layer, "h")
         self.hpitch = int(self._rule("ROUTE", "horizontalgrid", 3000))
         self.vpitch = int(self._rule("ROUTE", "verticalgrid", 4000))
         self.extent = extent
         self.tracks = {}
+
+    def _route_raw(self, key, default=None):
+        try:
+            route = self.rules.getValue("rules", "ROUTE")
+        except Exception:
+            return default
+        return route.get(key, default) if isinstance(route, dict) else default
+
+    def _route_str(self, key, default=""):
+        v = self._route_raw(key, default)
+        return v if isinstance(v, str) else default
+
+    def _tech_directions(self):
+        d = self._route_raw("directions")
+        if isinstance(d, dict) and d:
+            return dict(d)
+        self.log.warning(
+            "ROUTE.directions missing from the technology; no layer has a "
+            "preferred direction and nothing can be routed")
+        return {}
+
+    def metal_stack(self):
+        """Metal layers in stack order, from the tech's own chain.
+
+        Follows previous/next (M1 -> VIA1 -> M2 -> ...) rather than
+        sorting names. Sorting happened to work for M1..M5 and would
+        put M10 between M1 and M2 the moment a technology had one.
+        """
+        layers = getattr(self.rules, "layers", None) or {}
+        metals, byname = {}, {}
+        for name in layers:
+            try:
+                l = self.rules.getLayer(name)
+            except Exception:
+                continue
+            byname[name] = l
+            if getattr(l, "material", None) == Layer.metal:
+                metals[name] = l
+        if not metals:
+            return []
+        starts = [n for n, l in metals.items()
+                  if getattr(l, "previous", "") not in metals
+                  and getattr(l, "previous", "") not in
+                  {getattr(m, "previous", "") for m in metals.values()
+                   if False}]
+        #- the bottom metal is the one nothing leads into
+        incoming = set()
+        for n, l in metals.items():
+            via = getattr(l, "next", "")
+            for m, ml in metals.items():
+                if getattr(ml, "previous", "") == via:
+                    incoming.add(m)
+        starts = [n for n in metals if n not in incoming] or [sorted(metals)[0]]
+        order, seen = [], set()
+        cur = starts[0]
+        while cur and cur not in seen:
+            order.append(cur)
+            seen.add(cur)
+            via = getattr(metals[cur], "next", "")
+            cur = next((m for m, ml in metals.items()
+                        if getattr(ml, "previous", "") == via), None)
+        return order
 
     def _rule(self, layer, key, default):
         try:
@@ -194,14 +254,17 @@ class TrackMap:
             y2 = max(r.y2 for r in rects)
         self.extent = (x1, y1, x2, y2)
 
+        tolerate = (self.pin_layer,) if self.pin_layer else ()
         for layer, direction in self.directions.items():
             horizontal = direction == "h"
             pitch = self.vpitch if horizontal else self.hpitch
             lo, hi = (y1, y2) if horizontal else (x1, x2)
             n = max(1, int((hi - lo) // pitch) + 1)
-            self.tracks[layer] = [
-                Track(i, lo + i * pitch, layer, horizontal) for i in range(n)
-            ]
+            self.tracks[layer] = []
+            for i in range(n):
+                t = Track(i, lo + i * pitch, layer, horizontal)
+                t.TOLERATE_UNATTRIBUTED_ON = tolerate
+                self.tracks[layer].append(t)
 
         for r in rects:
             layer = r.layer

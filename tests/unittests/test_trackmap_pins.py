@@ -99,3 +99,62 @@ class TrackMapPins(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(_have_fixture(), "LELOTEMP_OTAR fixture not present")
+class TechDriven(unittest.TestCase):
+    """The router must be a router, not a sky130 router.
+
+    Everything about the stack comes from the technology file. These
+    tests exist because the first version hard coded all of it: M1 was
+    the pin layer, M2/M4 were vertical, the layer order was
+    `sorted(names)`, and a via pad was 8800 because a note said so.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from cicpy.cic import load_design
+        from cicpy.core.rules import Rules
+        Rules(TECH)
+        cls.cell = load_design(CIC, [LIB]).cells["LELOTEMP_OTAR"]
+
+    def _map(self, **kw):
+        from cicpy.core.trackmap import TrackMap
+        return TrackMap(self.cell, **kw)
+
+    def test_pin_layer_comes_from_the_tech(self):
+        self.assertEqual(self._map().pin_layer, "M1")
+
+    def test_directions_come_from_the_tech(self):
+        self.assertEqual(self._map().directions,
+                         {"M2": "v", "M3": "h", "M4": "v", "M5": "h"})
+
+    def test_stack_order_follows_the_layer_chain_not_the_names(self):
+        """sorted() happens to work for M1..M5 and puts M10 between M1
+        and M2 the moment a technology has one."""
+        self.assertEqual(self._map().metal_stack(),
+                         ["M1", "M2", "M3", "M4", "M5"])
+
+    def test_no_layer_names_are_hard_coded_in_the_modules(self):
+        import re, os
+        import cicpy.core.trackmap as tmmod
+        import cicpy.core.mazerouter as mrmod
+        for mod in (tmmod, mrmod):
+            with open(mod.__file__) as fi:
+                src = fi.read()
+            #- strip comments: the reasoning may name layers, the code
+            #- may not
+            code = "\n".join(l for l in src.splitlines()
+                             if not l.strip().startswith("#"))
+            hits = re.findall(r'"(M\d+|VIA\d+)"', code)
+            self.assertEqual(hits, [],
+                             f"{os.path.basename(mod.__file__)} hard codes {hits}")
+
+    def test_via_size_is_asked_for_not_assumed(self):
+        from cicpy.core.mazerouter import MazeRouter
+        r = MazeRouter(self._map(block_pins=True).build(), "VS")
+        stack = r._layers
+        self.assertGreater(len(stack), 1)
+        w, h = r.via_extent(stack[0], stack[1])
+        self.assertGreater(w, 0)
+        self.assertGreater(h, 0)

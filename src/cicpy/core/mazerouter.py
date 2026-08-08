@@ -48,13 +48,13 @@ class MazeRouter:
     #- all in the switch column, where pins are 4000 apart -- it
     #- reported every ladder net blocked, which was its own constant
     #- talking rather than the layout.
-    VIA_PAD_FALLBACK = 4000
-
-    #- M1 is the pin layer here and the house rule reserves it for
-    #- power, so a route may via OFF a pin on it but never run ALONG it.
-    #- Without this the search tries to walk M1 through the pins of
-    #- every net in the column and gets nowhere.
-    PIN_ONLY_LAYERS = ("M1",)
+    #- No layer names and no sizes here. The technology carries them:
+    #-   ROUTE.pinlayer     which layer is pin-only
+    #-   ROUTE.directions   which way each routing layer runs
+    #-   layer previous/next   the stack order and via adjacency
+    #-   <layer> width/space   the legal wire pitch
+    #-   Cut.getInstance       the real via size
+    #- A router that hard codes any of these is a router for one PDK.
 
     def __init__(self, trackmap, net, via_cost=None, log=None):
         self.tm = trackmap
@@ -64,10 +64,14 @@ class MazeRouter:
         #- the detour genuinely is cheaper.
         self._via_size = {}
         self._clearance = {}
-        self.via_cost = (self.via_extent("M2", "M3")[0]
-                         if via_cost is None else via_cost)
         self.log = log or logging.getLogger("MazeRouter")
-        self._layers = sorted(self.tm.directions)
+        #- stack order from the technology's own chain, filtered to the
+        #- layers this map actually has tracks for
+        stack = [l for l in self.tm.metal_stack() if l in self.tm.directions]
+        self._layers = stack or sorted(self.tm.directions)
+        self.pin_only = tuple(l for l in (self.tm.pin_layer,) if l)
+        self.via_cost = (self._default_via_cost()
+                         if via_cost is None else via_cost)
         self._adj = self._layer_adjacency()
         self._pin_index = self._index_foreign_pins()
 
@@ -75,15 +79,22 @@ class MazeRouter:
     #- the grid
     #-----------------------------------------------------------------
 
+    def _default_via_cost(self):
+        """A via costs what it physically occupies, from the technology."""
+        routing = [l for l in self._layers if l not in self.pin_only]
+        if len(routing) >= 2:
+            return self.via_extent(routing[0], routing[1])[0]
+        if len(self._layers) >= 2:
+            return self.via_extent(self._layers[0], self._layers[1])[0]
+        return self.rule(self._layers[0] if self._layers else "", "width")
+
     def _layer_adjacency(self):
         """Which layers a via may connect.
 
-        Neighbours in the routing stack, by name order (M1,M2,...). The
-        stack is what the technology's connect rules say; using name
-        order here keeps the router honest about only stepping one layer
-        at a time, which is what makes the M1..M5 stack expensive rather
-        than free -- and an M1..M5 stack is what failed via3.1 when it
-        was taken in one go.
+        Neighbours in the stack, and the stack comes from the tech
+        file's previous/next chain, not from sorting names -- sorting
+        happened to work for M1..M5 and puts M10 between M1 and M2 the
+        moment a technology has one.
         """
         adj = defaultdict(list)
         for a, b in zip(self._layers, self._layers[1:]):
@@ -137,11 +148,15 @@ class MazeRouter:
     def _coords(self, layer):
         return [t.coord for t in self.tm.tracks.get(layer, [])]
 
-    def rule(self, layer, name, default=3000):
+    def rule(self, layer, name, default=None):
+        """A numeric design rule. Raises rather than inventing a number:
+        a silently defaulted spacing is a short waiting to happen."""
         try:
             from cicpy.core.rules import Rules
             return int(Rules.getInstance().get(layer, name))
         except Exception:
+            if default is None:
+                raise
             return default
 
     def clearance(self, layer):
@@ -203,8 +218,10 @@ class MazeRouter:
                 inst = Cut.getInstance(a_layer, b_layer, 1, 1)
                 self._via_size[key] = (int(inst.width()), int(inst.height()))
             except Exception:
-                self._via_size[key] = (self.VIA_PAD_FALLBACK,
-                                       self.VIA_PAD_FALLBACK)
+                #- no cut between these layers; fall back to the wire
+                #- width, which the technology does define
+                w = self.rule(a_layer, "width")
+                self._via_size[key] = (w, w)
         return self._via_size[key]
 
     def via_is_free(self, x, y, a_layer=None, b_layer=None):
@@ -214,7 +231,10 @@ class MazeRouter:
         where two nets most often collide -- and it is exactly what
         `column_blockers` was built to answer.
         """
-        w, h = self.via_extent(a_layer or "M2", b_layer or "M3")
+        routing = [l for l in self._layers if l not in self.pin_only]
+        d0 = routing[0] if routing else (self._layers[0] if self._layers else "")
+        d1 = routing[1] if len(routing) > 1 else d0
+        w, h = self.via_extent(a_layer or d0, b_layer or d1)
         hw, hh = w // 2, h // 2
         ax1, ax2, ay1, ay2 = x - hw, x + hw, y - hh, y + hh
         for _net, (bx1, bx2, by1, by2) in self._pins_near(ax1, ax2, ay1, ay2):
@@ -340,7 +360,7 @@ class MazeRouter:
         #- steps in x at the horizontal pitch; a vertical one in y at
         #- the vertical pitch.
         step = self.tm.hpitch if horizontal else self.tm.vpitch
-        for delta in () if layer in self.PIN_ONLY_LAYERS else (-step, step):
+        for delta in () if layer in self.pin_only else (-step, step):
             nx, ny = (x + delta, y) if horizontal else (x, y + delta)
             if not self.in_bounds(nx, ny):
                 continue
@@ -393,7 +413,7 @@ class MazeRouter:
     def pin_centre(rect):
         return (int((rect.x1 + rect.x2) / 2), int((rect.y1 + rect.y2) / 2))
 
-    def connect(self, layout, a_rect, b_rect, layer="M1", width=None):
+    def connect(self, layout, a_rect, b_rect, layer=None, width=None):
         """Search between two pin rects and draw the result.
 
         The convenience the pycells want: give it two pins, get geometry
@@ -402,6 +422,7 @@ class MazeRouter:
         components, and guessing them is how a router quietly adds a
         redundant route that shorts something.
         """
+        layer = layer or getattr(a_rect, "layer", None) or self.tm.pin_layer
         start = (*self.pin_centre(a_rect), layer)
         goal = (*self.pin_centre(b_rect), layer)
         path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))
@@ -501,9 +522,12 @@ def stack_of(instance_name):
     return m.group(1) if m else ""
 
 
-def pins_by_stack(layout, layer="M1"):
+def pins_by_stack(layout, layer=None):
     """{stack: {net: [rect, ...]}} for everything the node graph knows."""
     from collections import defaultdict
+    if layer is None:
+        from cicpy.core.trackmap import TrackMap
+        layer = TrackMap(layout).pin_layer
     out = defaultdict(lambda: defaultdict(list))
     for net in getattr(layout, "nodeGraphList", []):
         g = layout.nodeGraph.get(net)

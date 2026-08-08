@@ -198,6 +198,24 @@ short, and no amount of track or layer picking could have fixed it. The
 router is right to detour, and it is the first thing in this codebase
 that can even state the constraint.
 
+## Step 3b, built: paths become geometry
+
+`MazeRouter.segments` collapses a path into runs and vias;
+`MazeRouter.emit` draws them. Kept apart from the search on purpose --
+searching has no side effects, so a path can be inspected, asserted on
+and diffed before a layout ever changes. Four more tests.
+
+Measured on the detour around VDS's pin: 34 path nodes become 4 runs
+and 3 vias --
+
+    M3 270000,104000 -> 234000,104000     west, clear of the pin span
+    M2 234000,104000 -> 234000,116000     up, where a via is legal
+    M3 234000,116000 -> 270000,116000     back east
+    M4 270000,116000 -> 270000,104000     down to the target
+
+-- and every via lands at a column `via_is_free` accepts. A straight run
+in the free channel collapses 14 nodes to a single rect with no vias.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to
@@ -212,9 +230,12 @@ that can even state the constraint.
    the router must ask.
 3. **Dijkstra over one scope.** DONE -- `core/mazerouter.py`, 9 tests.
    Still returns a PATH, not geometry; nothing is drawn yet.
-3b. **Emit geometry from a path** -- turn the node list into rects and
-   cuts, and route one real OTAR net with it end to end. This is the
-   next step and the first that can change a layout.
+3b. **Emit geometry from a path.** DONE -- segments() and emit().
+3c. **Route one real OTAR net end to end**: find the net's pins through
+   the node graph, search between them, emit, and check the result with
+   drc + connectivity. This is the first step that changes a layout,
+   and the first that can be judged by the same measure as the old
+   router.
 4. **Promote a stack to a cell** and LVS it standalone. `r_deg` is the
    right first subject — it is 4 instances and already has clean LVS as
    `HRPPO12`, so a mismatch is the promotion's fault and nothing else.

@@ -110,6 +110,44 @@ class MazeRouterTest(unittest.TestCase):
         path = r.search((200000, 269000, "M3"), (240000, 269000, "M3"))
         self.assertEqual(path[-1], snapped)
 
+    #-- path to geometry --------------------------------------------
+
+    def test_straight_path_collapses_to_one_run(self):
+        """A path is per-track; geometry should not be."""
+        r = self.router("VS")
+        path = r.search((200000, 269000, "M3"), (239000, 269000, "M3"))
+        runs, vias = r.segments(path)
+        self.assertEqual(len(runs), 1, "14 nodes should be one rect")
+        self.assertEqual(vias, [])
+
+    def test_detour_segments_into_runs_and_vias(self):
+        r = self.router("VS")
+        path = r.search((VDS_PIN[0], VDS_PIN[1], "M3"),
+                        (VDS_PIN[0], VDS_PIN[1], "M4"))
+        runs, vias = r.segments(path)
+        self.assertGreater(len(runs), 1)
+        self.assertEqual(len(vias), len(runs) - 1,
+                         "one via per layer change")
+
+    def test_every_emitted_via_is_at_a_legal_column(self):
+        """The property that matters. If this fails the router has
+        drawn the short it was built to avoid."""
+        r = self.router("VS")
+        path = r.search((VDS_PIN[0], VDS_PIN[1], "M3"),
+                        (VDS_PIN[0], VDS_PIN[1], "M4"))
+        _runs, vias = r.segments(path)
+        for _a, _b, x, y in vias:
+            self.assertTrue(r.via_is_free(x, y),
+                            f"via at {(x, y)} sits on a foreign pin")
+
+    def test_search_does_not_mutate(self):
+        """Searching must be free of side effects, so a path can be
+        inspected and asserted on before anything is drawn."""
+        r = self.router("VS")
+        before = len(self.cell.children)
+        r.search((200000, 269000, "M3"), (239000, 269000, "M3"))
+        self.assertEqual(len(self.cell.children), before)
+
     def test_blocked_carries_a_diagnosis(self):
         """'No route' is not a diagnosis."""
         from cicpy.core.mazerouter import Blocked

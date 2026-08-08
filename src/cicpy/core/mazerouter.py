@@ -277,6 +277,67 @@ class MazeRouter:
         return out
 
     #-----------------------------------------------------------------
+    #- from a path to geometry
+    #-----------------------------------------------------------------
+
+    def segments(self, path):
+        """Collapse a path into (layer, x1, y1, x2, y2) runs and vias.
+
+        Returns (runs, vias). A run is consecutive nodes on one layer; a
+        via is a point where the layer changed. Emitted separately
+        because they are checked separately -- a run against track
+        occupancy, a via against the column.
+        """
+        runs, vias = [], []
+        if not path:
+            return runs, vias
+        start = path[0]
+        for prev, node in zip(path, path[1:]):
+            if node[2] != prev[2]:
+                #- a layer change ends the run and makes a via
+                if (start[0], start[1]) != (prev[0], prev[1]) or start is path[0]:
+                    runs.append((prev[2], start[0], start[1], prev[0], prev[1]))
+                vias.append((prev[2], node[2], prev[0], prev[1]))
+                start = node
+        last = path[-1]
+        if (start[0], start[1]) != (last[0], last[1]):
+            runs.append((last[2], start[0], start[1], last[0], last[1]))
+        return runs, vias
+
+    def emit(self, layout, path, width=None):
+        """Draw `path` into `layout`. Returns (rects, cuts) counts.
+
+        This is the only part of the router that mutates anything, kept
+        apart from the search on purpose: a path can be inspected,
+        asserted on and diffed without a layout ever changing.
+        """
+        from cicpy.core.cut import Cut
+        runs, vias = self.segments(path)
+        w = width or self.tm.hpitch
+        half = w // 2
+        nrect = 0
+        for layer, x1, y1, x2, y2 in runs:
+            lx, hx = sorted((x1, x2))
+            ly, hy = sorted((y1, y2))
+            if lx == hx:
+                lx, hx = lx - half, hx + half
+            if ly == hy:
+                ly, hy = ly - half, hy + half
+            layout.addRectangle(layer, int(lx), int(ly),
+                                int(hx - lx), int(hy - ly))
+            nrect += 1
+        ncut = 0
+        for a_layer, b_layer, x, y in vias:
+            c = Cut.getInstance(a_layer, b_layer, 1, 1)
+            if c is None:
+                continue
+            cc = c.getCopy()
+            cc.moveCenter(int(x), int(y))
+            layout.add(cc)
+            ncut += 1
+        return nrect, ncut
+
+    #-----------------------------------------------------------------
 
     @staticmethod
     def _manhattan(a, b):

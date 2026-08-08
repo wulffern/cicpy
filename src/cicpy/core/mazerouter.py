@@ -836,6 +836,51 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         for inst in layout.iterInstances():
             if (getattr(inst, "instanceName", "") or "") in wanted:
                 cell.add(inst)
+        #- The routing that belongs to this stack. Without it the cell
+        #- holds devices and no wires, so its layout extracts as one net
+        #- per terminal: measured on P_IN_A, 7 devices and 22 nets
+        #- against the schematic's 5 -- with the DEVICE count matching
+        #- exactly, which is how it was clear the decomposition was
+        #- right and only the wires were missing.
+        #-
+        #- A stack's routing is the geometry inside its own bounds,
+        #- which is what a stack-level router would produce and what the
+        #- parent currently produces. Copies, not moves: the parent
+        #- still needs its geometry, and this cell is published
+        #- alongside it rather than replacing it.
+        cell.updateBoundingRect()
+        sx1, sy1, sx2, sy2 = cell.x1, cell.y1, cell.x2, cell.y2
+        #- The parent's ROUTING, and only that. Not
+        #- _collectPhysicalRects: that flattens instance content too, so
+        #- copying it duplicates every device's own geometry, which the
+        #- instances already bring. Routed wires are not direct children
+        #- either -- they live inside Route objects -- so this walks the
+        #- non-instance children and takes the rects it finds.
+        def _routed(node, out, depth=0):
+            if depth > 6:
+                return
+            for ch in getattr(node, "children", []) or []:
+                if ch is None:
+                    continue
+                if hasattr(ch, "isInstance") and ch.isInstance():
+                    continue
+                if hasattr(ch, "isPort") and ch.isPort():
+                    continue
+                if hasattr(ch, "isRect") and ch.isRect():
+                    out.append(ch)
+                else:
+                    _routed(ch, out, depth + 1)
+
+        routed = []
+        _routed(layout, routed)
+        added = 0
+        for r in routed:
+            if (r.x1 >= sx1 and r.x2 <= sx2
+                    and r.y1 >= sy1 and r.y2 <= sy2):
+                cell.add(r.getCopy())
+                added += 1
+        log.info(f"{name}: {added} routed rects of {len(routed)} inside")
+
         #- the boundary nets, as ports, from the pins that carry them
         pins = {}
         for net in entry["ports"]:
@@ -886,8 +931,6 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         made.append((name, fp, sorted(pins)))
         log.info(f"stack cell {name}: {len(wanted)} instances, "
                  f"{len(pins)} ports, fp={fp}")
-    if made:
-        _write_stack_schematics(layout, design, [m[0] for m in made], log)
     return made
 
 
@@ -910,191 +953,3 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
 #- 24 wires on LELOTEMP_OTAR_P_SW that way, against 0 by hand.
 
 
-def _run_stack_pycell(layout, cell, entry, log):
-    """Run <STACKCELL>.py if the design ships one.
-
-    Divide and conquer, using the mechanism that already exists: a cell
-    can have a pycell beside it, so a stack cell can too. Same lookup as
-    cic.py's -- dirname + name + ".py" on sys.path -- so a stack's
-    routing lives in its own file rather than as another paragraph in
-    the parent's.
-
-    The hook is `route(cell, layout, entry)`: the stack cell being
-    built, the parent it came from, and its plan entry. The parent is
-    passed because the node graph belongs to it -- a stack cell holds
-    the instances but not the netlist, so its pins are only findable
-    through the parent until the flow builds each stack from its own
-    generated subckt.
-    """
-    import importlib
-    import os
-    import sys
-    dirname = getattr(layout, "dirname", "") or ""
-    path = os.path.join(dirname, cell.name + ".py")
-    if not os.path.exists(path):
-        return False
-    if dirname not in sys.path:
-        sys.path.append(dirname)
-    try:
-        mod = importlib.import_module(cell.name)
-        importlib.reload(mod)
-    except Exception as e:
-        log.error(f"{cell.name}: pycell failed to import: {e}")
-        return False
-    fn = getattr(mod, "route", None)
-    if fn is None:
-        return False
-    try:
-        fn(cell, layout, entry)
-        log.info(f"{cell.name}: routed by its own pycell")
-        return True
-    except Exception as e:
-        log.error(f"{cell.name}: pycell route() raised: {e}")
-        return False
-
-
-def write_stack_cells(layout, design=None, plan=None, log=None):
-    """Register each stack as a real cell so a .mag is written for it.
-
-    Returns [(name, fingerprint, ports)].
-
-    This is the standalone-verification step, and deliberately NOT the
-    restructuring one. The parent keeps its instances; each stack is
-    additionally published as a cell holding the same instances, with
-    its boundary nets as ports. That is enough to get a .mag and a
-    netlist per stack and to LVS each one ALONE -- which is the gate the
-    hierarchy needs -- without disturbing a parent that currently works.
-
-    Turning the parent into a cell that REFERENCES these rather than
-    containing them is a separate change, and it should not be made
-    until the standalone LVS passes: it is the difference between
-    "generate and check" and "generate, check, and rely on".
-    """
-    from cicpy.core.layoutcell import LayoutCell
-    log = log or logging.getLogger("MazeRouter")
-    design = design if design is not None else design_of(layout)
-    if design is None:
-        log.warning("no design reachable from the layout; no stack cells written")
-        return []
-    plan = plan if plan is not None else plan_stack_cells(layout)
-    made = []
-    for entry in plan:
-        name = entry["name"]
-        if name in getattr(design, "cells", {}):
-            continue
-        cell = LayoutCell()
-        cell.name = name
-        cell.design = design
-        wanted = set(entry["instances"])
-        for inst in layout.iterInstances():
-            if (getattr(inst, "instanceName", "") or "") in wanted:
-                cell.add(inst)
-        #- the boundary nets, as ports, from the pins that carry them
-        pins = {}
-        for net in entry["ports"]:
-            g = layout.nodeGraph.get(net)
-            if g is None:
-                continue
-            for port in getattr(g, "ports", []):
-                pinst = getattr(port, "parent", None)
-                nm = getattr(pinst, "instanceName", "") if pinst else ""
-                if nm not in wanted:
-                    continue
-                rect = port.get() if hasattr(port, "get") else None
-                if rect is not None:
-                    pins.setdefault(net, rect)
-                    break
-        for net, rect in pins.items():
-            try:
-                cell.addPort(net, rect)
-            except Exception as e:
-                log.warning(f"{name}: could not add port {net}: {e}")
-        cell.updateBoundingRect()
-        lines, fp = stack_subckt(layout, entry)
-        cell.cic_subckt = lines
-        cell.cic_fingerprint = fp
-        #- Give the cell a real Subckt, parsed from the generated text.
-        #- Subckt.parse takes spice lines, so the generated netlist and
-        #- the object the printers want are the same thing rather than
-        #- two representations to keep in step.
-        try:
-            from cicspi import Subckt
-            #- the PARENT's parser. A Subckt built without one has no
-            #- instance registry to resolve subcircuit references
-            #- against, and parse() dies on the first device with
-            #- "NoneType has no attribute allinst".
-            parser = getattr(getattr(layout, "ckt", None), "parser", None)
-            if parser is None:
-                parser = getattr(Subckt, "circuits", None)
-            ckt = Subckt(parser)
-            ckt.parse(list(lines), 0)
-            cell.ckt = ckt
-        except Exception as e:
-            log.warning(f"{name}: could not build a subckt: {e}")
-        design.cells[name] = cell
-        if hasattr(design, "cellnames") and name not in design.cellnames:
-            #- ahead of the parent, so it is defined before it is used
-            design.cellnames.insert(0, name)
-        _run_stack_pycell(layout, cell, entry, log)
-        made.append((name, fp, sorted(pins)))
-        log.info(f"stack cell {name}: {len(wanted)} instances, "
-                 f"{len(pins)} ports, fp={fp}")
-    if made:
-        _write_stack_schematics(layout, design, [m[0] for m in made], log)
-    return made
-
-
-def _write_stack_schematics(layout, design, names, log):
-    """Write a .sch per stack, with the printer the design already has.
-
-    Not a hand-rolled netlist file: an xschem schematic, so the ordinary
-    flow can netlist it and LVS it like any other cell. A generated
-    schematic is safe to overwrite precisely because it is generated --
-    it is rebuilt from the parent netlist and the stack grouping every
-    run, so there is nothing in it for anyone to have edited.
-    """
-    try:
-        from cicpy.printer.xschemprinter import XschemPrinter
-        from cicpy.core.rules import Rules
-    except Exception as e:
-        log.warning(f"no xschem printer available: {e}")
-        return
-    dirname = getattr(layout, "dirname", "") or ""
-    if not dirname:
-        return
-    lib = dirname.rstrip("/")
-    try:
-        printer = XschemPrinter(lib, Rules.getInstance())
-        printer.design = design
-        printer.startLib(lib)
-        #- Every cell the printer might have to resolve, and they are
-        #- NOT in design.cells at this point -- that holds one cell, the
-        #- top. The device cells live in MagicDesign.maglib.
-        #-
-        #- This matters more than it looks: symbolAndWrite RETURNS
-        #- SILENTLY when a referenced cell is missing
-        #- (xschemprinter.py:368). The symbol is written and the per-pin
-        #- wires are not, so the schematic looks plausible, xschem
-        #- netlists it with no connectivity, and LVS reports the CDL as
-        #- having "no elements and/or nodes". No warning anywhere.
-        printer.cells.update(getattr(design, "cells", {}) or {})
-        maglib = getattr(design, "maglib", None) or {}
-        for nm in maglib:
-            if nm in printer.cells:
-                continue
-            try:
-                lc = design.getLayoutCell(nm)
-            except Exception:
-                lc = None
-            if lc is not None:
-                printer.cells[nm] = lc
-        for nm in names:
-            cell = design.cells.get(nm)
-            if cell is None or getattr(cell, "ckt", None) is None:
-                continue
-            printer.cells[cell.name] = cell
-            printer.printCell(cell)
-        printer.endLib()
-        log.info(f"wrote {len(names)} stack schematics")
-    except Exception as e:
-        log.warning(f"could not write stack schematics: {e}")

@@ -471,6 +471,50 @@ is looking at the wrong group object somewhere -- the pycell mirrors its
 stacks and the names carry a `_mirror` suffix, which is the likely
 culprit. Cosmetic for the analysis, wrong for the extraction.
 
+## Why the stack LVS gate cannot pass yet, measured
+
+The gate runs. What it reports is the thing the hierarchy exists to fix.
+
+`LELOTEMP_OTAR_P_IN_A`, which has no diode-connected devices and so is
+the clean case:
+
+    layout:     7 devices, 30 nets
+    schematic:  7 devices,  5 nets
+
+**The device count matches exactly.** The decomposition and the
+generated netlist are right. What is missing is wire: the stack cell
+holds the devices and none of the connections, so every terminal
+extracts as its own net.
+
+The reason is not a bug in the extraction. It is that **nothing in this
+design was ever routed at stack level.** Measured: of 32 routed rects in
+the parent, exactly **1** lies inside P_IN_A's bounds. The parent's
+routing is inter-stack almost in its entirety, because it was all done
+at the top -- which is precisely the arrangement the levels are meant to
+replace.
+
+So the order is not optional and not merely tidier:
+
+    route each stack   -> its cell has devices AND wires -> LVS can pass
+    then the group level
+    then the top
+
+Until stack-level routing exists, a stack cell is a bag of unconnected
+devices and no amount of care in the netlist generation will make it
+match. `LELOTEMP_OTAR_P_SW.py` is the first stack to have any: it routes
+its five internal nets, 5 of 5, and those are wires the parent never
+drew.
+
+### A second blocker, in the library rather than here
+
+`REYATR_PCH_4C1F2D` does not LVS standalone: its layout has 2 devices
+and 3 nets, its schematic 1 device and 4 nets. It is the diode-connected
+variant -- `build_diode` adds the gate-to-drain tie to the M1 PATTERN
+and leaves the netlist saying D and G are separate. At the parent level
+this never showed, because the parent ties them anyway; a stack
+containing one cannot LVS until the cell's netlist says what its layout
+does. Five of the eight stacks contain at least one.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to

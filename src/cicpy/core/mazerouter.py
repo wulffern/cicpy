@@ -21,6 +21,7 @@ See plans/router_plan.md.
 """
 import heapq
 import logging
+import re
 
 from .rules import Rules
 from collections import defaultdict
@@ -659,6 +660,33 @@ def stack_membership(layout):
     return member
 
 
+def stack_groups(layout):
+    """{stack name: the StackGroup itself}.
+
+    The group, not just its instance names, because
+    CellGroup.addConnectivityRoute scopes itself -- it builds its own
+    instanceRegex and takes a different path through getNodeAccessRects
+    than passing includeInstances by hand does. The hand written routes
+    that worked in this design all went through the group.
+    """
+    from cicpy.core.cellgroup import CellGroup, StackGroup
+    out = {}
+
+    def _walk(grp):
+        if isinstance(grp, StackGroup):
+            nm = getattr(grp, "name", "")
+            if nm:
+                out[nm] = grp
+            return
+        for c in getattr(grp, "children", []) or []:
+            if isinstance(c, (StackGroup, CellGroup)):
+                _walk(c)
+
+    for grp in getattr(layout, "cellgroups", []) or []:
+        _walk(grp)
+    return out
+
+
 def pins_by_stack(layout, layer=None):
     """{stack: {net: [rect, ...]}} for everything the node graph knows."""
     from collections import defaultdict
@@ -680,6 +708,59 @@ def pins_by_stack(layout, layer=None):
     return out
 
 
+def route_spec(path, tm):
+    """Turn a searched path into a route.py command, or None.
+
+    The search decides WHERE a net should go; route.py knows how to
+    DRAW it -- widths, via enclosures, cut placement, alignment, all of
+    which it has been getting right for years. Emitting raw rects and
+    cut instances instead reimplements that badly: it is what produced
+    272 DRC errors of minimum width, minimum area and via enclosure, and
+    what makes a route look hand stitched rather than routed.
+
+    So the router's output here is a (layer, routeType, options) triple
+    for `addConnectivityRoute`, not geometry.
+
+    Returns None when the path is not a shape route.py can express --
+    a staircase across several layers has no route type -- and the
+    caller should then leave the net alone rather than draw something
+    route.py would not have.
+    """
+    if not path or len(path) < 2:
+        return None
+    xs = {n[0] for n in path}
+    ys = {n[1] for n in path}
+    ends = (path[0][2], path[-1][2])
+
+    #- A path ALWAYS changes layer, so "is it one layer" is never the
+    #- question. The pin layer is pin-only -- a route may via off it and
+    #- not run along it -- so the search has to leave it to move at all,
+    #- and every pin-to-pin path reads as M1 -> M2 -> ... -> M1.
+    #-
+    #- What matters is the SHAPE. A path with one x is a vertical, one y
+    #- a horizontal, whatever it did about layers on the way.
+    if len(xs) == 1 and len(ys) > 1:
+        rtype = "||"
+    elif len(ys) == 1 and len(xs) > 1:
+        rtype = "-"
+    else:
+        return None
+
+    #- and the layer is the one the ENDS are on, when they agree. Both
+    #- ends of a stack-internal net are pins, so that is the pin layer,
+    #- and a straight run of pin-layer metal between two pins is exactly
+    #- what a person would write. Asking for a routing layer instead
+    #- gave an empty route: getNodeAccessRects looked for M2 geometry on
+    #- an M1 pin and found nothing to join.
+    layer = ends[0] if ends[0] == ends[1] else None
+    if layer is None:
+        routing = [n[2] for n in path if n[2] != tm.pin_layer]
+        if not routing:
+            return None
+        layer = routing[0]
+    return (layer, rtype, "")
+
+
 def route_stack_level(layout, margin=8000, log=None, only=None):
     """Route every net inside every stack. Returns (routed, blocked).
 
@@ -697,6 +778,7 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
     log = log or logging.getLogger("MazeRouter")
     routed, blocked = [], []
     by_stack = pins_by_stack(layout)
+    groups = stack_groups(layout)
     #- `only` names the stacks to route. One at a time is the sane way
     #- to bring this up: a stack that is not clean is then the only
     #- thing that can have made the layout dirty, and the next one
@@ -710,6 +792,8 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
         subs = {n: rs for n, rs in by_stack[stack].items() if len(rs) >= 2}
         if not subs:
             continue
+        insts_in_stack = sorted({n for n, st in stack_membership(layout).items()
+                                 if st == stack})
         allr = [r for v in by_stack[stack].values() for r in v]
         extent = (min(r.x1 for r in allr) - margin,
                   min(r.y1 for r in allr) - margin,
@@ -719,12 +803,36 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
             tm = TrackMap(layout, block_pins=True, extent=extent).build()
             r = MazeRouter(tm, net)
             try:
-                #- chain the pins: each to the previous, so an n-pin net
-                #- inside one stack comes out as one component
+                #- Search for the shape, then hand it to route.py. The
+                #- search proves a path exists and says which layer and
+                #- direction it wants; the drawing is not ours to do.
+                specs = []
                 for a, b in zip(rects, rects[1:]):
-                    r.connect(layout, a, b)
-                    tm = TrackMap(layout, block_pins=True, extent=extent).build()
-                    r = MazeRouter(tm, net)
+                    layer = getattr(a, "layer", None) or tm.pin_layer
+                    start = (*r.pin_centre(a), layer)
+                    goal = (*r.pin_centre(b), layer)
+                    r._own = [a, b]
+                    path = r.search(start, goal,
+                                    r.manhattan_heuristic(r.snap(goal)))
+                    spec = route_spec(path, tm)
+                    if spec is None:
+                        raise Blocked(
+                            f"path for {net} is not a shape route.py can "
+                            f"draw ({len(path)} nodes, layers "
+                            f"{sorted({n[2] for n in path})})")
+                    specs.append(spec)
+                #- one command per net: route.py finds the net's own
+                #- rects, so a repeated spec would redraw the same thing
+                #- Scoped to this stack's instances. route.py finds a
+                #- net's own rects, and without the scope it would take
+                #- every pin of the net in the whole cell -- which is
+                #- the top level route this is replacing.
+                layer, rtype, opts = specs[0]
+                grp = groups.get(stack)
+                if grp is None:
+                    raise Blocked(f"no group object for stack {stack}")
+                grp.addConnectivityRoute(layer, f"^{re.escape(net)}$",
+                                         rtype, opts, 1)
                 routed.append((stack, net))
             except Blocked as e:
                 blocked.append((stack, net, str(e)))
@@ -952,6 +1060,22 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         cell = LayoutCell()
         cell.name = name
         cell.design = design
+        #- Bound from the INSTANCES, not from every rect, so a route
+        #- drawn inside a stack cannot inflate the placement box.
+        #-
+        #- It does NOT explain the size, and that was measured before
+        #- assuming it did. A stack is as wide as the device columns it
+        #- holds plus 0.480 of guard: P_SW 8.480 for one 8.000 column,
+        #- R_DEG 16.480 for two. That 0.480 is the ring each REYATR cell
+        #- overhangs its box with so that abutted columns MERGE their
+        #- guards -- shared in the parent, and paid in full by a stack
+        #- standing alone. The size is right; there is nothing to trim.
+        #-
+        #- What does look wrong is the position: these cells keep the
+        #- parent's absolute coordinates (R_DEG at x 24.000, P_SW at
+        #- y 32.300), so reading extents straight out of the .mag makes
+        #- them appear to start far from the origin.
+        cell.boundaryIgnoreRouting = True
         wanted = set(entry["instances"])
         for inst in layout.iterInstances():
             if (getattr(inst, "instanceName", "") or "") in wanted:

@@ -158,3 +158,64 @@ class TechDriven(unittest.TestCase):
         w, h = r.via_extent(stack[0], stack[1])
         self.assertGreater(w, 0)
         self.assertGreater(h, 0)
+
+
+@unittest.skipUnless(_have_fixture(), "LELOTEMP_OTAR fixture not present")
+class StackSubckt(unittest.TestCase):
+    """The generated schematic side of a stack subcell.
+
+    Generated, never edited -- which is the answer to a hand-maintained
+    substack schematic drifting from its layout: there is nothing to
+    drift, because both sides come from the same netlist and are rebuilt
+    together every run. The fingerprint guards what regeneration cannot,
+    which is the GROUPING changing silently: instance names decide
+    placement groups, so a rename moves a device to another stack and
+    both sides then agree, wrongly and consistently.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from cicpy.cic import load_design
+        from cicpy.core.rules import Rules
+        from cicpy.core.mazerouter import plan_stack_cells
+        Rules(TECH)
+        cls.cell = load_design(CIC, [LIB]).cells["LELOTEMP_OTAR"]
+        cls.plan = plan_stack_cells(cls.cell)
+        cls.big = max(cls.plan, key=lambda p: len(p["instances"]))
+
+    def _subckt(self, entry):
+        from cicpy.core.mazerouter import stack_subckt
+        return stack_subckt(self.cell, entry)
+
+    def test_header_declares_exactly_the_boundary_nets(self):
+        lines, _fp = self._subckt(self.big)
+        header = lines[0].split()
+        self.assertEqual(header[0], ".subckt")
+        self.assertEqual(header[1], self.big["name"])
+        self.assertEqual(sorted(header[2:]), sorted(self.big["ports"]))
+
+    def test_internal_nets_are_not_ports(self):
+        """The whole point: what is internal stops existing above."""
+        lines, _fp = self._subckt(self.big)
+        ports = set(lines[0].split()[2:])
+        for net in self.big["internal"]:
+            self.assertNotIn(net, ports)
+
+    def test_every_instance_appears_once(self):
+        lines, _fp = self._subckt(self.big)
+        names = [l.split()[0] for l in lines[1:-1]]
+        self.assertEqual(sorted(names), sorted(self.big["instances"]))
+        self.assertEqual(len(names), len(set(names)))
+
+    def test_it_is_terminated(self):
+        lines, _fp = self._subckt(self.big)
+        self.assertEqual(lines[-1], ".ends")
+
+    def test_fingerprint_is_stable_and_sensitive(self):
+        _l, a = self._subckt(self.big)
+        _l, b = self._subckt(self.big)
+        self.assertEqual(a, b, "same stack must fingerprint the same")
+        moved = dict(self.big)
+        moved["ports"] = sorted(set(self.big["ports"]) | {"__EXTRA__"})
+        _l, c = self._subckt(moved)
+        self.assertNotEqual(a, c, "a changed boundary must change the print")

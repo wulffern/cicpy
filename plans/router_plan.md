@@ -416,6 +416,44 @@ Three separate things, and none is nesting:
    compare the extracted stack against and the xschem source has no
    such hierarchy -- this is the piece with no existing machinery.
 
+### Generate both sides, every run, and gate on LVS
+
+The obvious worry about a substack schematic is that it drifts from the
+layout. The answer is not to maintain one: **generate it**, from the
+same netlist and grouping that build the layout, so both sides are
+rebuilt together and there is nothing to drift.
+
+`stack_subckt()` does that. On LELOTEMP_OTAR it produces, unedited:
+
+    .subckt LELOTEMP_OTAR_P_SW_MIRROR VCP VDD_1V8
+    xbs1 net2 VCP net1 VDD_1V8 REYATR_PCH_4C1F2
+    xbs2 net4 VCP net2 VDD_1V8 REYATR_PCH_4C1F2
+    xbs4 net3 VCP net4 VDD_1V8 REYATR_PCH_4C1F2
+    xbs6 net1 VCP VDD_1V8 VDD_1V8 REYATR_PCH_4C1F2
+    xbs7 net5 VCP net3 VDD_1V8 REYATR_PCH_4C1F2
+    xbs8 VCP VCP net5 VDD_1V8 REYATR_PCH_4C1F2D
+    .ends
+
+The ladder, as six devices with two ports and net1..net5 internal --
+small enough to read, and small enough to LVS on its own.
+
+Regeneration cannot guard the one thing that would be silent: **the
+GROUPING changing.** Instance names decide placement groups
+(subcktinstance.cpp:24), so a rename moves a device to another stack and
+the schematic and the layout then agree, wrongly and consistently. Hence
+a fingerprint over the devices, their connections and the boundary, so
+a changed stack is visible rather than merely different.
+
+The order that makes this safe:
+
+    for each stack:  regenerate subckt + mag, compare fingerprint,
+                     run LVS on the stack ALONE
+    only if all pass: route the group level
+    only if that passes: route the top
+
+A stack that fails LVS stops the run there, where the evidence is six
+devices rather than 1969 rects.
+
 ### Two facts that cost a cycle each
 
 - **The groups exist only during the flow.** A `.cic` reloaded from disk

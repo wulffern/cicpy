@@ -683,3 +683,42 @@ def plan_stack_cells(layout, parent_name=None):
             "internal": internal,
         })
     return out
+
+
+def stack_subckt(layout, entry):
+    """Synthesise the schematic side of a stack subcell.
+
+    Returns (lines, fingerprint). The lines are a spice subckt built
+    from the devices actually in the stack, with the boundary nets as
+    its ports; the fingerprint is what those devices and their
+    connections are, so a silent change can be detected.
+
+    GENERATED, never edited. That is the answer to the obvious worry
+    about a hand-maintained substack schematic drifting from the layout:
+    there is nothing to drift, because both sides come from the same
+    netlist and grouping and are rebuilt together every run.
+
+    The fingerprint guards the one thing regeneration cannot: the
+    GROUPING changing without anyone noticing. Instance names decide
+    placement groups (ciccreator subcktinstance.cpp:24), so a rename
+    silently moves a device to another stack -- and both the schematic
+    and the layout would then agree, wrongly and consistently.
+    """
+    import hashlib
+    devices = []
+    for inst in layout.iterInstances():
+        name = getattr(inst, "instanceName", "") or ""
+        if name not in entry["instances"]:
+            continue
+        nodes = list(getattr(inst, "instancePortsList", []) or [])
+        cell = getattr(inst, "cell", "") or ""
+        devices.append((name, nodes, cell))
+    devices.sort()
+    ports = list(entry["ports"])
+    lines = [f".subckt {entry['name']} {' '.join(ports)}"]
+    for name, nodes, cell in devices:
+        lines.append(f"{name} {' '.join(nodes)} {cell}")
+    lines.append(".ends")
+    key = "|".join(f"{n}:{c}:{','.join(nd)}" for n, nd, c in devices)
+    key += "||" + ",".join(sorted(ports))
+    return lines, hashlib.sha1(key.encode()).hexdigest()[:12]

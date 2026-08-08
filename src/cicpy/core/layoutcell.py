@@ -1514,7 +1514,7 @@ class LayoutCell(Cell):
         graph = self.nodeGraph.get(name)
         rects = []
         if graph is not None:
-            rects = self.getNodeAccessRects(name, "M1", includeInstances=includeInstances, excludeInstances=excludeInstances)
+            rects = self.getNodeAccessRects(name, self._pinLayer(), includeInstances=includeInstances, excludeInstances=excludeInstances)
             if len(rects) == 0:
                 rects = graph.getRectangles(excludeInstances, includeInstances, "")
         routering = self.named_rects[router_key]
@@ -1615,12 +1615,12 @@ class LayoutCell(Cell):
                     continue
                 if not self._instance_matches_route_scope(inst, includeInstances=includeInstances, excludeInstances=excludeInstances):
                     continue
-                rr = port.get("M1") if hasattr(port, "get") else None
+                rr = port.get(self._pinLayer()) if hasattr(port, "get") else None
                 if rr is not None:
                     rects.append(rr)
         else:
             rects = self.getNodeAccessRects(
-                name, "M1", includeInstances=includeInstances,
+                name, self._pinLayer(), includeInstances=includeInstances,
                 excludeInstances=excludeInstances, includeGroups=includeGroups)
             if len(rects) == 0:
                 rects = graph.getRectangles(excludeInstances, includeInstances, "")
@@ -1708,7 +1708,7 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
-    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="M1", widthmult:int=1):
+    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="", widthmult:int=1):
         """Tie every device source on a power net to that device's own bulk
         guard ring, locally, on the layer the pins already live on.
 
@@ -1729,6 +1729,8 @@ class LayoutCell(Cell):
         same net on ``bulk`` are connected: a cascode whose source is an
         internal node is left alone for the signal router.
         """
+        #- default to the technology's pin layer rather than to "M1"
+        layer = layer or self._pinLayer()
         self.log.info(
             f"addPowerGuardConnection(name={name}, includeInstances={includeInstances}, excludeInstances={excludeInstances}, terminals={terminals}, bulk={bulk}, layer={layer})"
         )
@@ -1858,10 +1860,52 @@ class LayoutCell(Cell):
             r.rotate(90); r.rotate(90); r.rotate(90)
         self.add(r)
 
+    def _pinLayer(self):
+        """The layer the cells put their pins on, from the technology.
+
+        ROUTE.pinlayer. It was a literal "M1" in the power path, which
+        is the sky130 answer and silently the wrong rect on any
+        technology whose primitives present pins anywhere else -- and
+        wrong quietly, because getNodeAccessRects just returns nothing
+        and the strap is skipped with an error about a missing pin.
+        """
+        from .trackmap import TrackMap
+        return TrackMap(self).pin_layer or "M1"
+
+    def _metalStack(self):
+        """The technology's metal layers, bottom up."""
+        from .trackmap import TrackMap
+        return TrackMap(self).metal_stack()
+
+    def _layerAbove(self, layer):
+        """The next metal up from `layer`, or None at the top."""
+        stack = self._metalStack()
+        if layer in stack:
+            i = stack.index(layer)
+            if i + 1 < len(stack):
+                return stack[i + 1]
+        return None
+
+    def _topLayerRunning(self, direction):
+        """The highest routing layer that runs `direction` ("v"/"h")."""
+        from .trackmap import TrackMap
+        tm = TrackMap(self)
+        stack = tm.metal_stack()
+        wanted = [l for l in stack if tm.directions.get(l) == direction]
+        return wanted[-1] if wanted else (stack[-1] if stack else None)
+
     def addPowerRing(self, layer:str, name:str, location:str="rtbl", widthmult:int=1, spacemult:int=10):
         self.log.info(f"addPowerRing(layer={layer}, name={name}, location={location}, widthmult={widthmult}, spacemult={spacemult})")
-        c = Cut.getInstance("M3","M4",2,2)
-        mw = c.height()*widthmult
+        #- The ring is as wide as a via up off its OWN layer, which is
+        #- what a rail has to be able to carry. Cut.getInstance("M3","M4")
+        #- gave the right number for a sky130 M1 ring by coincidence and
+        #- nothing anywhere else.
+        above = self._layerAbove(layer)
+        c = Cut.getInstance(layer, above, 2, 2) if above else None
+        if c is None:
+            mw = Rules.getInstance().get(layer, "width") * widthmult
+        else:
+            mw = c.height()*widthmult
         xgrid = Rules.getInstance().get("ROUTE","horizontalgrid")*spacemult
         ygrid = Rules.getInstance().get("ROUTE","horizontalgrid")*spacemult
         rr = RouteRing(layer, name, self.getCopy(), location, ygrid, xgrid, mw)
@@ -2002,22 +2046,32 @@ class LayoutCell(Cell):
         # method makes a sheet, should really make it better
         if len(rects) > 0:
             from .cut import Cut
-            cuts = Cut.getCutsForRects("M4", rects, 2, 1)
+            #- A power sheet spans the cell top to bottom, so it belongs
+            #- on the highest layer the technology runs VERTICALLY. That
+            #- is M4 in sky130 here, which is what this used to say
+            #- outright.
+            sheet = self._topLayerRunning("v")
+            if sheet is None:
+                self.log.warning(
+                    f"addPowerRoute({net}): the technology declares no "
+                    f"vertical routing layer; not routing")
+                return
+            cuts = Cut.getCutsForRects(sheet, rects, 2, 1)
             rp = None
-            
+
             if len(cuts) > 0:
                 r_bound = Cell.calcBoundingRectFromList(cuts, False)
                 r_bound.setTop(self.top())
                 r_bound.setBottom(self.bottom())
                 for cut in cuts:
                     self.add(cut)
-                rp = Rect("M4", r_bound.x1, r_bound.y1, r_bound.width(), r_bound.height())
+                rp = Rect(sheet, r_bound.x1, r_bound.y1, r_bound.width(), r_bound.height())
             else:
                 r_bound = Cell.calcBoundingRectFromList(rects, False)
                 r_bound.setTop(self.top())
                 r_bound.setBottom(self.bottom())
-                rp = Rect("M4", r_bound.x1, r_bound.y1, r_bound.width(), r_bound.height())
-            
+                rp = Rect(sheet, r_bound.x1, r_bound.y1, r_bound.width(), r_bound.height())
+
             if rp:
                 self.add(rp)
                 if net in self.ports:
@@ -2255,86 +2309,6 @@ class LayoutCell(Cell):
             options = options.strip(",")
             options = (options + "," if options else "") + f"{key}{int(coord)}"
         return options.strip(",")
-
-    def addTrackRoute(self, net, layers=None, viaCost=None, cuts=1):
-        """Search for a path for one net instead of being told where it goes.
-
-        The route language names a corridor; this looks for a free one.
-        Use it for the net that will not fit anywhere obvious, and keep
-        the declarative routes for the ones that do: a stated route is
-        easier to read later than a found one.
-
-        Returns the Route that was added, or None when no path exists,
-        in which case nothing is drawn and the reason is logged.
-        """
-        from .trackrouter import TrackRouter
-        from .route import Route
-
-        router = TrackRouter(self, layers=layers, via_cost=viaCost)
-        router._collect()
-
-        #- Every access rect this net has. getNodeAccessRects answers with
-        #- the same physical pins whatever layer it is asked about, so
-        #- ask once and take each rect's own layer: asking per layer
-        #- produced goals on layers where the rect does not exist, and
-        #- the search dutifully failed to reach them
-        anchors = []
-        seen = set()
-        for r in self.getNodeAccessRects(net, ""):
-            layer = getattr(r, "layer", "")
-            if layer not in router.layer_index:
-                continue
-            key = (layer, r.x1, r.y1, r.x2, r.y2)
-            if key in seen:
-                continue
-            seen.add(key)
-            anchors.append((r, layer))
-        if len(anchors) < 2:
-            self.log.warning(
-                f"addTrackRoute({net}): {len(anchors)} access rects, nothing to join")
-            return None
-
-        #- Join the pins one at a time, each to everything already
-        #- connected, which is what makes a multi pin net a tree rather
-        #- than a set of independent paths
-        connected = router._nodes_for_rect(anchors[0][0], anchors[0][1])
-        all_rects = []
-        all_vias = []
-        for rect, layer in anchors[1:]:
-            goals = router._nodes_for_rect(rect, layer)
-            if not goals or not connected:
-                continue
-            path = router.search(connected, goals, net)
-            if path is None:
-                self.log.warning(
-                    f"addTrackRoute({net}): no path to a pin on {layer}")
-                continue
-            rects, vias = router._path_to_rects(path, net)
-            if not router.validate(rects, net) or not router.validate_vias(vias, net):
-                continue
-            all_rects.extend(rects)
-            all_vias.extend(vias)
-            connected.extend(path)
-
-        if not all_rects:
-            self.log.warning(f"addTrackRoute({net}): found no path at all")
-            return None
-
-        ro = Route(net, router.layers[0].name, [], [], "", "-")
-        for r in all_rects:
-            ro.add(r)
-        for a, b in all_vias:
-            la = router.layers[a[2]].name
-            lb = router.layers[b[2]].name
-            cut = Cut.getInstance(la, lb, cuts, cuts)
-            if cut:
-                cut.moveCenter(a[0] * router.pitch, a[1] * router.pitch)
-                ro.add(cut)
-        self._annotateRoute(ro, "addTrackRoute", {"net": net})
-        self.add(ro)
-        self.log.info(
-            f"addTrackRoute({net}): {len(all_rects)} rects, {len(all_vias)} vias")
-        return ro
 
     def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, includeGroups=""):
         options = self._resolveChannelOptions(options)

@@ -107,9 +107,18 @@ class MazeRouter:
             adj[b].append(a)
         return adj
 
-    #- Bucket size for the pin index. Coarse on purpose: it only has to
-    #- cut the candidate set down, and an exact overlap test runs after.
-    BUCKET = 20000
+    #- Bucket size for the pin index, in routing pitches. Coarse on
+    #- purpose: it only has to cut the candidate set down, and an exact
+    #- overlap test runs after. Counted in pitches rather than database
+    #- units so it stays the same SIZE OF NEIGHBOURHOOD in a technology
+    #- with different units -- as a literal 20000 it was either every
+    #- pin in one bucket or one pin per bucket, and both are the linear
+    #- scan the index exists to avoid.
+    BUCKET_PITCHES = 5
+
+    @property
+    def BUCKET(self):
+        return self.BUCKET_PITCHES * max(self.tm.hpitch, self.tm.vpitch)
 
     def _index_foreign_pins(self):
         """Every pin not belonging to this net, bucketed by position.
@@ -967,8 +976,15 @@ def _internal_nets(layout, stack):
     return set()
 
 
-def route_stack_level(layout, margin=8000, log=None, only=None):
+def route_stack_level(layout, margin=None, log=None, only=None):
     """Route every net inside every stack. Returns (routed, blocked).
+
+    `margin` is the halo around a stack's own geometry that the search
+    is allowed to use. Left as None it comes from the technology --
+    two routing pitches, which is the least room a detour around an
+    obstacle can possibly need: one pitch to step aside and one to come
+    back. It was a literal 8000 for a while, which is that number for
+    sky130 and a guess anywhere else.
 
     Level one of three. Each stack is solved against its OWN extent, so
     a route here cannot see -- or collide with -- anything in another
@@ -982,6 +998,9 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
     """
     from cicpy.core.trackmap import TrackMap
     log = log or logging.getLogger("MazeRouter")
+    if margin is None:
+        probe = TrackMap(layout)
+        margin = 2 * max(probe.hpitch, probe.vpitch)
     routed, blocked = [], []
     #- before ANY search: the straps have to exist to be avoided
     draw_supplies_first(layout, log)

@@ -175,7 +175,8 @@ class TrackMap:
         if block_pins and self.pin_layer:
             #- the pin layer joins the map when pins are modelled: it is
             #- not routed on, but it is where every pin is
-            self.directions.setdefault(self.pin_layer, "h")
+            self.directions.setdefault(self.pin_layer,
+                                       self._pin_layer_direction())
         self.hpitch = int(self._rule("ROUTE", "horizontalgrid", 3000))
         self.vpitch = int(self._rule("ROUTE", "verticalgrid", 4000))
         self.extent = extent
@@ -200,6 +201,34 @@ class TrackMap:
             "ROUTE.directions missing from the technology; no layer has a "
             "preferred direction and nothing can be routed")
         return {}
+
+    def _pin_layer_direction(self):
+        """Which way the pin layer runs, taken from the stack.
+
+        The pin layer is pin-only, so it has no ROUTE.directions entry
+        of its own -- but it still needs one here, because that is what
+        decides whether a pin is bucketed into tracks along x or along
+        y, and bucketing it the wrong way puts every pin on one track.
+
+        A metal stack alternates, so the answer is the opposite of the
+        first routing layer above the pin layer. Hard coding "h" was a
+        sky130 answer wearing a general name: it is right for M1 here
+        and wrong the moment a technology runs its bottom metal the
+        other way.
+        """
+        stack = self.metal_stack()
+        if self.pin_layer in stack:
+            for layer in stack[stack.index(self.pin_layer) + 1:]:
+                d = self.directions.get(layer)
+                if d:
+                    return "v" if d == "h" else "h"
+        #- nothing above it in the stack has a direction: fall back to
+        #- the opposite of whatever the technology does have, so the
+        #- pins at least do not share an axis with the only routing
+        #- layer there is
+        for d in self.directions.values():
+            return "v" if d == "h" else "h"
+        return "h"
 
     def metal_stack(self):
         """Metal layers in stack order, from the tech's own chain.

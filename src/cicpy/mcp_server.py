@@ -514,6 +514,72 @@ def tracks(cicfile: str, techfile: str, cell: str, layer: str = "",
     return out.strip() or "(no output)"
 
 
+@mcp.tool()
+def blockers(cicfile: str, techfile: str, cell: str, net: str, box: str,
+             includes: list[str] | None = None) -> str:
+    """What stops `net` from dropping a via column in `box`.
+
+    Ask this when a route shorts and the track report looks clean. A
+    wire of another net is space to route around; a PIN of another net
+    is space that cannot be crossed at all -- and the collision is
+    rarely on one layer. A trunk on M4 and a pin on M1 never share a
+    track, so a same-layer check reports nothing. What collides is the
+    via COLUMN: a route reaching a pin comes down through every layer at
+    that x, and any other net's pin in the way is shorted.
+
+    Every routing failure measured in LELOTEMP_OTAR was this, four
+    separate times, and nothing in the old router could see it.
+
+    Args:
+        cicfile: Path to the .cic holding the layout.
+        techfile: Path to the technology file.
+        cell: The cell to inspect.
+        net: The net that wants to route there.
+        box: "X1:X2:Y1:Y2", the column to test.
+        includes: Other .cic files the design references.
+    """
+    cmd = ["cicpy", "blockers", cicfile, techfile, cell,
+           "--net", net, "--box", box]
+    for inc in (includes or []):
+        cmd += ["--I", inc]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
+    return out.strip() or "(no output)"
+
+
+@mcp.tool()
+def findroute(cicfile: str, techfile: str, cell: str, net: str,
+              start: str, stop: str,
+              includes: list[str] | None = None) -> str:
+    """Search a path for `net`, and report it WITHOUT drawing anything.
+
+    A shortest path over the track grid that knows what is in the way,
+    including other nets' pins. Use it to answer "is there a way through
+    and what does it cost" before committing geometry -- the old loop
+    was to draw a guess, regenerate, and read the short report, which
+    costs a full rebuild per guess.
+
+    A failure is a diagnosis: it reports how far the search got and what
+    blocked it, not just "no route".
+
+    Args:
+        cicfile: Path to the .cic holding the layout.
+        techfile: Path to the technology file.
+        cell: The cell to route in.
+        net: Net to route.
+        start: "X,Y,LAYER", e.g. "270000,104000,M3".
+        stop: "X,Y,LAYER".
+        includes: Other .cic files the design references.
+    """
+    cmd = ["cicpy", "findroute", cicfile, techfile, cell,
+           "--net", net, "--start", start, "--stop", stop]
+    for inc in (includes or []):
+        cmd += ["--I", inc]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
+    return out.strip() or "(no output)"
+
+
 #- What each route option means. The names are checked against the
 #- parser at call time, so this cannot quietly drift from the code: an
 #- option the parser gained and this table has not is reported as

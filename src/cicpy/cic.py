@@ -610,6 +610,108 @@ def tracks(ctx,cicfile,techfile,cell,includes,layer,band,free,verbose):
     print(tm.report(layer=layer or None, band=b, verbose=verbose))
 
 
+@cli.command("blockers")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("cell")
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+@click.option("--net",required=True,help="The net that wants to route here")
+@click.option("--box",required=True,help="X1:X2:Y1:Y2, the via column to test")
+def blockers(ctx,cicfile,techfile,cell,includes,net,box):
+    """What stops NET from dropping a via column in BOX.
+
+    A wire of another net is space to route around; a PIN of another net
+    is space that cannot be crossed at all. And the collision is rarely
+    on one layer: a trunk on M4 and a pin on M1 never share a track, so
+    a same-layer check reports nothing. What collides is the via column
+    -- a route reaching a pin comes down through every layer at that x,
+    and any other net's pin in the way is shorted.
+
+    This asks that question directly, before anything is drawn.
+    """
+    cic.Rules(techfile)
+    design = load_design(cicfile, includes)
+    if(cell not in design.cells):
+        log.error(f"Could not find cell {cell} in {cicfile}")
+        raise SystemExit(2)
+    from cicpy.core.trackmap import TrackMap
+    tm = TrackMap(design.cells[cell], block_pins=True).build()
+    try:
+        x1,x2,y1,y2 = [float(v) for v in box.split(":")]
+    except ValueError:
+        log.error("--box wants X1:X2:Y1:Y2")
+        raise SystemExit(2)
+    hits = tm.column_blockers(net, x1, x2, y1, y2)
+    if not hits:
+        print(f"{net}: nothing blocks the column {box}")
+        return
+    seen = set()
+    print(f"{net}: {len(hits)} blocking pin spans in {box}")
+    for other, coord, s0, s1 in hits:
+        key = (other, coord, s0, s1)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"   {other:16s} at {coord}  span {s0}..{s1}")
+
+
+@cli.command("findroute")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("cell")
+@click.option("--I","includes",multiple=True,help="Additional .cic library file or glob to merge before processing")
+@click.option("--net",required=True,help="Net to route")
+@click.option("--start",required=True,help="X,Y,LAYER")
+@click.option("--stop",required=True,help="X,Y,LAYER")
+def findroute(ctx,cicfile,techfile,cell,includes,net,start,stop):
+    """Search a path for NET, and report it without drawing anything.
+
+    The search knows what is in the way, including other nets' PINS,
+    which the route.py router does not model at all. It draws nothing:
+    the point is to be able to ask "is there a way through, and what
+    does it cost" before committing geometry.
+
+    A failure is a diagnosis, not a shrug -- it reports how far the
+    search got and what was blocking.
+    """
+    cic.Rules(techfile)
+    design = load_design(cicfile, includes)
+    if(cell not in design.cells):
+        log.error(f"Could not find cell {cell} in {cicfile}")
+        raise SystemExit(2)
+    from cicpy.core.trackmap import TrackMap
+    from cicpy.core.mazerouter import MazeRouter, Blocked
+
+    def _node(text):
+        parts = text.split(",")
+        if len(parts) != 3:
+            log.error("--start/--stop want X,Y,LAYER")
+            raise SystemExit(2)
+        return (int(float(parts[0])), int(float(parts[1])), parts[2].strip())
+
+    tm = TrackMap(design.cells[cell], block_pins=True).build()
+    r = MazeRouter(tm, net)
+    a, b = _node(start), _node(stop)
+    try:
+        path = r.search(a, b, r.manhattan_heuristic(r.snap(b)))
+    except Blocked as e:
+        print(f"{net}: BLOCKED")
+        print(f"   {e}")
+        print(f"   nodes explored: {e.reached}")
+        for other, coord, s0, s1 in e.blockers[:10]:
+            print(f"   blocker {other} at {coord} span {s0}..{s1}")
+        raise SystemExit(1)
+    runs, vias = r.segments(path)
+    print(f"{net}: path found, {len(path)} nodes -> {len(runs)} runs, {len(vias)} vias")
+    for layer,x1,y1,x2,y2 in runs:
+        print(f"   run {layer:3s} {x1},{y1} -> {x2},{y2}")
+    for la,lb,x,y in vias:
+        ok = "ok" if r.via_is_free(x,y) else "BLOCKED"
+        print(f"   via {la}->{lb} at {x},{y}  [{ok}]")
+
+
 @cli.command("gui")
 @click.pass_context
 @click.argument("cicfile")

@@ -282,6 +282,38 @@ still moves to another technology and survives a resize.
 Never write `bandy`/`trunkx` in a design. They exist as the resolved
 form of the above and a coordinate in a pycell outlives nothing.
 
+## Ask before you draw
+
+Three questions, each answerable without a regeneration. The old loop --
+draw a guess, rebuild, read the short report -- costs a full rebuild per
+guess, and five of them were spent on one net before any of these
+existed.
+
+    tracks     which corridor is free, and where
+    blockers   what stops THIS net from dropping a via column HERE
+    findroute  is there a way through at all, and what does it cost
+
+`blockers` is the one that is not obvious. When a route shorts and the
+track report looks clean, the collision is almost never on one layer: a
+trunk on M4 and a pin on M1 never share a track, so a same-layer check
+reports nothing. What collides is the via COLUMN -- a route reaching a
+pin comes down through every layer at that x, and any other net's pin in
+the way is shorted. Every routing failure measured in LELOTEMP_OTAR was
+that, four separate times.
+
+Two facts that fall out of it and are worth carrying:
+
+- **A via pad is 8800 across.** Where pins are closer together than that
+  -- the horizontal resistor puts its terminals 4000 apart -- no layer
+  change is possible directly on either pin, by any net, including the
+  one that owns it. No choice of track or layer fixes it; the route has
+  to leave and come back.
+- **Bars land where the pins are, not where there is room.** A plain
+  route takes its bar height from the net's own pins, so bars fight
+  inside device rows while the channel between them sits empty.
+  Measured: one bar inside the pmos row with 27 free M3 tracks in the
+  channel it should have used.
+
 ## Router facts that cost a day to learn
 
 - **One net per row channel, unless you place them.** The router lays a

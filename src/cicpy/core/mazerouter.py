@@ -583,3 +583,103 @@ def route_stack_level(layout, margin=8000, log=None):
                 blocked.append((stack, net, str(e)))
                 log.warning(f"{stack}/{net}: {e}")
     return routed, blocked
+
+
+def plan_stack_cells(layout, parent_name=None):
+    """What subcells the stacks would become, without making any.
+
+    Returns [{name, stack, instances, ports, internal}] where `ports`
+    are the nets that cross the stack boundary -- the ones the parent
+    still has to route -- and `internal` are the nets wholly inside it,
+    which the stack owns and nobody above needs to see.
+
+    Deliberately analysis only. Turning a group into a real subcell
+    means three separate things, and knowing the shape first is what
+    makes them separable:
+
+      1. a LayoutCell registered in design.cells, or no .mag is written
+         for it. Nesting alone does NOT do this: DesignPrinter flattens
+         a nested LayoutCell into its parent
+         (designprinter.py: `elif child.isLayoutCell(): printChildren`).
+      2. an Instance of it in the parent, so the parent references
+         rather than contains.
+      3. a subckt for the schematic side, synthesised from the devices
+         in the stack with the boundary nets as its ports -- LVS needs
+         something to compare the extracted stack against, and the
+         xschem source has no such hierarchy.
+
+    The port list is the whole payoff. Everything in `internal` stops
+    existing as far as the parent is concerned.
+    """
+    from collections import defaultdict
+    counts = defaultdict(lambda: defaultdict(int))
+    insts = defaultdict(list)
+    #- The CellGroups the design actually built, when it built any.
+    #- The name-prefix rule is a fallback and it is WRONG for taps and
+    #- fillers: addTaps names them after the GROUP (xstack_n_load_a_bot)
+    #- while the devices are named by prefix (xnd, xns), so a prefix
+    #- grouping puts every tap in a one-instance stack of its own --
+    #- measured, 17 bogus stacks out of 25.
+    #- The STACKS, which are not layout.cellgroups. makeCellGroup
+    #- registers the top groups (pmos, nmos, res); addStack adds a
+    #- StackGroup as a CHILD of one of those, so the stacks have to be
+    #- walked to. Looking only at layout.cellgroups finds the three top
+    #- groups and none of the eight stacks, and the fallback prefix rule
+    #- then puts every tap in a one-instance stack of its own -- 17
+    #- bogus stacks out of 25, measured.
+    #-
+    #- Note the groups exist only DURING the flow. A .cic reloaded from
+    #- disk has none, so this has to run inside a pycell hook.
+    member = {}
+
+    def _walk(grp, depth=0):
+        insts_here = (list(getattr(grp, "instances", []))
+                      + list(getattr(grp, "tap_instances", [])))
+        kids = [c for c in getattr(grp, "children", []) or []
+                if hasattr(c, "instances")]
+        #- a group with instances and no sub-groups is a stack
+        if insts_here and not kids:
+            gname = getattr(grp, "name", "")
+            for inst in insts_here:
+                nm = getattr(inst, "instanceName", "") or ""
+                if nm and gname:
+                    member[nm] = gname
+        for c in kids:
+            _walk(c, depth + 1)
+
+    for grp in getattr(layout, "cellgroups", []) or []:
+        _walk(grp)
+    for inst in layout.iterInstances():
+        name = getattr(inst, "instanceName", "") or ""
+        st = member.get(name) or stack_of(name)
+        if not st:
+            continue
+        insts[st].append(name)
+        member[name] = st
+    for net in getattr(layout, "nodeGraphList", []):
+        g = layout.nodeGraph.get(net)
+        if g is None:
+            continue
+        for port in getattr(g, "ports", []):
+            inst = getattr(port, "parent", None)
+            nm = getattr(inst, "instanceName", "") if inst else ""
+            if nm:
+                counts[member.get(nm) or stack_of(nm)][net] += 1
+    #- how many stacks does each net appear in?
+    spread = defaultdict(int)
+    for st in counts:
+        for net in counts[st]:
+            spread[net] += 1
+    out = []
+    for st in sorted(insts):
+        nets = counts.get(st, {})
+        ports = sorted(n for n in nets if spread[n] > 1)
+        internal = sorted(n for n in nets if spread[n] == 1)
+        out.append({
+            "name": f"{parent_name or layout.name}_{st}".upper(),
+            "stack": st,
+            "instances": sorted(insts[st]),
+            "ports": ports,
+            "internal": internal,
+        })
+    return out

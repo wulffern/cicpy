@@ -382,6 +382,57 @@ Two things this makes obvious in hindsight:
   of the three bugs traded one for the other, and only running both
   after every change showed which.
 
+## Stacks as real subcells
+
+The decomposition is only a convention until the stacks are cells. Made
+real, `LELOTEMP_OTAR_<stack>` gets its own `.mag`, its own netlist and
+its own LVS, and the parent sees ports instead of pins.
+
+`plan_stack_cells()` reports the shape without building anything, and
+the shape is the argument:
+
+    LELOTEMP_OTAR_P_SW_MIRROR    6 insts   2 ports   internal: net1..net5
+    LELOTEMP_OTAR_R_DEG          4 insts   3 ports   internal: R1<0>
+    LELOTEMP_OTAR_P_IN_A_MIRROR  7 insts   4 ports   internal: VIN
+    LELOTEMP_OTAR_P_BIAS_MIRROR  6 insts   6 ports   internal: PWRUP_1V8
+
+**All five ladder nets are INTERNAL to one 6-instance cell with 2
+boundary ports.** The problem that defeated four hand attempts and that
+whole-cell routing could only half solve stops being a top-level problem
+at all -- it is 6 instances and 2 pins, and it can be LVS'd on its own.
+
+### What building them actually takes
+
+Three separate things, and none is nesting:
+
+1. **A LayoutCell registered in `design.cells`**, or no `.mag` is
+   written. Nesting alone does not do it: `DesignPrinter.printChildren`
+   FLATTENS a nested LayoutCell into its parent
+   (`elif child.isLayoutCell(): self.printChildren(child.children)`).
+2. **An `Instance` of it in the parent**, so the parent references
+   rather than contains.
+3. **A subckt for the schematic side**, synthesised from the devices in
+   the stack with the boundary nets as ports. LVS needs something to
+   compare the extracted stack against and the xschem source has no
+   such hierarchy -- this is the piece with no existing machinery.
+
+### Two facts that cost a cycle each
+
+- **The groups exist only during the flow.** A `.cic` reloaded from disk
+  has no cellgroups, so any of this has to run inside a pycell hook.
+  Analysing a saved file silently returns the fallback grouping.
+- **The stacks are not `layout.cellgroups`.** `makeCellGroup` registers
+  the top groups (pmos, nmos, res); `addStack` adds a StackGroup as a
+  CHILD of one. Looking only at `cellgroups` finds three groups and none
+  of the eight stacks, and the name-prefix fallback then puts every tap
+  in a one-instance stack of its own -- 17 bogus stacks out of 25.
+
+Still unattributed: the tap instances (`xstack_<group>_bot/top`) come out
+as their own stacks. They are in the stack's `tap_instances`, so the walk
+is looking at the wrong group object somewhere -- the pycell mirrors its
+stacks and the names carry a `_mirror` suffix, which is the likely
+culprit. Cosmetic for the analysis, wrong for the extraction.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to

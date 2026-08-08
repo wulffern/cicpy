@@ -596,6 +596,46 @@ this never showed, because the parent ties them anyway; a stack
 containing one cannot LVS until the cell's netlist says what its layout
 does. Five of the eight stacks contain at least one.
 
+## Step 1 done, and it exposed the real prerequisite
+
+The via-pad fix is in and tested. A route now knows which pin rects it
+was asked to join (`connect()` records them) and may land a via on ITS
+OWN pin while still being refused one beside a device rail. That
+replaces "tolerate every unattributed rect on the pin layer", which was
+the only reason the 14 li.3 errors appeared. `Track.foreign_spans` makes
+the distinction available; `MazeRouter.own_metal` uses it. Two tests,
+one asserting that a router which does NOT know its own pin refuses.
+
+Turning stack-level routing on with that fixed: **17 routed, 11
+blocked** -- up from 7 -- and **306 DRC errors**. The via placement is
+right. The EMITTER is not:
+
+    Metal3 width < 0.3um            met3.1
+    Metal3 minimum area < 0.24um2   met3.6
+    Metal2/3/4 spacing              met2.2 met3.2 met4.2
+    via/via2/via3 spacing and width
+
+None of that is the search. It is that `emit()` draws a rect per run
+with the layer's `width` across and the run's own length along, and
+nothing else:
+
+  - a one-step run is 3000 x 3000 = 0.09 um2, under met3's 0.24 minimum
+  - the tech carries `width` and `space` and **no minimum area at all**,
+    so there is nothing to check against even if it wanted to
+  - two of the router's own segments are never checked against each
+    other, only against pre-existing geometry
+
+So the order changes. Steps 2, 3 and 4 all assume the router can draw
+legal geometry, and it cannot yet:
+
+  **1b. Make emit() DRC-correct.** Add `minarea` (and whatever else the
+  rules need) to the technology -- allowed, and the right place -- then
+  enforce minimum run length, minimum area, and spacing between the
+  router's OWN segments. Until this is done, every route the search
+  finds is a route that cannot be drawn.
+
+Reverted; LELOTEMP_OTAR is back at 0 DRC, 0 shorts, 13 opens.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to

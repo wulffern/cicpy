@@ -74,6 +74,8 @@ class MazeRouter:
                          if via_cost is None else via_cost)
         self._adj = self._layer_adjacency()
         self._pin_index = self._index_foreign_pins()
+        #- rects this route may land on; set by connect()
+        self._own = []
 
     #-----------------------------------------------------------------
     #- the grid
@@ -224,6 +226,27 @@ class MazeRouter:
                 self._via_size[key] = (w, w)
         return self._via_size[key]
 
+    def own_metal(self, x1, x2, y1, y2):
+        """Does this box overlap metal the route is allowed to land on?
+
+        The pin rects it was asked to join. Unattributed metal on the pin
+        layer is otherwise indistinguishable from a device's internal
+        rail -- `_collectPhysicalRects` can only attribute PORTS -- so
+        without this the choice is between allowing a via anywhere on the
+        pin layer (which drops pads within 0.17 of a device rail, 14
+        li.3 errors measured) and allowing none at all (which blocks
+        every via off every pin, by the pin itself).
+
+        The route knows the answer and was throwing it away: connect()
+        is handed the two rects it is joining.
+        """
+        for r in self._own:
+            if r is None:
+                continue
+            if not (x2 <= r.x1 or x1 >= r.x2) and not (y2 <= r.y1 or y1 >= r.y2):
+                return True
+        return False
+
     def via_is_free(self, x, y, a_layer=None, b_layer=None):
         """Can this net drop a via column at (x, y)?
 
@@ -260,7 +283,15 @@ class MazeRouter:
             for t in self.tm.tracks.get(layer, []):
                 if not (lo <= t.coord <= hi):
                     continue
-                if t.wire_overlaps(self.net, a, b):
+                #- On the pin layer, look at unattributed metal too and
+                #- let the route's own pins through. Everywhere else the
+                #- layer rule stands.
+                strict = layer in self.pin_only
+                for _other, s0, s1 in t.foreign_spans(
+                        self.net, a, b,
+                        tolerate_unattributed=(not strict)):
+                    if strict and self.own_metal(ax1, ax2, ay1, ay2):
+                        continue
                     return False
         return True
 
@@ -423,6 +454,7 @@ class MazeRouter:
         redundant route that shorts something.
         """
         layer = layer or getattr(a_rect, "layer", None) or self.tm.pin_layer
+        self._own = [a_rect, b_rect]
         start = (*self.pin_centre(a_rect), layer)
         goal = (*self.pin_centre(b_rect), layer)
         path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))

@@ -80,18 +80,31 @@ class Track:
     #- what a Track built outside one would use
     TOLERATE_UNATTRIBUTED_ON = ()
 
-    def wire_overlaps(self, net, lo, hi):
-        """Foreign wire actually inside lo..hi on this track."""
+    def foreign_spans(self, net, lo, hi, tolerate_unattributed=None):
+        """Spans in lo..hi that do not belong to `net`.
+
+        `tolerate_unattributed` defaults to the layer rule; pass False to
+        see unattributed metal too. A caller that knows which of it is
+        its OWN -- a route holds the pin rects it is joining -- can then
+        filter, which is the only way to allow a via on a pin without
+        also allowing one on the device rail beside it.
+        """
+        if tolerate_unattributed is None:
+            tolerate_unattributed = self.layer in self.TOLERATE_UNATTRIBUTED_ON
+        out = []
         for other, spans in self.wires.items():
             if other == net:
                 continue
-            if (other in self.UNATTRIBUTED
-                    and self.layer in self.TOLERATE_UNATTRIBUTED_ON):
+            if other in self.UNATTRIBUTED and tolerate_unattributed:
                 continue
             for a, b in spans:
                 if not (hi <= a or lo >= b):
-                    return True
-        return False
+                    out.append((other, a, b))
+        return out
+
+    def wire_overlaps(self, net, lo, hi, tolerate_unattributed=None):
+        """Foreign wire actually inside lo..hi on this track."""
+        return bool(self.foreign_spans(net, lo, hi, tolerate_unattributed))
 
     def block(self, net, lo, hi):
         self.pins[net].append((lo, hi))

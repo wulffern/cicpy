@@ -61,7 +61,33 @@ class MazeRouterTest(unittest.TestCase):
         """
         r = self.router("VDS")
         self.assertEqual(r.via_extent("M1", "M2"), (4000, 4000))
-        #- a net may via on its own pin; the neighbour 4000 away is clear
+
+    def test_a_via_on_the_pin_layer_needs_to_know_its_own_pin(self):
+        """The contract that replaced "tolerate everything on M1".
+
+        Unattributed metal on the pin layer is indistinguishable from a
+        device's internal rail, so a router that does not know which pin
+        it is landing on must refuse -- otherwise it drops pads within
+        0.17 of a rail (14 li.3 errors, measured). Told which rect is
+        its own, it may proceed.
+        """
+        r = self.router("VDS")
+        #- knows nothing: refuses
+        self.assertFalse(r.via_is_free(VDS_PIN[0], VDS_PIN[1], "M1", "M2"))
+        #- told that this pin is its own: allowed
+        g = self.cell.nodeGraph.get("VDS")
+        own = [p.get("M1") for p in g.ports
+               if hasattr(p, "get") and p.get("M1") is not None]
+        #- overlapping the via BOX, not containing the centre: the probe
+        #- point is a track coordinate and need not sit inside the rect
+        w, h = r.via_extent("M1", "M2")
+        bx1, bx2 = VDS_PIN[0] - w // 2, VDS_PIN[0] + w // 2
+        by1, by2 = VDS_PIN[1] - h // 2, VDS_PIN[1] + h // 2
+        own = [x for x in own
+               if not (bx2 <= x.x1 or bx1 >= x.x2)
+               and not (by2 <= x.y1 or by1 >= x.y2)]
+        self.assertTrue(own, "fixture has no VDS pin near the probe point")
+        r._own = own
         self.assertTrue(r.via_is_free(VDS_PIN[0], VDS_PIN[1], "M1", "M2"))
 
     def test_a_via_only_occupies_the_layers_it_connects(self):

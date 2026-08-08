@@ -628,7 +628,34 @@ nothing else:
 So the order changes. Steps 2, 3 and 4 all assume the router can draw
 legal geometry, and it cannot yet:
 
-  **1b. Make emit() DRC-correct.** Add `minarea` (and whatever else the
+  **1b. Make emit() DRC-correct.** IN PROGRESS -- three of the four
+  pieces are in, and the error count on LELOTEMP_OTAR with stack
+  routing enabled went 306 -> 272. Not clean, and the remainder is one
+  specific thing.
+
+  Done:
+    - `minlength` in the technology, per metal: the minimum AREA
+      divided by the routing width. Area is not a length and cannot be
+      scaled by gamma with the other rules, so it is expressed as the
+      length that satisfies it. met3/met4 need 0.80 um at a 0.30 wire;
+      the rest are covered by the width already.
+    - emit() grows a run to `minlength` about its own centre.
+    - via pads get a spacing MARGIN in the obstacle check, not merely
+      non-overlap: a pad reaches 2000 from centre and a wire on the next
+      track starts at 1500.
+    - landing pads. A cut is 4000 square and a routing wire 3000 wide,
+      so a wire does not even COVER its own via, let alone enclose it.
+      Pads are cut + the layer's enclosure rule on each side, on both
+      layers, and the cut layer name comes from the technology's own
+      previous/next chain rather than a table.
+
+  Left, and it wants a design pass rather than another patch: the via
+  STACK. What remains is mcon.1/via3.1 width and via2.2/via3.2 spacing,
+  which say the pads are still not right for a multi-layer drop -- every
+  layer the stack passes through needs its own pad, sized by its own
+  enclosure rule, and adjacent stacks need to respect via spacing as a
+  pair rather than individually. Patching this at the end of a long run
+  produced 306 -> 327 -> 272; it should be designed once instead. Add `minarea` (and whatever else the
   rules need) to the technology -- allowed, and the right place -- then
   enforce minimum run length, minimum area, and spacing between the
   router's OWN segments. Until this is done, every route the search

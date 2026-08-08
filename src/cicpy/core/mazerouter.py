@@ -21,6 +21,8 @@ See plans/router_plan.md.
 """
 import heapq
 import logging
+
+from .rules import Rules
 from collections import defaultdict
 
 
@@ -211,6 +213,30 @@ class MazeRouter:
         return {l: self.tm.directions[l] for l in self._layers[lo:hi + 1]
                 if l in self.tm.directions}
 
+    def via_enclosure(self, layer, a_layer, b_layer):
+        """How far `layer` must extend past the cut joining a and b.
+
+        The cut layer sits between the two metals in the technology's
+        own chain, so its name comes from there rather than from a
+        table: M3.next is VIA3 when M4 is above it.
+        """
+        names = []
+        for l in (a_layer, b_layer):
+            try:
+                lay = Rules.getInstance().getLayer(l)
+            except Exception:
+                continue
+            for attr in ("next", "previous"):
+                v = getattr(lay, attr, "")
+                if v:
+                    names.append(v)
+        for v in names:
+            try:
+                return int(Rules.getInstance().get(layer, v + "enclosure"))
+            except Exception:
+                continue
+        return 0
+
     def via_extent(self, a_layer, b_layer):
         """(width, height) of the real cut between two layers."""
         key = tuple(sorted((a_layer, b_layer)))
@@ -280,8 +306,16 @@ class MazeRouter:
             horizontal = direction == "h"
             lo, hi = (ay1, ay2) if horizontal else (ax1, ax2)
             a, b = (ax1, ax2) if horizontal else (ay1, ay2)
+            #- A pad needs SPACE from a neighbour, not merely to miss
+            #- it. Checking only tracks whose coordinate is inside the
+            #- pad lets a wire one track away sit hard against it: the
+            #- pad reaches 2000 from centre and a wire on the next track
+            #- starts at 1500, so they overlap outright, and even clear
+            #- of that they must still be `space` apart.
+            margin = (self.rule(layer, "space")
+                      + self.rule(layer, "width") // 2)
             for t in self.tm.tracks.get(layer, []):
-                if not (lo <= t.coord <= hi):
+                if not (lo - margin <= t.coord <= hi + margin):
                     continue
                 #- On the pin layer, look at unattributed metal too and
                 #- let the route's own pins through. Everywhere else the
@@ -477,12 +511,32 @@ class MazeRouter:
             #- confused and why adjacent tracks abutted.
             w = width or self.rule(layer, "width")
             half = w // 2
+            #- A run must be long enough to satisfy the layer's minimum
+            #- area. The technology carries `minlength` for this --
+            #- min area divided by the routing width -- because area is
+            #- not a length and cannot be scaled by gamma like the rest.
+            #- Without it a one step run is 3000 x 3000 = 0.09 um2
+            #- against met3's 0.24 minimum, and every short segment the
+            #- router draws is a met3.6 error.
+            try:
+                minlen = self.rule(layer, "minlength")
+            except Exception:
+                minlen = w
             lx, hx = sorted((x1, x2))
             ly, hy = sorted((y1, y2))
             if lx == hx:
                 lx, hx = lx - half, hx + half
             if ly == hy:
                 ly, hy = ly - half, hy + half
+            #- grow the long axis to minlength, about its own centre so
+            #- the run still covers what it was routed to cover
+            if (hx - lx) >= (hy - ly):
+                if (hx - lx) < minlen:
+                    c = (lx + hx) // 2
+                    lx, hx = c - minlen // 2, c + minlen - minlen // 2
+            elif (hy - ly) < minlen:
+                c = (ly + hy) // 2
+                ly, hy = c - minlen // 2, c + minlen - minlen // 2
             #- built directly rather than through addRectangle so the
             #- NET can be set. Without it the rect comes back as "?" on
             #- the next map rebuild and the router cannot tell its own
@@ -491,6 +545,23 @@ class MazeRouter:
             rr.setNet(self.net)
             layout.add(rr)
             nrect += 1
+        #- Landing pads. A cut is 4000 square here and a routing wire
+        #- 3000 wide, so the wire does not even COVER the via, let alone
+        #- enclose it: every via drawn without a pad is an mcon.1 /
+        #- via3.1 width error and takes its neighbours with it. The pad
+        #- is the cut plus the layer's own enclosure rule on each side,
+        #- on BOTH layers the via joins.
+        for a_layer, b_layer, x, y in vias:
+            cw, ch = self.via_extent(a_layer, b_layer)
+            for lay in (a_layer, b_layer):
+                enc = self.via_enclosure(lay, a_layer, b_layer)
+                pw, ph = cw + 2 * enc, ch + 2 * enc
+                rr = Rect(lay, int(x - pw // 2), int(y - ph // 2),
+                          int(pw), int(ph))
+                rr.setNet(self.net)
+                layout.add(rr)
+                nrect += 1
+
         ncut = 0
         for a_layer, b_layer, x, y in vias:
             #- getInstance already returns a FRESH InstanceCut each call

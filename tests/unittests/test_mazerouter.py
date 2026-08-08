@@ -132,8 +132,8 @@ class MazeRouterTest(unittest.TestCase):
             pass
         changes = [(a, b) for a, b in zip(path, path[1:]) if a[2] != b[2]]
         self.assertTrue(changes, "no layer change at all")
-        for a, _b in changes:
-            self.assertTrue(r.via_is_free(a[0], a[1]),
+        for a, b in changes:
+            self.assertTrue(r.via_is_free(a[0], a[1], a[2], b[2]),
                             f"changed layer at {a[:2]}, which is blocked")
 
     def test_bounded(self):
@@ -180,9 +180,12 @@ class MazeRouterTest(unittest.TestCase):
         path = r.search((VDS_PIN[0], VDS_PIN[1], "M3"),
                         (VDS_PIN[0], VDS_PIN[1], "M4"))
         _runs, vias = r.segments(path)
-        for _a, _b, x, y in vias:
-            self.assertTrue(r.via_is_free(x, y),
-                            f"via at {(x, y)} sits on a foreign pin")
+        for la, lb, x, y in vias:
+            #- with the via's OWN layers: the check is layer specific,
+            #- and asking about a different pair asks a different
+            #- question
+            self.assertTrue(r.via_is_free(x, y, la, lb),
+                            f"via {la}->{lb} at {(x, y)} is not legal")
 
     def test_search_does_not_mutate(self):
         """Searching must be free of side effects, so a path can be

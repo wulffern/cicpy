@@ -1,0 +1,101 @@
+"""TrackMap's pin model, against a layout whose failure is known.
+
+These are regression tests for a bug that was invisible for a long time
+because nothing looked for it: `_collectPhysicalRects` skips ports, so
+no pin ever reached the track map, and every router question was
+answered as if pins did not exist. Four separate routing failures in
+LELOTEMP_OTAR were the same thing -- a route laid through another net's
+pin.
+
+The fixture is that layout, so a regression here is a regression against
+a measured short rather than against a made-up one.
+"""
+import os
+import unittest
+
+IP = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+CIC = os.path.join(IP, "lelo_temp_sky130a", "design",
+                   "LELO_TEMP_SKY130A", "LELOTEMP_OTAR.cic")
+LIB = os.path.join(IP, "rey_atr_sky130a", "design", "REY_ATR_SKY130A.cic")
+TECH = os.path.join(IP, "tech_sky130A", "cic", "sky130.tech")
+
+#- the measured collision: VS drops a via column into the resistor to
+#- reach its pin, and passes VDS's pin at y 104000 on the way
+RES_COLUMN = (265200, 274200)
+VS_SPAN = (57300, 290700)
+
+
+def _have_fixture():
+    return all(os.path.exists(p) for p in (CIC, LIB, TECH))
+
+
+@unittest.skipUnless(_have_fixture(), "LELOTEMP_OTAR fixture not present")
+class TrackMapPins(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        from cicpy.cic import load_design
+        from cicpy.core.rules import Rules
+        from cicpy.core.trackmap import TrackMap
+        Rules(TECH)
+        design = load_design(CIC, [LIB])
+        cls.cell = design.cells["LELOTEMP_OTAR"]
+        cls.plain = TrackMap(cls.cell).build()
+        cls.pins = TrackMap(cls.cell, block_pins=True).build()
+
+    def test_pins_off_by_default(self):
+        """The default must not change: block_pins is opt-in."""
+        n = sum(len(t.pins) for l in self.plain.tracks
+                for t in self.plain.tracks[l])
+        self.assertEqual(n, 0)
+
+    def test_pins_are_found(self):
+        n = sum(len(t.pins) for l in self.pins.tracks
+                for t in self.pins.tracks[l])
+        self.assertGreater(n, 0, "no pins reached the track map")
+
+    def test_pin_nets_are_real_nets(self):
+        """Not cell-local port names.
+
+        Attributing a pin from its own port name gives B, S, P, N -- the
+        subcell's names for its terminals, which say nothing about which
+        net the instance is wired to. The node graph is the only source
+        that knows.
+        """
+        nets = {n for l in self.pins.tracks for t in self.pins.tracks[l]
+                for n in t.pins}
+        self.assertIn("VDS", nets)
+        self.assertIn("VS", nets)
+        self.assertNotIn("B", nets)
+        self.assertNotIn("S", nets)
+
+    def test_column_blockers_finds_the_known_collision(self):
+        """The one the short report blamed."""
+        hits = self.pins.column_blockers("VS", *RES_COLUMN, *VS_SPAN)
+        nets = {h[0] for h in hits}
+        self.assertIn("VDS", nets)
+
+    def test_column_blockers_is_clean_where_nothing_is(self):
+        """A control, so the test above is not just 'returns something'."""
+        hits = self.pins.column_blockers("VS", *RES_COLUMN, 240000, 250000)
+        self.assertEqual(hits, [])
+
+    def test_a_net_does_not_block_itself(self):
+        hits = self.pins.column_blockers("VDS", *RES_COLUMN, *VS_SPAN)
+        self.assertNotIn("VDS", {h[0] for h in hits})
+
+    def test_same_layer_test_does_not_catch_it(self):
+        """Why column_blockers exists at all.
+
+        VS's trunk is on M4 and VDS's pin is on M1, so they never share a
+        track and a same-layer test reports nothing. This asserts the
+        limitation, so that if someone 'simplifies' column_blockers back
+        to a per-layer check the reason is right here.
+        """
+        free = self.pins.free_between("M4", *VS_SPAN, *RES_COLUMN)
+        aware = self.pins.free_for("VS", "M4", *VS_SPAN, *RES_COLUMN)
+        self.assertEqual(sorted(free), sorted(aware))
+
+
+if __name__ == "__main__":
+    unittest.main()

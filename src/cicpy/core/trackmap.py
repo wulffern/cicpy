@@ -133,8 +133,7 @@ class TrackMap:
     def build(self):
         #- _collectPhysicalRects already walks an arbitrary subtree, so
         #- scoping costs one argument
-        rects = [r for r in self.layout._collectPhysicalRects(
-                     self.scope, include_ports=self.block_pins)
+        rects = [r for r in self.layout._collectPhysicalRects(self.scope)
                  if getattr(r, "layer", "") in self.directions]
         if not rects:
             self.log.warning("no geometry on any routing layer")
@@ -169,14 +168,93 @@ class TrackMap:
             first = max(0, int((a - lo) // pitch))
             last = min(len(self.tracks[layer]) - 1, int((b - lo) // pitch))
             net = getattr(r, "net", "") or "?"
-            is_pin = bool(getattr(r, "isPin", False))
             for i in range(first, last + 1):
                 span_lo = r.x1 if horizontal else r.y1
                 span_hi = r.x2 if horizontal else r.y2
                 self.tracks[layer][i].occupy(net, span_lo, span_hi)
-                if is_pin:
-                    self.tracks[layer][i].block(net, span_lo, span_hi)
+        if self.block_pins:
+            self._mark_pins()
         return self
+
+    def _mark_pins(self):
+        x1, y1, x2, y2 = self.extent
+        for net, r in self._pin_rects():
+            layer = getattr(r, "layer", "")
+            if layer not in self.tracks:
+                continue
+            horizontal = self.directions[layer] == "h"
+            pitch = self.vpitch if horizontal else self.hpitch
+            lo = y1 if horizontal else x1
+            a = r.y1 if horizontal else r.x1
+            b = r.y2 if horizontal else r.x2
+            first = max(0, int((a - lo) // pitch))
+            last = min(len(self.tracks[layer]) - 1, int((b - lo) // pitch))
+            span_lo = r.x1 if horizontal else r.y1
+            span_hi = r.x2 if horizontal else r.y2
+            for i in range(first, last + 1):
+                self.tracks[layer][i].block(net, span_lo, span_hi)
+
+    def _pin_rects(self):
+        """(net, rect) for every pin, with the net resolved properly.
+
+        NOT from the port's own name. A subcell's port is called B or S
+        or P in its own cell and that says nothing about which net the
+        instance terminal is wired to -- attributing pins that way gives
+        cell-local names and a router that compares the wrong things.
+
+        The node graph already holds the answer: nodeGraph[net].ports is
+        the ports of that net, which is the same source
+        _directNodeAccessRects routes from. Reading pins from there
+        means the map and the router agree by construction.
+        """
+        graphs = getattr(self.layout, "nodeGraph", None)
+        if not graphs:
+            self.log.warning("no node graph; pins cannot be attributed to nets")
+            return
+        for net in getattr(self.layout, "nodeGraphList", []) or list(graphs):
+            g = graphs.get(net)
+            if g is None:
+                continue
+            for port in getattr(g, "ports", []):
+                for layer in self.directions:
+                    rr = port.get(layer) if hasattr(port, "get") else None
+                    if rr is not None:
+                        yield net, rr
+
+    def column_blockers(self, net, x1, x2, y1, y2):
+        """Foreign pins inside the via column (x1..x2) over y1..y2.
+
+        This, not same-layer overlap, is the test that matters. A trunk
+        on M4 and a pin on M1 never share a track, so `crosses_pin` on
+        either layer reports nothing -- measured, it rejected 0 of 3
+        candidate tracks for the one collision known to exist. What
+        actually collides is the VIA COLUMN: a route reaching a pin has
+        to come down through every layer at that x, and any other net's
+        pin in the way is shorted.
+
+        Verified against LELOTEMP_OTAR's VS/VDS failure: VS dropping at
+        x 265200..274200 over y 57300..290700 returns VDS at y 104000,
+        which is the pin the short report blamed.
+
+        Returns [(net, y, x1, x2)].
+        """
+        out = []
+        for layer, direction in self.directions.items():
+            horizontal = direction == "h"
+            for t in self.tracks.get(layer, []):
+                #- the coordinate the track sits at must be inside the
+                #- span the column travels through
+                lo, hi = (y1, y2) if horizontal else (x1, x2)
+                if not (lo <= t.coord <= hi):
+                    continue
+                a, b = (x1, x2) if horizontal else (y1, y2)
+                for other, spans in t.pins.items():
+                    if other == net:
+                        continue
+                    for s0, s1 in spans:
+                        if not (b <= s0 or a >= s1):
+                            out.append((other, int(t.coord), int(s0), int(s1)))
+        return out
 
     def free_for(self, net, layer, span_lo, span_hi, lo=None, hi=None):
         """Track indices `net` can use over span_lo..span_hi.

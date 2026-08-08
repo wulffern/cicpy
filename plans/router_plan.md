@@ -118,22 +118,48 @@ touch `route.py`. The existing `addConnectivityRoute` and
 net. Power stays on the existing `addRouteRing`/`addPowerStrap` — rings
 and straps are not a search problem and the user has excluded them.
 
-## Pin attribution is the next gap, and it is known
+## The obstacle is a via COLUMN, not a track overlap
 
-Step 2 works: 171 pin-bearing track entries appear on LELOTEMP_OTAR
-where there were 0, and 93 M1 tracks are correctly reported as carrying
-a pin foreign to `VS`. But the nets read `B`, `S`, `P`, `N` -- those are
-CELL-LOCAL port names from subcells, not the net the instance terminal
-is wired to. Pin attribution is only correct for top level ports.
+The most important correction this plan has had, and it only appeared by
+testing the mechanism against the failure it was built for.
 
-The router cannot use `crosses_pin` for real until that is closed. The
-mapping already exists: `getNodeAccessRects` resolves instance ports to
-nets through the node graph. So the division is:
+`crosses_pin` on a layer finds nothing. VS's trunk is on M4 and VDS's
+pin is on M1; they never share a track, so a same-layer test rejected
+**0 of 3** candidate tracks for the one collision known to exist. The
+model was right that pins are obstacles and wrong about what they
+obstruct.
 
-    node graph   which net a pin belongs to
-    TrackMap     where everything is, and what is free
+What collides is the via column. A route reaching a pin must come down
+through every layer at that x, and any other net's pin in that column is
+shorted. Asked that way, on the same layout:
 
-and the router asks both. That is step 2b, before Dijkstra.
+    column_blockers("VS", x 265200..274200, y 57300..290700)
+      -> VDS  at y 104000
+         R1<0> at y 64000
+
+VDS at y 104000 is exactly the pin the short report blamed. A control
+band with nothing in it returns clean, and a net does not block itself.
+
+This is now `TrackMap.column_blockers`, with seven regression tests in
+`tests/unittests/test_trackmap_pins.py` including one that asserts the
+same-layer test does NOT catch it -- so if anyone simplifies the column
+check back to a per-layer one, the reason is in the failure message.
+The tests were verified to fail when the mechanism is sabotaged.
+
+**For the router this sets the cost model.** A via column is not a point
+cost; it is an exclusive claim on (x, y-range) across all layers, and it
+is 8800 wide because that is the pad. Two nets wanting the same column
+is the conflict to search around, and it is why "which layer" was always
+the wrong question.
+
+## Pin attribution: closed
+
+Attributing a pin from its own port name gives `B`, `S`, `P`, `N` --
+the subcell's names for its own terminals, which say nothing about the
+net the instance is wired to. Pins are now read from
+`nodeGraph[net].ports` instead, the same source `_directNodeAccessRects`
+routes from, so the map and the router agree by construction. 1700 pin
+spans over 20 real nets on OTAR.
 
 ## Order of work
 
@@ -144,8 +170,9 @@ and the router asks both. That is step 2b, before Dijkstra.
    `Track.block/blocking/crosses_pin`, `TrackMap(block_pins=)` and
    `free_for(net, ...)`. M1 joins the map when pins are modelled,
    because that is where all 213 of OTAR's pins are.
-2b. **Resolve pin nets through the node graph** -- see above. Without it
-   `crosses_pin` compares cell-local port names.
+2b. **Resolve pin nets through the node graph.** DONE.
+2c. **`column_blockers`.** DONE -- and it, not `crosses_pin`, is what
+   the router must ask.
 3. **Dijkstra over one scope**, no hierarchy yet. Validate on
    `LELOTEMP_OTAR`'s `mid` channel against the known answer: the bars
    must land on the free tracks the `tracks` tool already reports.

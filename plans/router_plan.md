@@ -216,6 +216,35 @@ and 3 vias --
 -- and every via lands at a column `via_is_free` accepts. A straight run
 in the free channel collapses 14 nodes to a single rect with no vias.
 
+## Step 3c: VO is routed, by search
+
+The net route.py could not place at all. 13 opens -> **12, 0 shorts,
+0 DRC**, and the path is one the old flow would never have found:
+
+    M1 at xnd4's pin in the nmos row
+    M2 up   126000, 220000 -> 340000
+    M3 east 126000 -> 207000  at y 340000   <- the MID CHANNEL
+    M2 up   207000, 340000 -> 408000        -> xba2's pin
+
+y 340000 is inside the mid channel, which held 27 free M3 tracks the
+whole time and had never been used, because a plain route takes its bar
+height from the net's own pins. The search is not choosing a layer, it
+is choosing a path, so the channel is simply where the cheapest path
+goes.
+
+One bug on the way, and a nasty one: **`Cut.getInstance` already returns
+a fresh `InstanceCut`** and registers the cut cell for
+`Design.addCuts()` to hoist. Taking a `getCopy()` of it produced
+something the printer did not recognise as an instance -- the wires
+appeared in the .mag and **not one via did**, so the net stayed open
+with nothing in any report to say why. Only measuring the .mag for via
+geometry found it. Regression test added, verified to fail when the
+getCopy() is put back.
+
+Note also that a unit slip cost a cycle here: mag coordinates are
+internal/50, not internal/5, so a first check "found" no geometry that
+was in fact present.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to
@@ -231,11 +260,9 @@ in the free channel collapses 14 nodes to a single rect with no vias.
 3. **Dijkstra over one scope.** DONE -- `core/mazerouter.py`, 9 tests.
    Still returns a PATH, not geometry; nothing is drawn yet.
 3b. **Emit geometry from a path.** DONE -- segments() and emit().
-3c. **Route one real OTAR net end to end**: find the net's pins through
-   the node graph, search between them, emit, and check the result with
-   drc + connectivity. This is the first step that changes a layout,
-   and the first that can be judged by the same measure as the old
-   router.
+3c. **Route one real OTAR net end to end.** DONE -- VO, via an
+   afterRoute hook in LELOTEMP_OTAR.py. 0 shorts, 0 DRC, one fewer
+   open.
 4. **Promote a stack to a cell** and LVS it standalone. `r_deg` is the
    right first subject — it is 4 instances and already has clean LVS as
    `HRPPO12`, so a mismatch is the promotion's fault and nothing else.

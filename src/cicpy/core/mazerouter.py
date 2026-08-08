@@ -304,6 +304,24 @@ class MazeRouter:
             runs.append((last[2], start[0], start[1], last[0], last[1]))
         return runs, vias
 
+    @staticmethod
+    def pin_centre(rect):
+        return (int((rect.x1 + rect.x2) / 2), int((rect.y1 + rect.y2) / 2))
+
+    def connect(self, layout, a_rect, b_rect, layer="M1", width=None):
+        """Search between two pin rects and draw the result.
+
+        The convenience the pycells want: give it two pins, get geometry
+        or a Blocked with a reason. Deliberately explicit about WHICH
+        two pins -- picking them automatically needs the connectivity
+        components, and guessing them is how a router quietly adds a
+        redundant route that shorts something.
+        """
+        start = (*self.pin_centre(a_rect), layer)
+        goal = (*self.pin_centre(b_rect), layer)
+        path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))
+        return self.emit(layout, path, width=width)
+
     def emit(self, layout, path, width=None):
         """Draw `path` into `layout`. Returns (rects, cuts) counts.
 
@@ -328,12 +346,19 @@ class MazeRouter:
             nrect += 1
         ncut = 0
         for a_layer, b_layer, x, y in vias:
-            c = Cut.getInstance(a_layer, b_layer, 1, 1)
-            if c is None:
+            #- getInstance already returns a FRESH InstanceCut each call
+            #- and registers the cut cell in Cut._cuts, which is what
+            #- Design.addCuts() later hoists into the design. Taking a
+            #- getCopy() of it instead produced something the printer
+            #- did not recognise as an instance: the wires appeared in
+            #- the .mag and not one via did, so every routed net stayed
+            #- open with nothing to show why.
+            inst = Cut.getInstance(a_layer, b_layer, 1, 1)
+            if inst is None:
                 continue
-            cc = c.getCopy()
-            cc.moveCenter(int(x), int(y))
-            layout.add(cc)
+            inst.moveCenter(int(x), int(y))
+            inst.updateBoundingRect()
+            layout.add(inst)
             ncut += 1
         return nrect, ncut
 

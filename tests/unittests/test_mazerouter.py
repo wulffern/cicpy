@@ -148,6 +148,30 @@ class MazeRouterTest(unittest.TestCase):
         r.search((200000, 269000, "M3"), (239000, 269000, "M3"))
         self.assertEqual(len(self.cell.children), before)
 
+    def test_emit_makes_real_cut_instances(self):
+        """Vias must be InstanceCut, not copies.
+
+        Cut.getInstance already returns a fresh InstanceCut per call and
+        registers the cut cell for Design.addCuts() to hoist. Taking a
+        getCopy() of it produced something the printer did not recognise
+        as an instance: the wires appeared in the .mag and not one via
+        did, so the routed net stayed open with nothing to show why.
+        """
+        from cicpy.core.instancecut import InstanceCut
+        r = self.router("VS")
+        path = r.search((VDS_PIN[0], VDS_PIN[1], "M3"),
+                        (VDS_PIN[0], VDS_PIN[1], "M4"))
+        before = len(self.cell.children)
+        nrect, ncut = r.emit(self.cell, path)
+        added = self.cell.children[before:]
+        try:
+            self.assertGreater(ncut, 0)
+            cuts = [c for c in added if isinstance(c, InstanceCut)]
+            self.assertEqual(len(cuts), ncut,
+                             "emitted vias are not InstanceCut")
+        finally:
+            del self.cell.children[before:]
+
     def test_blocked_carries_a_diagnosis(self):
         """'No route' is not a diagnosis."""
         from cicpy.core.mazerouter import Blocked

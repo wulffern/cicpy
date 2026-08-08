@@ -1063,7 +1063,8 @@ def run_stack_pycells(layout, log=None):
     return handled
 
 
-def route_stack_level(layout, margin=None, log=None, only=None):
+def route_stack_level(layout, margin=None, log=None, only=None,
+                      boundary=False):
     """Route every net inside every stack. Returns (routed, blocked).
 
     `margin` is the halo around a stack's own geometry that the search
@@ -1106,24 +1107,37 @@ def route_stack_level(layout, margin=None, log=None, only=None):
     for stack in sorted(by_stack):
         if wanted is not None and stack not in wanted:
             continue
-        if stack in by_pycell:
+        #- WHICH NETS a stack routes depends on what the stack IS.
+        #-
+        #- As a region of a flat parent it routes only its INTERNAL
+        #- nets. A net with pins outside as well belongs to the level
+        #- above: joining the pins that happen to be inside calls the
+        #- net done while the rest of it is still elsewhere.
+        #-
+        #- As a CELL it must route every net it has two or more pins
+        #- of, boundary nets included, because a cell that leaves them
+        #- apart presents the same net at several ports and hands the
+        #- parent a problem it just created. `boundary=True` says the
+        #- stack is being built as a cell.
+        #-
+        #- The old comment here claimed a boundary net could not be
+        #- routed inside a series column without shorting the chain.
+        #- Measured on the column that produced that claim, with the
+        #- devices stacked in chain order: the gate column is clear of
+        #- every source and drain pin over the stack's whole height,
+        #- and the net routes as a plain vertical. The restriction was
+        #- costing closure for nothing.
+        internal = _internal_nets(layout, stack)
+        pycell_did = stack in by_pycell
+        if pycell_did and not boundary:
             log.info(f"{stack}: routed by its own pycell, not searching")
             continue
-        #- INTERNAL nets only. A net that also has pins outside this
-        #- stack is a boundary net and belongs to the next level up:
-        #- routing it here joins the pins that happen to be inside and
-        #- calls the net done, while the rest of it is still elsewhere.
-        #-
-        #- Measured: a gate net with two pins inside a series column
-        #- and more outside it gets a stack level vertical that runs the
-        #- length of the chain -- so it crosses the pin of every
-        #- intermediate node and shorts the lot in one command.
-        #- The same shape at group level has the whole column to get
-        #- around them with. This is the hierarchy doing its job, not a
-        #- restriction on it.
-        internal = _internal_nets(layout, stack)
         subs = {n: rs for n, rs in by_stack[stack].items()
-                if len(rs) >= 2 and n in internal}
+                if len(rs) >= 2 and (n in internal or boundary)}
+        if pycell_did:
+            #- its pycell has already spoken for the internal nets;
+            #- the boundary nets are still ours
+            subs = {n: rs for n, rs in subs.items() if n not in internal}
         if not subs:
             continue
         insts_in_stack = sorted({n for n, st in stack_membership(layout).items()

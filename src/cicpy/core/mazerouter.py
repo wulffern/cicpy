@@ -719,7 +719,10 @@ def stack_subckt(layout, entry):
         if name not in entry["instances"]:
             continue
         nodes = list(getattr(inst, "instancePortsList", []) or [])
-        cell = getattr(inst, "cell", "") or ""
+        #- the SCHEMATIC cell, not the layout one. They differ for a
+        #- diode connected device, which is placed as the D variant.
+        cell = (getattr(inst, "schematicCell", "")
+                or getattr(inst, "cell", "") or "")
         #- Skip instances with no nodes. Taps and fillers are LAYOUT,
         #- not circuit: the parent netlist has no such devices either,
         #- they are added by the placement. Emitting them produced a

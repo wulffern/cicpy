@@ -120,6 +120,14 @@ class LayoutCell(Cell):
         if layoutCell is None:
             raise ValueError(f"Could not find layout cell for {cktInst.subcktName}")
         i.cell = layoutCell.name
+        #- The name the SCHEMATIC uses, which is not always the layout
+        #- cell: a diode connected device is placed as the D variant,
+        #- and the netlist knows nothing of that substitution. Anything
+        #- generating a netlist from placed instances has to use this,
+        #- or it writes a layout-only cell into a schematic -- which is
+        #- what put REYATR_PCH_4C1F2D into a generated stack netlist and
+        #- made it fail LVS against a schematic that has no such cell.
+        i.schematicCell = getattr(cktInst, "subcktName", "") or layoutCell.name
         i.layoutcell = layoutCell
         i.libpath = layoutCell.libpath
         i.setSubcktInstance(cktInst)

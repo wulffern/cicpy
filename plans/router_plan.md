@@ -505,6 +505,52 @@ match. `LELOTEMP_OTAR_P_SW.py` is the first stack to have any: it routes
 its five internal nets, 5 of 5, and those are wires the parent never
 drew.
 
+### The diode blocker, diagnosed
+
+Chased to the end, and the answer is not what it looked like.
+
+`REYATR_PCH_4C1F2D` fails a standalone comparison -- layout 2 devices /
+3 nets against schematic 1 / 4 -- and five of the eight stacks contain
+one. The first guess was that this is a library bug. It is narrower.
+
+**Top-level LVS passes**: "Netlists match uniquely with port errors",
+and REYATR_PCH_4C1F2D does not appear anywhere in that log. It cannot,
+because the top-level SCHEMATIC instantiates the base cell:
+
+    xbs8 VCP VCP net5 VDD_1V8 REYATR_PCH_4C1F2
+
+The D variant is a LAYOUT substitution, made by
+`LayoutCell._diodeVariant` when the netlist shorts a gate to its own
+drain. netgen flattens it and matches. The cell is only ever compared
+against itself when something puts it on BOTH sides -- which a
+stack-level flow does.
+
+Two things came out of that:
+
+1. `Instance.schematicCell` now records `cktInst.subcktName` at
+   placement, because `addInstance` was discarding it. Anything
+   generating a netlist from placed instances needs the schematic name,
+   not the layout one, or it writes a layout-only cell into a schematic.
+   `stack_subckt` uses it.
+2. It does not fix the stack .sch, and it was worth finding out why:
+   that file is written by transpile FROM THE .cic, which stores placed
+   instances by their layout cell. So the schematic side of a stack
+   still names the D variant, and both sides compare it.
+
+So the remaining decision is a real one about the library, not a bug to
+patch quietly: **how should a diode-connected cell's schematic express
+the tie its layout makes?** `build_diode` adds the gate-to-drain
+connection to the M1 pattern and leaves the netlist saying D and G are
+separate nodes. Options, none free:
+
+  - give the D cell a 3-port interface (D S B) -- honest, but the
+    substitution maps a 4-node instance onto it
+  - keep 4 ports and tie G to D inside -- then G is a port connected to
+    D, which is what the layout has, but the generated subckt for a
+    PatternTransistor has no way to say so today
+  - leave it, and exclude *D cells from per-stack LVS -- cheapest, and
+    leaves a real cell unverified
+
 ### A second blocker, in the library rather than here
 
 `REYATR_PCH_4C1F2D` does not LVS standalone: its layout has 2 devices

@@ -73,9 +73,26 @@ class XschemSymbol(Cell):
             raise Exception(f"Could not find symbol {filename}")
 
 
+        #- The v line and the K block belong to whoever WRITES the
+        #- symbol, not to whoever reads it: printSymbol emits both from
+        #- scratch and then replays this buffer. Keeping the source's K
+        #- block meant a symbol that was read and written back grew a
+        #- second one each time -- harmless until a cell could find its
+        #- own previously generated .sym, and then it compounded every
+        #- run. A K block is "K {" through the line that closes it.
+        in_k_block = False
         with open(filename) as fi:
             for l in fi:
                 if(l.startswith("v")): # Skip v line, I want to add more info
+                    continue
+                if(in_k_block):
+                    if(l.lstrip().startswith("}")):
+                        in_k_block = False
+                    continue
+                if(l.startswith("K")):
+                    #- a one line K {...} closes on the same line
+                    if(l.count("{") > l.count("}")):
+                        in_k_block = True
                     continue
                 self.symbuffer.append(l)
                 if(l.startswith("B")):
@@ -225,6 +242,24 @@ class XschemPrinter(DesignPrinter):
 
         if(not path.isdir(self.libpath)):
             os.makedirs(self.libpath)
+
+        #- The library being written is also a place to FIND symbols.
+        #- technology.symbol_libs names the shared libraries -- the PDK's
+        #- devices, cpdk -- and cannot name this one, because which
+        #- library is being written is not a property of the technology.
+        #-
+        #- So a cell whose symbol sits beside its own schematic, which is
+        #- every cell a design or a transistor library ships, was
+        #- unfindable: transpiling a generated stack cell died with
+        #- "Could not find symbol <device>, are you missing a xschem lib
+        #- reference in the techfile?" while the .sym was in the very
+        #- directory being written to.
+        #-
+        #- Appended, not prepended: symbol_libs still wins, so a design
+        #- cannot shadow a PDK symbol by leaving a stale one lying about.
+        for s in glob.glob(self.libpath + os.path.sep + "*.sym"):
+            if s not in self.lib_symbols:
+                self.lib_symbols.append(s)
 
     def endLib(self):
         pass

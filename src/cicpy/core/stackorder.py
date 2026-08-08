@@ -4,12 +4,12 @@ A rail down a column of parallel devices crosses every pin it passes,
 so a net whose pins on that terminal are interleaved with another net's
 cannot have one. That is decided by the order the devices sit in, which
 is placement's business, not routing's -- and it is cheap to fix and
-expensive to discover. LELOTEMP_OTAR's load column came out
+expensive to discover. A load column measured in the wild came out
 
-    VD1 VD1 VD1 VD1 VBP VD1
+    A A A A B A
 
-and the one device in the middle is the difference between five pins on
-a rail and five pins going up to M2 and back.
+and the one odd device in the middle is the difference between five
+pins on a rail and five pins going up a layer and back.
 
 Finding that by drawing it costs a regeneration per column and reads as
 a short or an open with no hint of the cause. This reads the netlist

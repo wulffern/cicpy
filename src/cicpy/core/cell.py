@@ -213,6 +213,11 @@ class Cell(Rect):
             #- every plain instance, which emptied the box either way
             if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
                 continue
+            #- see calcBoundingRectFromList: a child still at
+            #- (0,0)-(0,0) is a placeholder, not geometry at the origin
+            if(child.x1 == 0 and child.y1 == 0
+               and child.x2 == 0 and child.y2 == 0):
+                continue
             cx1 = child.x1
             cx2 = child.x2
             cy1 = child.y1
@@ -262,6 +267,20 @@ class Cell(Rect):
 
         for cr in children:
             if ignoreBoundaryRouting and (not cr.isInstance() or cr.isCut()):
+                continue
+
+            #- A child that is still (0,0)-(0,0) is a PLACEHOLDER, not
+            #- geometry at the origin. A Route is created empty and only
+            #- gets its rects when route() runs, so any box taken while
+            #- one is queued is dragged to the origin and stays there.
+            #-
+            #- Measured: moving stack pycells to before beforeRoute --
+            #- where their routes can actually be drawn -- put five such
+            #- Routes in a cell before its power rings were built, and
+            #- the cell came out more than twice as wide, with the rails
+            #- stretched across the empty space and resetOrigins unable
+            #- to pull it back because something genuinely sat at x=0.
+            if cr.x1 == 0 and cr.y1 == 0 and cr.x2 == 0 and cr.y2 == 0:
                 continue
 
             cx1 = cr.x1

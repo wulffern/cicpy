@@ -160,10 +160,10 @@ class TrackMap:
         This is the difference between "which tracks are free" and
         "which tracks are free *for this piece of work*". Planning a
         route against every rect in the design is what makes a router
-        fight geometry it can never touch: measured on LELOTEMP_OTAR, a
-        top level query reports 0 M3 tracks free across the mid channel
-        because one trunk crosses all of them, while the span a given
-        net actually needs has 27.
+        fight geometry it can never touch: measured, a top level query
+        reported 0 horizontal tracks free across a mid channel because
+        one trunk crossed all of them, while the span the net actually
+        needed had 27.
         """
         self.log = logging.getLogger("TrackMap")
         self.layout = layout
@@ -383,9 +383,10 @@ class TrackMap:
         to come down through every layer at that x, and any other net's
         pin in the way is shorted.
 
-        Verified against LELOTEMP_OTAR's VS/VDS failure: VS dropping at
-        x 265200..274200 over y 57300..290700 returns VDS at y 104000,
-        which is the pin the short report blamed.
+        Verified against a measured short: the net dropping a via
+        column into a resistor over the full height of the row returns
+        the one foreign pin in its way, which is the pin the short
+        report blamed.
 
         Returns [(net, y, x1, x2)].
         """
@@ -418,15 +419,15 @@ class TrackMap:
         "?" as foreign and every via off every pin is blocked by the
         pin's own metal.
 
-        It is also a hole, and LELOTEMP_OTAR's ladder fell through it.
-        REYATR_PCH_4C1F2 carries an unattributed M1 strip up its left
-        side, 3200 wide, past both S and D. Those two pins are 4000
-        apart in y and overlap in x, so a route drawn on the PIN LAYER
-        between one device's D and the next device's S ties D to S
-        through that strip: measured, magic extracted every ladder
-        device with D and S as one node while cicpy's own check --
-        which tolerates the strip -- reported the short only after the
-        flood relabelled it.
+        It is also a hole, and a series column fell through it. A
+        transistor cell may carry an unattributed strip on the pin layer
+        up its side, past both S and D, and in a compact library those
+        two pins sit a few hundred nanometres apart and overlap in x. A
+        route drawn on the PIN LAYER between one device's D and the next
+        device's S then ties D to S through that strip: measured, magic
+        extracted a six device chain with D and S as one node, while the
+        connectivity check here -- which tolerates the strip -- reported
+        it only after the flood relabelled it.
 
         So: staying on the pin layer is safe only where there is no
         foreign metal AT ALL in the corridor, attributed or not. Ask

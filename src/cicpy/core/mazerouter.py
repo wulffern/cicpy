@@ -9,7 +9,7 @@ Independent of ``route.py``. Nothing here draws geometry yet: this is
 the search and the cost model, which is the part the old router does not
 have. It answers "where should this net go", and it answers it against
 obstacles that include *other nets' pins* -- the thing every routing
-failure in LELOTEMP_OTAR turned out to be.
+routing failure measured so far has turned out to be.
 
 The grid is (track_x, track_y, layer). Moves are a step along a layer's
 preferred direction, or a via to an adjacent layer. Dijkstra rather than
@@ -125,8 +125,8 @@ class MazeRouter:
 
         `column_blockers` walks every track on every layer, which is
         fine for a question asked once and ruinous for one asked per
-        node expansion: the first search over LELOTEMP_OTAR did not
-        finish in five minutes. The obstacles do not change during a
+        node expansion: on a cell of a couple of thousand rects the
+        first search did not finish in five minutes. The obstacles do not change during a
         search, so they are gathered once here.
 
         Buckets are keyed on the axis the pin's own layer runs along.
@@ -182,7 +182,7 @@ class MazeRouter:
         6000 apart -- while TrackMap cuts tracks every 3000. Two nets on
         ADJACENT tracks abut exactly and short.
 
-        That is what shorted VD2 into VS: the route was legal on its own
+        That is what shorts two nets a track apart: each is legal on its own
         track, which is all is_free used to check, and touched the
         neighbour's.
         """
@@ -613,15 +613,15 @@ class MazeRouter:
 #- --------------------------------------------------------------------
 #- Hierarchical routing: stack, then group, then top
 #- --------------------------------------------------------------------
-#- The large-net problem dissolves if it is never posed. VO has three
-#- pins in two stacks; routed whole it is a haul across the cell that
-#- collides with everything between. Routed stack-first it is one
-#- two-pin route inside xba and one hop between stacks.
+#- The large-net problem dissolves if it is never posed. A net with
+#- three pins spread over two stacks, routed whole, is a haul across
+#- the cell that collides with everything between. Routed stack-first
+#- it is one two-pin route inside a stack and one hop between stacks.
 #-
-#- Measured on LELOTEMP_OTAR: 13 nets of up to 33 pins become 19
+#- Measured on a mid-sized OTA: 13 nets of up to 33 pins become 19
 #- stack-level subproblems and 13 inter-stack hops, and 27 of 28
 #- subproblems are routable when scoped to their own stack -- including
-#- all five ladder nets, which whole-cell routing could only get 3 of.
+#- a five-net series column that whole-cell routing could only get 3 of.
 
 def stack_of(instance_name):
     """The stack an instance belongs to.
@@ -725,13 +725,11 @@ def _pin_layer_if_clear(path, tm, router, pins, trunk):
     no track spent on a layer the group level wants for crossing the
     cell. That is the prize, and it is worth asking for.
 
-    In practice, on REY_ATR, nothing earns it: both p_sw and r_deg have
-    unattributed device metal beside their pins and both fall through to
-    M2. R1<0> used to be drawn on M1 and is now on M2, two vias dearer.
-    That is the correct trade -- see below for what the M1 version was
-    actually doing -- but it does mean this test currently says no every
-    time here, and a technology whose primitives keep their internal
-    metal off the pin layer is the one that would collect on it.
+    Whether it is ever earned depends on the cell library. One whose
+    primitives keep their own metal off the pin layer will collect on
+    it; one that runs internal straps there will not, and every stack
+    falls through to a routing layer instead. Both are correct outcomes
+    -- the test is cheap and the fallback costs two vias.
 
     "Clear" took three goes to ask correctly.
 
@@ -739,19 +737,21 @@ def _pin_layer_if_clear(path, tm, router, pins, trunk):
     ROUTE.directions entry of its own, and so the map holds no tracks
     for it -- `is_free` answers False for every corridor, not because
     anything is there but because it has nothing to look at. That moved
-    a clean r_deg off the pin layer for no reason.
+    a stack off the pin layer that had every right to it.
 
     `column_blockers` is the right question for PINS, and it finds the
-    real ones: on p_sw it sees VCP's strap across the ladder's whole pin
-    band. But a pin is all it can see. A device's own internal metal
+    real ones -- a power strap laid across a column's whole pin band is
+    exactly what it is for. But a pin is all it can see. A device's own
+    internal metal
     carries no net, arrives as "?", and is tolerated on the pin layer --
     it has to be, or a via could not land on a pin at all.
 
     That tolerance is a hole and the ladder fell through it.
-    REYATR_PCH_4C1F2 runs an unattributed strip up its left side past
-    both S and D, which sit 4000 apart and overlap in x. Routed on the
-    pin layer, every ladder link tied its device's D to its S: magic
-    extracted all six devices with D and S as one node. So the corridor
+    A transistor cell may run an unattributed strip up its side past
+    both S and D, and in a compact library those two pins sit a few
+    hundred nanometres apart and overlap in x. Routed on the pin layer,
+    a series link then ties its device's D to its own S -- measured,
+    magic extracted a six device chain as one node. So the corridor
     must be clear of unattributed metal too, and over the PINS' full
     span rather than the trunk's -- route.py lands on the whole pin, and
     the strip sits at the far left of a 22400 pin while the trunk is in
@@ -831,13 +831,11 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
     #- squarely in line. Taking the shape from the path therefore asked
     #- route.py for a trunk and branches where a plain vertical would do.
     #-
-    #- These devices are nf=2: source on both sides, drain in the middle,
-    #- so a ladder link leaves one device's drain and lands on the next
-    #- device's source with 16400 of shared column between them --
-    #- measured on net1, x 275200..291200 overlap, clear of VCP's strap
-    #- at 300800. A straight route down that overlap is what a person
-    #- would draw, and it needs no trunk to be placed and no lane to be
-    #- reserved.
+    #- On an nf=2 device -- source on both sides, drain in the middle --
+    #- a series link leaves one drain and lands on the next source with
+    #- a wide shared column between them. A straight route down that
+    #- overlap is what a person would draw, and it needs no trunk placed
+    #- and no lane reserved.
     if pins and len(pins) == 2:
         a, b = pins
         ox1, ox2 = max(a.x1, b.x1), min(a.x2, b.x2)
@@ -846,9 +844,9 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
             #- share a column, separated vertically
             #- and SAY which column. Left to itself route.py takes the
             #- bar from the net's own rects, which for two offset pins
-            #- is their UNION -- 268800..297600 on net1, wider than
-            #- either pin and into VCP and VDD_1V8. The overlap is the
-            #- only part both pins actually share.
+            #- is their UNION, which is wider than either pin and
+            #- reaches whatever sits beside the column. The overlap is
+            #- the only part both pins actually share.
             mid = (ox1 + ox2) // 2
             #- FALL THROUGH for the layer. This used to return here with
             #- the pin layer, which skipped every check below it -- the
@@ -885,7 +883,7 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
         #- horizontal branches off it -- "-|--" puts the trunk left of
         #- the pins, "--|-" right -- which is the same shape a search
         #- returns whenever the two pins share neither row nor column.
-        #- Refusing them left every ladder net in p_sw unrouted, and
+        #- Refusing them left every net in a series column unrouted, and
         #- they are the majority of what a stack needs: pins at
         #- different heights in different columns.
         #-
@@ -909,9 +907,9 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
         #-
         #- A claim is a column AND a y interval, and both halves are
         #- load bearing. A bare set of x was wrong twice over: it kept
-        #- net3 out of a column net2 only used two rows away, and it let
-        #- net3 sit 3000 from net2 -- half the pitch the metal needs --
-        #- because that x was, strictly, not the claimed one.
+        #- a net out of a column its neighbour only used two rows
+        #- away, and it let two nets sit half the pitch the metal needs
+        #- apart, because that x was, strictly, not the claimed one.
         span = (min(n[1] for n in path), max(n[1] for n in path))
         clear = 0
         try:
@@ -931,34 +929,16 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
         #- and SAY where. Without this route.py places the trunk from
         #- the net's own pins, so five ladder nets in one column each
         #- compute the same lane and land on it: measured, one component
-        #- holding VCP and net1..net5. The search already picked a column
+        #- holding every net in the column. The search already picked one
         #- with room in it -- per net, against a map that has the last
         #- route in it -- and trunkx is route.py's way of being told.
         opts = f"trunkx={trunk}"
     else:
         return None
 
-    #- INSIDE A STACK, THE PIN LAYER IF IT IS FREE.
-    #-
-    #- A link between two devices in one column is a short local hop and
-    #- its pins are already on the pin layer: no via, no landing pad, and
-    #- no track spent on a layer the group level wants for crossing the
-    #- cell. r_deg's R1<0> is exactly that, and it routes clean on M1.
-    #-
-    #- "If free" is asked, and asking it correctly took two goes. It
-    #- cannot be asked of is_free: the pin layer is pin-only, so it has
-    #- no entry in ROUTE.directions and the map holds no TRACKS for it --
-    #- is_free then answers False for every corridor on it, not because
-    #- anything is there but because it has nothing to look at. It moved
-    #- a clean r_deg off M1 for no reason.
-    #-
-    #- The map does hold PINS on that layer, and that is the right
-    #- question anyway: is another net's metal in this corridor.
-    #- column_blockers answers it. Measured on p_sw, it finds VCP's strap
-    #- running the length of the column and reaching x 275200..304000,
-    #- across the ladder's whole pin band -- so the ladder falls through
-    #- to a routing layer, which is what M2 is for, while r_deg stays on
-    #- M1 because its column is clear.
+    #- The pin layer when it is clear, else a routing layer that runs
+    #- the way this shape needs. _pin_layer_if_clear carries the whole
+    #- argument for why that test is shaped as it is.
     vertical = rtype in ("||", "-|--", "--|-")
     want = "v" if vertical else "h"
 
@@ -1005,22 +985,22 @@ def draw_supplies_first(layout, log=None):
     mechanically. Ordering the list is not enough: a route added in
     beforeRoute is not DRAWN until the routing phase, so a stack search
     running in beforeRoute looks at a column with no strap in it and
-    happily routes through one. Measured on p_sw: all five ladder nets
-    came out shorted to VCP's strap, which the search never saw.
+    happily routes through one: measured, every net in a series column
+    came out shorted to a supply strap the search never saw.
 
     route() is idempotent only in the sense that nothing calls it twice
     -- LayoutCell.route() skips anything flagged _pre_routed, which is
     the hook this uses. Without the flag the geometry is drawn again in
     the routing phase.
 
-    INCOMPLETE, and measured as such: on LELOTEMP_OTAR this draws 0.
+    INCOMPLETE, and measured as such: on a real cell this draws 0.
     The rings and straps do not arrive as Route objects on layout.routes
     -- addRouteRing and addPowerConnection build their geometry another
     way -- so there is nothing here to pre-draw yet. It is not dead
     weight: the queued signal routes it does catch are real, and the
     remaining work is to find where the supply geometry is queued. Until
-    then a stack search still cannot see a strap, which is why p_sw
-    falls back off the pin layer rather than avoiding VCP on it.
+    then a stack search still cannot see a strap, which is why a stack
+    falls back off the pin layer rather than routing around one on it.
     """
     log = log or logging.getLogger("MazeRouter")
     supplies = supply_nets(layout)
@@ -1051,6 +1031,36 @@ def _internal_nets(layout, stack):
         if entry["stack"] == stack:
             return set(entry["internal"])
     return set()
+
+
+def run_stack_pycells(layout, log=None):
+    """Let each stack that ships a `<STACKCELL>.py` route itself.
+
+    Called by LayoutCell.layout() between afterPlace and beforeRoute, so
+    the Routes a stack pycell creates are drawn by the same route() pass
+    as everything else. Returns the set of stack keys that were handled.
+
+    Opt-in by the file existing. A design with no stack pycells -- which
+    is every design but one today -- sees no change at all.
+
+    The stacks handled here are remembered on the layout so
+    route_stack_level will not route them a second time: a stack that
+    has said how it wants to be wired has said it.
+    """
+    log = log or logging.getLogger("MazeRouter")
+    handled = set()
+    try:
+        plan = plan_stack_cells(layout)
+    except Exception as e:
+        log.warning(f"could not plan stack cells: {e}")
+        return handled
+    for entry in plan:
+        if _run_stack_pycell(layout, entry, log):
+            handled.add(entry["stack"])
+    if handled:
+        log.info(f"stack pycells routed: {sorted(handled)}")
+    layout._stacks_routed_by_pycell = handled
+    return handled
 
 
 def route_stack_level(layout, margin=None, log=None, only=None):
@@ -1090,18 +1100,24 @@ def route_stack_level(layout, margin=None, log=None, only=None):
     wanted = None
     if only:
         wanted = {only} if isinstance(only, str) else set(only)
+    #- a stack whose own pycell already wired it is finished. Routing it
+    #- again lays a second set of wires over the first.
+    by_pycell = getattr(layout, "_stacks_routed_by_pycell", None) or set()
     for stack in sorted(by_stack):
         if wanted is not None and stack not in wanted:
+            continue
+        if stack in by_pycell:
+            log.info(f"{stack}: routed by its own pycell, not searching")
             continue
         #- INTERNAL nets only. A net that also has pins outside this
         #- stack is a boundary net and belongs to the next level up:
         #- routing it here joins the pins that happen to be inside and
         #- calls the net done, while the rest of it is still elsewhere.
         #-
-        #- Measured, on p_sw: VCP has two pins in the ladder column and
-        #- more outside it, and a stack level vertical between them runs
-        #- the length of a SERIES chain -- so it crosses the pin of every
-        #- intermediate node and shorts VCP to net1..net5 in one command.
+        #- Measured: a gate net with two pins inside a series column
+        #- and more outside it gets a stack level vertical that runs the
+        #- length of the chain -- so it crosses the pin of every
+        #- intermediate node and shorts the lot in one command.
         #- The same shape at group level has the whole column to get
         #- around them with. This is the hierarchy doing its job, not a
         #- restriction on it.
@@ -1206,8 +1222,9 @@ def plan_stack_cells(layout, parent_name=None):
     #- measured, 17 bogus stacks out of 25.
     #- One definition of "which stack is this instance in", shared with
     #- pins_by_stack. They used to disagree -- this walked the
-    #- CellGroups and gave r_deg, that used the name prefix and gave xd
-    #- -- so asking the router to route "r_deg" matched nothing and
+    #- CellGroups and gave the stack's name, that used the instance
+    #- name prefix -- so asking the router for a stack by name matched
+    #- nothing and
     #- reported 0 routed, 0 blocked, which reads exactly like success.
     member = stack_membership(layout)
 
@@ -1282,7 +1299,7 @@ def stack_subckt(layout, entry):
         #- they are added by the placement. Emitting them produced a
         #- schematic the printer refused --
         #-   instance xfill_p_sw_0: []
-        #-   cell REYATR_PCH_4C1F2D: ['D','G','S','B']
+        #-   cell <PCH variant with a diode tie>: ['D','G','S','B']
         #- and they would have had nothing to match in LVS anyway, since
         #- they extract as geometry rather than as devices.
         if not nodes:
@@ -1314,7 +1331,7 @@ def design_of(layout):
     return None
 
 
-def _run_stack_pycell(layout, cell, entry, log):
+def _run_stack_pycell(layout, entry, log, cell=None):
     """Run <STACKCELL>.py if the design ships one.
 
     Divide and conquer, using the mechanism that already exists: a cell
@@ -1323,37 +1340,52 @@ def _run_stack_pycell(layout, cell, entry, log):
     routing lives in its own file rather than as another paragraph in
     the parent's.
 
-    The hook is `route(cell, layout, entry)`: the stack cell being
-    built, the parent it came from, and its plan entry. The parent is
-    passed because the node graph belongs to it -- a stack cell holds
-    the instances but not the netlist, so its pins are only findable
-    through the parent until the flow builds each stack from its own
-    generated subckt.
+    The hook is `route(layout, entry)`: the parent the stack came from,
+    and its plan entry. The parent is passed because the node graph
+    belongs to it -- a stack holds the instances but not the netlist, so
+    its pins are only findable through the parent until the flow builds
+    each stack from its own generated subckt.
+
+    The old three-argument form `route(cell, layout, entry)` is still
+    called, with cell=None. It only ever made sense when this ran at
+    publication time, which is exactly the bug: by then route() has run
+    and nothing the pycell adds will be drawn.
     """
+    import inspect as _inspect
     import importlib
     import os
     import sys
+    #- the plan carries the name; the CELL does not exist yet when this
+    #- runs, and that is the point
+    name = entry["name"]
     dirname = getattr(layout, "dirname", "") or ""
-    path = os.path.join(dirname, cell.name + ".py")
+    path = os.path.join(dirname, name + ".py")
     if not os.path.exists(path):
         return False
     if dirname not in sys.path:
         sys.path.append(dirname)
     try:
-        mod = importlib.import_module(cell.name)
+        mod = importlib.import_module(name)
         importlib.reload(mod)
     except Exception as e:
-        log.error(f"{cell.name}: pycell failed to import: {e}")
+        log.error(f"{name}: pycell failed to import: {e}")
         return False
     fn = getattr(mod, "route", None)
     if fn is None:
         return False
     try:
-        fn(cell, layout, entry)
-        log.info(f"{cell.name}: routed by its own pycell")
+        nargs = len(_inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        nargs = 2
+    try:
+        if nargs >= 3:
+            fn(cell, layout, entry)
+        else:
+            fn(layout, entry)
+        log.info(f"{name}: routed by its own pycell")
         return True
     except Exception as e:
-        log.error(f"{cell.name}: pycell route() raised: {e}")
+        log.error(f"{name}: pycell route() raised: {e}")
         return False
 
 
@@ -1394,16 +1426,15 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #-
         #- It does NOT explain the size, and that was measured before
         #- assuming it did. A stack is as wide as the device columns it
-        #- holds plus 0.480 of guard: P_SW 8.480 for one 8.000 column,
-        #- R_DEG 16.480 for two. That 0.480 is the ring each REYATR cell
-        #- overhangs its box with so that abutted columns MERGE their
-        #- guards -- shared in the parent, and paid in full by a stack
-        #- standing alone. The size is right; there is nothing to trim.
+        #- holds plus the library's guard: one column plus its ring,
+        #- and twice that for two columns. The overhang is the guard
+        #- ring a cell carries past its own box so that abutted columns
+        #- MERGE their guards -- shared in the parent, and paid in full
+        #- by a stack standing alone. The size is right; nothing to trim.
         #-
         #- What does look wrong is the position: these cells keep the
-        #- parent's absolute coordinates (R_DEG at x 24.000, P_SW at
-        #- y 32.300), so reading extents straight out of the .mag makes
-        #- them appear to start far from the origin.
+        #- parent's absolute coordinates, so reading extents straight
+        #- out of the .mag makes them appear to start far from origin.
         cell.boundaryIgnoreRouting = True
         wanted = set(entry["instances"])
         for inst in layout.iterInstances():
@@ -1514,7 +1545,10 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         if hasattr(design, "cellnames") and name not in design.cellnames:
             #- ahead of the parent, so it is defined before it is used
             design.cellnames.insert(0, name)
-        _run_stack_pycell(layout, cell, entry, log)
+        #- The pycell is NOT run here. It used to be, and that made it
+        #- dead: this is afterPaint, route() ran long ago, and any Route
+        #- the pycell added was never drawn. It runs before beforeRoute
+        #- now -- see run_stack_pycells.
         made.append((name, fp, sorted(pins)))
         log.info(f"stack cell {name}: {len(wanted)} instances, "
                  f"{len(pins)} ports, fp={fp}")
@@ -1537,6 +1571,6 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
 #-
 #-   cicpy transpile <cell>.cic <tech> <LIB> --xschem --I <deps>
 #-
-#- 24 wires on LELOTEMP_OTAR_P_SW that way, against 0 by hand.
+#- 24 wires on a generated stack cell that way, against 0 by hand.
 
 

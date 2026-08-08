@@ -285,7 +285,7 @@ def apply(layout, cell_name=None, yaml_path=None, search_dirs=None):
 
         import cicpy.groups as gp
         gp.apply(layout)                         # uses layout.name
-        gp.apply(layout, "LELOTEMP_OTAN")        # explicit cell name
+        gp.apply(layout, "MYCELL")               # explicit cell name
         gp.apply(layout, yaml_path="path/to.yaml")
 
     Returns ``{group_name: created_object}`` so the caller can wire the

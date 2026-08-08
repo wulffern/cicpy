@@ -527,8 +527,8 @@ def blockers(cicfile: str, techfile: str, cell: str, net: str, box: str,
     via COLUMN: a route reaching a pin comes down through every layer at
     that x, and any other net's pin in the way is shorted.
 
-    Every routing failure measured in LELOTEMP_OTAR was this, four
-    separate times, and nothing in the old router could see it.
+    Every routing failure measured so far has been this, and nothing
+    in the old router could see it.
 
     Args:
         cicfile: Path to the .cic holding the layout.

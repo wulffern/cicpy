@@ -79,8 +79,8 @@ class LayoutCell(Cell):
         """The diode-connected twin of this device's cell, if it applies.
 
         A library can carry a variant that ties drain to gate inside the
-        cell, named by suffixing ``D``. In REYATR that tie is a single
-        column of M1 the pattern was already one column short of: no
+        cell, named by suffixing ``D``. In a library built for it that
+        tie is a single pattern column the cell already had spare: no
         via, no routing layer, nothing outside the abutment box. When
         the netlist shorts a device's gate to its own drain and such a
         cell exists, it is strictly better than anything drawn at
@@ -138,8 +138,9 @@ class LayoutCell(Cell):
         #- and the netlist knows nothing of that substitution. Anything
         #- generating a netlist from placed instances has to use this,
         #- or it writes a layout-only cell into a schematic -- which is
-        #- what put REYATR_PCH_4C1F2D into a generated stack netlist and
-        #- made it fail LVS against a schematic that has no such cell.
+        #- what puts a layout-only diode variant into a generated stack
+        #- netlist and makes it fail LVS against a schematic that has no
+        #- such cell.
         i.schematicCell = getattr(cktInst, "subcktName", "") or layoutCell.name
         i.layoutcell = layoutCell
         i.libpath = layoutCell.libpath
@@ -695,9 +696,9 @@ class LayoutCell(Cell):
                 #- A router needs them anyway, and needs them marked as
                 #- PINS rather than as wire. A pin of another net is not
                 #- merely occupied space to be shared -- it is space that
-                #- must not be crossed at all. Every routing failure in
-                #- LELOTEMP_OTAR was a trunk run through another net's
-                #- pin, and none of them were visible here because of
+                #- must not be crossed at all. Every routing failure
+                #- measured so far has been a trunk run through another
+                #- net's pin, and none were visible here because of
                 #- this `continue`.
                 if include_ports:
                     pr = child.getCopy()
@@ -1602,9 +1603,10 @@ class LayoutCell(Cell):
         stretches it to the ring on the *pin's* layer, with the via at the
         ring: from the source of an upper device that drags the pin's layer
         down across the drain and gate of everything below it. It is what
-        shorted the VCP ladder in lelo_temp and it shorts a whole row of
-        REY_ATR_SKY130A. Its geometry cannot be changed, every JNWATR design
-        in the wild depends on it, so the correct behaviour lives here.
+        shorted a gate ladder in one design and it shorts a whole row of
+        any library shaped that way. Its geometry cannot be changed --
+        designs in the wild depend on it -- so the correct behaviour
+        lives here instead.
 
         Three things are different, and all three are needed:
 
@@ -1892,6 +1894,25 @@ class LayoutCell(Cell):
         elif angle == "R270":
             r.rotate(90); r.rotate(90); r.rotate(90)
         self.add(r)
+
+    def _runStackPycells(self):
+        """Let every stack that ships a pycell route itself, before the
+        parent routes anything.
+
+        Opt-in by the existence of a `<STACKCELL>.py` beside the design,
+        so a cell with no such file is untouched and every existing
+        design behaves exactly as before. The built-in stack router is
+        NOT run from here: it would add internal routing to every design
+        that ever called addStack, which is not this method's business.
+        """
+        try:
+            from .mazerouter import run_stack_pycells
+        except Exception:
+            return
+        try:
+            run_stack_pycells(self, log=self.log)
+        except Exception as e:
+            self.log.error(f"stack pycells: {e}")
 
     def _pinLayer(self):
         """The layer the cells put their pins on, from the technology.
@@ -2493,6 +2514,20 @@ class LayoutCell(Cell):
             if getattr(r, 'debug_internal', False):
                 r.route()
                 r._pre_routed = True
+
+        #- STACKS ROUTE THEMSELVES FIRST, and the system asks them --
+        #- the design should not have to wire this up in its own
+        #- beforeRoute. Innermost first is the whole point of the
+        #- hierarchy: a stack's internal nets are settled against a
+        #- handful of instances before the parent commits a single
+        #- track to crossing the cell.
+        #-
+        #- HERE, and not in afterPaint where it used to sit. A pycell
+        #- called after paint can add all the Routes it likes; route()
+        #- has already run and nothing will ever draw them. That is what
+        #- made the first stack pycell look like it worked -- it logged
+        #- a success and left every net it touched open.
+        self._runStackPycells()
 
         self._runMethod(pycell,data,"beforeRoute")
 

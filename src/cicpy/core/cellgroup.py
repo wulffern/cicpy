@@ -748,10 +748,11 @@ class StackGroup(CellGroup):
         """A rail down a column of parallel devices, over one terminal.
 
         ``align`` picks which part of the pin the rail sits on, and on a
-        library whose pins overlap in x that is the whole game. REYATR
-        lays the source rail over columns 10..16 of its pattern and the
-        drain run over 12..18: the two share five columns, so a rail
-        taking the full pin width for each shorts them the moment both
+        library whose pins overlap in x that is the whole game. A
+        library may lay its source rail over one span of its pattern
+        columns and the drain run over another that overlaps it, so a
+        rail taking the full pin width for each shorts them the moment
+        both
         are asked for. Taking the *left* edge for one and the *right*
         edge for the other keeps each on the part of its pin the other
         does not have, and both stay on M1.
@@ -865,8 +866,8 @@ class StackGroup(CellGroup):
             x1, x2 = min(d.x1, g.x1), max(d.x2, g.x2)
             return [Rect(layer, x1, y1, x2 - x1, y2 - y1)]
 
-        #- diagonal, which is where REYATR puts them: G is a tab above
-        #- and to one side of the wide D bar. A block in the gate's own
+        #- diagonal, which is where a compact library tends to put
+        #- them: G a tab above and to one side of the wide D bar. A block in the gate's own
         #- column reaching down into the drain's band, and a short bar
         #- along that band back into the drain
         gx1, gx2 = widen(g.x1, g.x2)
@@ -1083,10 +1084,10 @@ class StackGroup(CellGroup):
 
         A rail down a column crosses every pin it passes, so a net whose
         pins are interleaved with another's cannot have one. Placement
-        decides that, not routing: ``n_load_a`` came out
-        VD1 VD1 VD1 VD1 **VBP** VD1, and one device moved to the end of
-        the column is the difference between a rail and a trip up to M2
-        and back for five pins.
+        decides that, not routing: a load column measured in the wild
+        came out A A A A **B** A, and moving the one odd device to the
+        end of the column is the difference between a rail and a trip up
+        a layer and back for five pins.
 
         Grouping is stable, so a net keeps the internal order the
         placement gave it and the nets keep the order of their first

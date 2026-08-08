@@ -630,23 +630,31 @@ def plan_stack_cells(layout, parent_name=None):
     #-
     #- Note the groups exist only DURING the flow. A .cic reloaded from
     #- disk has none, so this has to run inside a pycell hook.
+    #- A stack is a StackGroup. Identified by TYPE, not by shape: the
+    #- shape lies. A StackGroup's children include RouteBundles, which
+    #- carry `.instances` too -- they are routing helpers holding the
+    #- same devices -- so "a group with instances and no sub-groups"
+    #- walks past the real stack and lands on a bundle. The bundles have
+    #- no tap_instances, so every tap then fell out into a pseudo-stack
+    #- of its own, and only r_deg came out right, because r_deg happens
+    #- to have no bundles.
+    from cicpy.core.cellgroup import StackGroup
     member = {}
 
-    def _walk(grp, depth=0):
-        insts_here = (list(getattr(grp, "instances", []))
-                      + list(getattr(grp, "tap_instances", [])))
-        kids = [c for c in getattr(grp, "children", []) or []
-                if hasattr(c, "instances")]
-        #- a group with instances and no sub-groups is a stack
-        if insts_here and not kids:
+    def _walk(grp):
+        if isinstance(grp, StackGroup):
             gname = getattr(grp, "name", "")
-            for inst in insts_here:
+            for inst in (list(getattr(grp, "instances", []))
+                         + list(getattr(grp, "tap_instances", []))):
                 nm = getattr(inst, "instanceName", "") or ""
                 if nm and gname:
                     member[nm] = gname
-        for c in kids:
-            _walk(c, depth + 1)
+            return  #- do not descend: below here is routing, not placement
+        for c in getattr(grp, "children", []) or []:
+            if isinstance(c, (StackGroup, CellGroup)):
+                _walk(c)
 
+    from cicpy.core.cellgroup import CellGroup
     for grp in getattr(layout, "cellgroups", []) or []:
         _walk(grp)
     for inst in layout.iterInstances():

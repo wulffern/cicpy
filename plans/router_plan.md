@@ -513,8 +513,17 @@ Chased to the end, and the answer is not what it looked like.
 3 nets against schematic 1 / 4 -- and five of the eight stacks contain
 one. The first guess was that this is a library bug. It is narrower.
 
-**Top-level LVS passes**: "Netlists match uniquely with port errors",
-and REYATR_PCH_4C1F2D does not appear anywhere in that log. It cannot,
+**CORRECTION.** An earlier version of this section said top-level LVS
+passes. It does not, and never did: that claim came from a grep piped
+through `head -3`, which showed three per-SUBCIRCUIT "Netlists match
+uniquely" lines and cut off the real one. The full log ends
+
+    Final result: Netlists do not match.
+
+which is what a design with 13 open nets should say. Any reasoning built
+on "the top passes, so X is fine" was built on nothing.
+
+What IS true is that REYATR_PCH_4C1F2D does not appear in that log,
 because the top-level SCHEMATIC instantiates the base cell:
 
     xbs8 VCP VCP net5 VDD_1V8 REYATR_PCH_4C1F2
@@ -550,6 +559,32 @@ separate nodes. Options, none free:
     PatternTransistor has no way to say so today
   - leave it, and exclude *D cells from per-stack LVS -- cheapest, and
     leaves a real cell unverified
+
+### Tried: no diode variants at all
+
+`layout.useDiodeVariant = False` (the switch is in cicpy and stays).
+The result is a clean no, and worth keeping because it looks free right
+up until it is not.
+
+The layout is unmoved: **0 DRC, 0 shorts, 13 opens**, the same counts as
+with the variants on. But LVS goes from its usual result to worse, and
+the connectivity report says why -- the nets FRAGMENT:
+
+    VD1  3 components -> 6
+    VD2  3 -> 5
+    VD3  6 -> 7
+    VBP  3 -> 4      VCP 3 -> 4
+
+Those extra fragments are the missing ties. The *D cell is not an
+optimisation; it is currently the only thing connecting those gates to
+their drains, and nothing else offers to. The open COUNT does not move
+because every affected net was already open, which is exactly why the
+top-line numbers looked unchanged.
+
+Doing without them is still reasonable -- each tie is short, local, and
+gate-to-drain of one device, which is the easiest thing a stack-level
+router will ever be asked for. But it has to be routed first. Turning
+the switch off before that trades working connections for nothing.
 
 ### A second blocker, in the library rather than here
 

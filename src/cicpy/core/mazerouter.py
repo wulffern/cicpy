@@ -438,3 +438,88 @@ class MazeRouter:
             node = prev[node]
             path.append(node)
         return list(reversed(path))
+
+
+#- --------------------------------------------------------------------
+#- Hierarchical routing: stack, then group, then top
+#- --------------------------------------------------------------------
+#- The large-net problem dissolves if it is never posed. VO has three
+#- pins in two stacks; routed whole it is a haul across the cell that
+#- collides with everything between. Routed stack-first it is one
+#- two-pin route inside xba and one hop between stacks.
+#-
+#- Measured on LELOTEMP_OTAR: 13 nets of up to 33 pins become 19
+#- stack-level subproblems and 13 inter-stack hops, and 27 of 28
+#- subproblems are routable when scoped to their own stack -- including
+#- all five ladder nets, which whole-cell routing could only get 3 of.
+
+def stack_of(instance_name):
+    """The stack an instance belongs to.
+
+    Same rule ciccreator uses for placement groups: the leading
+    non-digit run of the name (subcktinstance.cpp:24). XA1/XA2 are one
+    stack, XR1/XM1 are two.
+    """
+    import re as _re
+    m = _re.match(r"^([^\d<>]+)", instance_name or "")
+    return m.group(1) if m else ""
+
+
+def pins_by_stack(layout, layer="M1"):
+    """{stack: {net: [rect, ...]}} for everything the node graph knows."""
+    from collections import defaultdict
+    out = defaultdict(lambda: defaultdict(list))
+    for net in getattr(layout, "nodeGraphList", []):
+        g = layout.nodeGraph.get(net)
+        if g is None:
+            continue
+        for port in getattr(g, "ports", []):
+            inst = getattr(port, "parent", None)
+            name = getattr(inst, "instanceName", "") if inst else ""
+            rect = port.get(layer) if hasattr(port, "get") else None
+            if name and rect is not None:
+                out[stack_of(name)][net].append(rect)
+    return out
+
+
+def route_stack_level(layout, margin=8000, log=None):
+    """Route every net inside every stack. Returns (routed, blocked).
+
+    Level one of three. Each stack is solved against its OWN extent, so
+    a route here cannot see -- or collide with -- anything in another
+    stack, and the search has the room that whole-cell routing has
+    already spent. Nets with one pin in a stack are left alone: there is
+    nothing to join, and the hop to the next stack is the next level's
+    problem.
+
+    The map is rebuilt per net because a route just drawn is an obstacle
+    for the next.
+    """
+    from cicpy.core.trackmap import TrackMap
+    log = log or logging.getLogger("MazeRouter")
+    routed, blocked = [], []
+    by_stack = pins_by_stack(layout)
+    for stack in sorted(by_stack):
+        subs = {n: rs for n, rs in by_stack[stack].items() if len(rs) >= 2}
+        if not subs:
+            continue
+        allr = [r for v in by_stack[stack].values() for r in v]
+        extent = (min(r.x1 for r in allr) - margin,
+                  min(r.y1 for r in allr) - margin,
+                  max(r.x2 for r in allr) + margin,
+                  max(r.y2 for r in allr) + margin)
+        for net, rects in sorted(subs.items()):
+            tm = TrackMap(layout, block_pins=True, extent=extent).build()
+            r = MazeRouter(tm, net)
+            try:
+                #- chain the pins: each to the previous, so an n-pin net
+                #- inside one stack comes out as one component
+                for a, b in zip(rects, rects[1:]):
+                    r.connect(layout, a, b)
+                    tm = TrackMap(layout, block_pins=True, extent=extent).build()
+                    r = MazeRouter(tm, net)
+                routed.append((stack, net))
+            except Blocked as e:
+                blocked.append((stack, net, str(e)))
+                log.warning(f"{stack}/{net}: {e}")
+    return routed, blocked

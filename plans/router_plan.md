@@ -58,36 +58,46 @@ for the search.
 
 ## The design
 
+### Route by LEVEL, not by net
+
+The first version of this plan classified NETS by scope: VO spans three
+groups, so VO is a top-level net, routed whole. That framing is what
+made VO hard, and it was wrong.
+
+Every net is routed at every level it touches, innermost first:
+
+    1. stack   every net, inside every stack it has 2+ pins in
+    2. group   between the stacks of a group, against their boundaries
+    3. top     between groups
+
+A large net is never posed as a large problem. Measured on
+LELOTEMP_OTAR, 13 open nets of up to 33 pins decompose into **19
+stack-level subproblems and 13 inter-stack hops**:
+
+    VO        3 pins -> xba:2, xnd:1                    + 1 hop
+    VDD_1V8  33 pins -> xba:12, xbl:14, xbs:7           + 2 hops
+    VD1      14 pins -> xbl:6, xnd:7, xns:1             + 2 hops
+
+VO stops being the hard net. It is one two-pin route inside xba and one
+hop, and the hop is between boundary ports rather than through
+everything in between.
+
+**Each level must be LVS clean before the next is built on it.** That is
+what makes the decomposition worth having rather than just tidier: a
+short at stack level is found against a handful of instances, not
+against 1969 rects at the top.
+
 ### Scope is a cell, and stacks become cells
 
-The rect-getting functions are the problem the user identified:
-`getNodeAccessRects` and `TrackMap.build` see the whole design, so every
-route is planned against every other route in the cell. Restricting the
-*query* is not enough — the fix is to make the scope a real hierarchy
-boundary.
-
-**Promote each stack to a cell.** A `CellGroup` that today is a
-placement convenience becomes a subcircuit with:
+Promoting each stack to a cell is what makes the levels real rather than
+a convention:
 
 - its own `.mag`, its own extracted netlist, and therefore **its own
-  LVS**. Errors are caught at the stack, not at the top, where a single
-  short currently hides behind 1969 rects.
-- ports on its boundary. This is the part that kills failure mode 2:
-  at the parent level a stack's internal pins are not visible, so no
-  trunk can pass through one. The parent routes to a *port*, and where
-  that port sits is the child's decision, made once.
-- reuse — two identical stacks are one cell.
-
-### Three scopes, outermost last
-
-    intra-stack   inside one stack cell. Obstacles: that cell only.
-                  Produces the boundary ports.
-    intra-group   between stacks of a group. Obstacles: the group's
-                  stack cells as solid blocks + their ports.
-    inter-group   the top. Obstacles: group cells as solid blocks.
-
-Each level sees O(10) obstacles rather than O(1000) rects, which is what
-makes A* cheap enough to run per net and admit a real cost model.
+  LVS**, which is what level 1 has to pass before level 2 exists.
+- ports on its boundary. At the parent level a stack's internal pins are
+  not visible, so no route can pass through one -- and a level-2 route
+  aims at a port whose position was decided once, by the child.
+- reuse: two identical stacks are one cell.
 
 ### The search
 
@@ -300,6 +310,30 @@ So the order of work gains a step that was not in the plan: **the router
 needs to route a SET, not a net.** Ordering by constrainedness, or
 rip-up-and-retry when a later net fails, or negotiated congestion. Until
 then it can close some nets in a column and will strand the rest.
+
+## Level 1 measured, 2026-08-08
+
+Feasibility, each subproblem scoped to its own stack extent: **27 of 28
+routable**, including all five ladder nets. Whole-cell routing could
+place only 3 of those 5 -- scoped, the search has the room that
+whole-cell routing had already spent. Only VBP in xba fails.
+
+Drawn for real (sequential, map rebuilt per net): **24 of 28 routed,
+LELOTEMP_OTAR 13 opens -> 9**, and **1 short**, VD2 into VS.
+
+So level 1 is NOT clean, and by its own rule nothing may be built on it
+yet. The short is not blindness: VS and VDS are both present in the
+track map as attributed wire, so the router saw them and drew into one
+anyway. The suspect is the width of the emitted rect against the track
+the step was checked on -- `is_free` tests the track's span along the
+route, while `emit` draws a rect half a pitch either side of the
+centreline, so a run can be legal on its own track and still overlap a
+neighbour's wire. Next cycle starts there.
+
+Also worth stating: this cell already carries hand-drawn top-level
+routes for VS and VDS, which cut across every stack. They predate the
+hierarchy and they are what level 1 keeps colliding with. The real test
+of the model is to remove them and let the router do all three levels.
 
 ## Order of work
 

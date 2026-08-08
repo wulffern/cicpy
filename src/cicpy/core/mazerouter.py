@@ -717,6 +717,78 @@ def pins_by_stack(layout, layer=None):
     return out
 
 
+def _pin_layer_if_clear(path, tm, router, pins, trunk):
+    """The pin layer, but only where nothing else is on it. Else None.
+
+    A link between two devices in one column is a short local hop and
+    its pins are already on the pin layer: no via, no landing pad, and
+    no track spent on a layer the group level wants for crossing the
+    cell. That is the prize, and it is worth asking for.
+
+    In practice, on REY_ATR, nothing earns it: both p_sw and r_deg have
+    unattributed device metal beside their pins and both fall through to
+    M2. R1<0> used to be drawn on M1 and is now on M2, two vias dearer.
+    That is the correct trade -- see below for what the M1 version was
+    actually doing -- but it does mean this test currently says no every
+    time here, and a technology whose primitives keep their internal
+    metal off the pin layer is the one that would collect on it.
+
+    "Clear" took three goes to ask correctly.
+
+    It cannot be asked of `is_free`: the pin layer is pin-only, has no
+    ROUTE.directions entry of its own, and so the map holds no tracks
+    for it -- `is_free` answers False for every corridor, not because
+    anything is there but because it has nothing to look at. That moved
+    a clean r_deg off the pin layer for no reason.
+
+    `column_blockers` is the right question for PINS, and it finds the
+    real ones: on p_sw it sees VCP's strap across the ladder's whole pin
+    band. But a pin is all it can see. A device's own internal metal
+    carries no net, arrives as "?", and is tolerated on the pin layer --
+    it has to be, or a via could not land on a pin at all.
+
+    That tolerance is a hole and the ladder fell through it.
+    REYATR_PCH_4C1F2 runs an unattributed strip up its left side past
+    both S and D, which sit 4000 apart and overlap in x. Routed on the
+    pin layer, every ladder link tied its device's D to its S: magic
+    extracted all six devices with D and S as one node. So the corridor
+    must be clear of unattributed metal too, and over the PINS' full
+    span rather than the trunk's -- route.py lands on the whole pin, and
+    the strip sits at the far left of a 22400 pin while the trunk is in
+    the middle of it.
+
+    Falling through to a routing layer costs two vias and is correct.
+    """
+    if not (tm.pin_layer and router is not None and path):
+        return None
+    if not (path[0][2] == path[-1][2] == tm.pin_layer):
+        return None
+    ys = [n[1] for n in path]
+    col = trunk if trunk is not None else path[0][0]
+    try:
+        pad = Rules.getInstance().get(tm.pin_layer, "space")
+    except Exception:
+        pad = 0
+    try:
+        if tm.column_blockers(router.net, col - pad, col + pad,
+                              min(ys), max(ys)) != []:
+            return None
+    except Exception:
+        return None
+    if pins and len(pins) == 2:
+        sx1 = min(p.x1 for p in pins) - pad
+        sx2 = max(p.x2 for p in pins) + pad
+    else:
+        sx1, sx2 = col - pad, col + pad
+    try:
+        if tm.column_metal(router.net, tm.pin_layer, sx1, sx2,
+                           min(ys), max(ys)) != []:
+            return None
+    except Exception:
+        return None
+    return tm.pin_layer
+
+
 def route_spec(path, tm, claimed=(), router=None, pins=None):
     """Turn a searched path into a route.py command, or None.
 
@@ -778,12 +850,32 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
             #- either pin and into VCP and VDD_1V8. The overlap is the
             #- only part both pins actually share.
             mid = (ox1 + ox2) // 2
-            return (ends[0] if ends[0] == ends[1] else tm.pin_layer,
-                    "||", f"trunkx={mid}", None)
-        if oy2 > oy1 and ox2 <= ox1:
+            #- FALL THROUGH for the layer. This used to return here with
+            #- the pin layer, which skipped every check below it -- the
+            #- "is the pin layer actually free" test never ran on the
+            #- shape that needs it most. That is how the ladder came out
+            #- on M1 through a device's own internal metal.
+            facing = ("||", f"trunkx={mid}")
+        elif oy2 > oy1 and ox2 <= ox1:
             #- share a row, separated horizontally
-            return (ends[0] if ends[0] == ends[1] else tm.pin_layer,
-                    "-", "", None)
+            facing = ("-", "")
+        else:
+            facing = None
+        if facing is not None:
+            rtype, opts = facing
+            layer = _pin_layer_if_clear(path, tm, router, pins, None)
+            if layer is None:
+                on_path = [n[2] for n in path if n[2] != tm.pin_layer]
+                want = "v" if rtype == "||" else "h"
+                candidates = ([l for l in on_path
+                               if tm.directions.get(l) == want]
+                              or [l for l, d in tm.directions.items()
+                                  if d == want]
+                              or on_path)
+                if not candidates:
+                    return None
+                layer = candidates[0]
+            return (layer, rtype, opts, None)
     if len(xs) == 1 and len(ys) > 1:
         rtype = "||"
     elif len(ys) == 1 and len(xs) > 1:
@@ -870,22 +962,7 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
     vertical = rtype in ("||", "-|--", "--|-")
     want = "v" if vertical else "h"
 
-    layer = None
-    if tm.pin_layer and router is not None and ends[0] == ends[1] == tm.pin_layer:
-        ys = [n[1] for n in path]
-        col = trunk if trunk is not None else path[0][0]
-        pad = 0
-        try:
-            pad = Rules.getInstance().get(tm.pin_layer, "space")
-        except Exception:
-            pad = 0
-        try:
-            hits = tm.column_blockers(router.net, col - pad, col + pad,
-                                      min(ys), max(ys))
-        except Exception:
-            hits = None
-        if hits == []:
-            layer = tm.pin_layer
+    layer = _pin_layer_if_clear(path, tm, router, pins, trunk)
 
     if layer is None:
         on_path = [n[2] for n in path if n[2] != tm.pin_layer]

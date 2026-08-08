@@ -96,30 +96,65 @@ between:
     net3  484000/488000  and  516000/520000
     net5  524000/528000  and  556000/560000
 
-With `STACK_ROUTING = ("r_deg", "p_sw")` this takes the top from
-**16 opens / 0 shorts to 11 opens / 1 short**: net1..net5 all close and
-VCP drops out of the short. The change is committed; p_sw routing is
-left OFF so the tree stays at 0 shorts.
+That alone took the top to **11 opens / 1 short**. The second half of
+the fix, below, cleared the short.
 
-### What still blocks p_sw
+### The second half: the pin layer was the wrong layer
 
-One short remains, holding `VDD_1V8, net1..net5`. It is NOT the trunks —
-those are clean pin-to-pin verticals. Four bridges, all the same shape:
+The remaining short held `VDD_1V8, net1..net5`, and it was NOT the
+trunks — those were clean pin-to-pin verticals at x 281700..284700.
+Four bridges, all the same shape:
 
     net1|net2  M1 (268800,405000)-(272000,409000)
        touches M1 (268800,409000)-(272000,413000)
 
-3200 × 4000 rects at the **far left** of the column (x 268800 is the
-left edge of the wide pin), stacked exactly abutting in y. Not yet
-identified. Two things ruled out by measurement:
+3200 × 4000 rects at the **far left** of the column, abutting in y,
+`net=''`, parent `REYATR_PCH_4C1F2`. **Device-internal metal, not
+routes.** The cell runs an unattributed M1 strip up its left side past
+both S and D, and those two pins are 4000 apart in y and overlap in x.
+A ladder link drawn on the PIN LAYER ties its device's D to its own S
+through that strip.
 
-- not `LELOTEMP_OTAR_P_SW.py` — disabling its `route()` entirely changes
-  nothing, which independently confirms its routes are never drawn (it
-  adds them to a parent CellGroup at stack-publication time). **It is
-  dead code and should be deleted.**
-- not the trunks, which sit at x 281700..284700.
+Magic agreed, and more bluntly than cicpy did. Extracted:
 
-Find who owns those rects before changing anything else.
+    routed on M1:  Xxbs1 xbs8/S xbs8/G xbs8/S ...   D and S one node
+    baseline:      Xxbs1 xbs1/D xbs8/G xbs1/S ...   distinct
+
+All six ladder devices came out with D and S merged. cicpy's own check
+saw it only after the flood relabelled the strip, because unattributed
+metal is *tolerated* on the pin layer — it has to be, or no via could
+land on a pin at all. That tolerance is the hole the ladder fell
+through.
+
+Fixed in `TrackMap.column_metal` + `_pin_layer_if_clear`: the pin layer
+is chosen only when the corridor holds no foreign metal **attributed or
+not**, tested over the PINS' full span rather than the trunk's — the
+strip sits at the far left of a 22400 pin while the trunk is in the
+middle of it. Two earlier attempts missed because the test ran in the
+wrong place: `route_spec`'s "pins face each other" shortcut returned
+before any layer check ran at all.
+
+### State now
+
+`STACK_ROUTING = ("r_deg", "p_sw")`, ladder on M2:
+
+| | |
+|---|---|
+| `LELOTEMP_OTAR` | **0 DRC, 0 shorts, 11 opens** (was 16) |
+| magic extraction | proper series chain, every device D ≠ S |
+| `P_SW` stack cell | 25 routed rects (was 0) |
+| cicpy tests | pass |
+
+`R1<0>` moved from M1 to M2 as well — r_deg's column has unattributed
+metal too. Two vias dearer and correct.
+
+Still to do: `LELOTEMP_OTAR_P_SW.py` is **dead code**. Disabling its
+`route()` changes nothing, which independently confirms its routes are
+never drawn (it adds them to a parent CellGroup at stack-publication
+time). Delete it.
+
+The 11 remaining opens are group- and top-level work: `VDS VS VO VD1
+VD2 VD3 VBP VCP VDD_1V8 PWRUP_1V8 PWRUP_N_1V8`.
 
 ### Also fixed since
 

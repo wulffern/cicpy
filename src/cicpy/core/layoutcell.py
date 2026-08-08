@@ -773,6 +773,35 @@ class LayoutCell(Cell):
             parent = getattr(parent, "parent", None)
         return None
 
+    @staticmethod
+    def _getShapeOwner(rect):
+        """Name the instance or cut a rect came out of.
+
+        A bridge whose two rects have no `route` is geometry somebody
+        PLACED, and without this the report says so only by omission --
+        which reads as "unknown" and sends the reader looking at the
+        router. Naming the instance turns four anonymous boxes into
+        "these two devices touch".
+        """
+        parent = getattr(rect, "parent", None)
+        seen = set()
+        chain = []
+        while parent is not None and id(parent) not in seen:
+            seen.add(id(parent))
+            if hasattr(parent, "isRoute") and parent.isRoute():
+                return None
+            iname = getattr(parent, "instanceName", "")
+            cname = getattr(parent, "name", "")
+            if iname and iname != cname:
+                chain.append(f"{iname}:{cname}" if cname else iname)
+            elif cname:
+                chain.append(str(cname))
+            parent = getattr(parent, "parent", None)
+        if not chain:
+            return None
+        #- innermost first, and drop the top cell: it is on every line
+        return " < ".join(chain[:3])
+
     def _captureRouteDebug(self, api_name, params):
         callsite = ""
         command = f"{api_name}(" + ", ".join(f"{k}={params[k]!r}" for k in params) + ")"
@@ -916,11 +945,13 @@ class LayoutCell(Cell):
                         "layer": a.layer,
                         "rect": [int(a.x1), int(a.y1), int(a.x2), int(a.y2)],
                         "route": self._getRouteSource(a),
+                        "owner": self._getShapeOwner(a),
                     },
                     "b": {
                         "layer": b.layer,
                         "rect": [int(b.x1), int(b.y1), int(b.x2), int(b.y2)],
                         "route": self._getRouteSource(b),
+                        "owner": self._getShapeOwner(b),
                     },
                 })
         #- the same pair of nets can meet in many places; show a few of
@@ -1136,6 +1167,8 @@ class LayoutCell(Cell):
                 where = route.get("debug_callsite", "")
                 text += f" [{route.get('name','')} {route.get('options','')}"
                 text += f" at {where}]" if where else "]"
+            elif s.get("owner"):
+                text += f" [{s['owner']}]"
             return text
         return (f"BRIDGE {'|'.join(bridge['nets'])}: "
                 f"{side(bridge['a'])} touches {side(bridge['b'])}")

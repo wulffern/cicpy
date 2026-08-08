@@ -407,6 +407,46 @@ class TrackMap:
                             out.append((other, int(t.coord), int(s0), int(s1)))
         return out
 
+    def column_metal(self, net, layer, x1, x2, y1, y2):
+        """Metal in the column that is not `net`'s, INCLUDING unattributed.
+
+        `column_blockers` answers with PINS, and a pin is all it can
+        answer with: `_collectPhysicalRects` cannot resolve a rect
+        inside an instance to a net, so a device's own internal rails
+        arrive as "?" and are tolerated everywhere on the pin layer.
+        That tolerance is what makes the router usable at all -- treat
+        "?" as foreign and every via off every pin is blocked by the
+        pin's own metal.
+
+        It is also a hole, and LELOTEMP_OTAR's ladder fell through it.
+        REYATR_PCH_4C1F2 carries an unattributed M1 strip up its left
+        side, 3200 wide, past both S and D. Those two pins are 4000
+        apart in y and overlap in x, so a route drawn on the PIN LAYER
+        between one device's D and the next device's S ties D to S
+        through that strip: measured, magic extracted every ladder
+        device with D and S as one node while cicpy's own check --
+        which tolerates the strip -- reported the short only after the
+        flood relabelled it.
+
+        So: staying on the pin layer is safe only where there is no
+        foreign metal AT ALL in the corridor, attributed or not. Ask
+        this before choosing it; ask `column_blockers` for the ordinary
+        "is another net's pin in the way" question.
+
+        Returns [(net_or_"?", coord, span_lo, span_hi)].
+        """
+        out = []
+        horizontal = self.directions.get(layer) == "h"
+        lo, hi = (y1, y2) if horizontal else (x1, x2)
+        a, b = (x1, x2) if horizontal else (y1, y2)
+        for t in self.tracks.get(layer, []):
+            if not (lo <= t.coord <= hi):
+                continue
+            for other, s0, s1 in t.foreign_spans(net, a, b,
+                                                 tolerate_unattributed=False):
+                out.append((other, int(t.coord), int(s0), int(s1)))
+        return out
+
     def free_for(self, net, layer, span_lo, span_hi, lo=None, hi=None):
         """Track indices `net` can use over span_lo..span_hi.
 

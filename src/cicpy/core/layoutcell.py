@@ -91,6 +91,19 @@ class LayoutCell(Cell):
         terminals in the expected order — this is a substitution, and a
         substitution that is not certain should not happen.
         """
+        #- A design may decline the substitution. It buys a free tie --
+        #- one character of M1, no via, nothing to route -- at the cost
+        #- of a layout cell that is not the schematic cell, and that
+        #- difference is only invisible while LVS is run at the top. Put
+        #- the same cell on both sides, as a per-stack flow does, and it
+        #- has to be compared against itself: layout 2 devices / 3 nets
+        #- against schematic 1 / 4, because the tie is in the M1 pattern
+        #- and not in the netlist.
+        #-
+        #- Off, the gate-to-drain connection becomes a route like any
+        #- other -- and a short, local, stack-internal one.
+        if not getattr(self, "useDiodeVariant", True):
+            return None
         name = getattr(cktInst, "subcktName", "")
         if not name or name.endswith("D"):
             return None

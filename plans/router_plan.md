@@ -161,6 +161,43 @@ net the instance is wired to. Pins are now read from
 routes from, so the map and the router agree by construction. 1700 pin
 spans over 20 real nets on OTAR.
 
+## Step 3, built: what the search found that the plan did not predict
+
+`core/mazerouter.py`. Dijkstra over (track_x, track_y, layer), moves
+along a layer's direction or a via between adjacent layers, obstacles
+from the pin-aware TrackMap. Nine tests in
+`tests/unittests/test_mazerouter.py`, verified to fail when the pin
+check is sabotaged.
+
+It works: a clear horizontal span comes back as a straight run on one
+layer, and a layer change on top of a foreign pin is refused and routed
+around -- out along M3 clear of the pin's x-span, up, and back.
+
+Three things only appeared by running it, and all three are worth more
+than the code:
+
+**The grid was unbounded.** `TrackMap.track_at` returns the NEAREST
+track, so it answers for coordinates far outside the cell. The first
+search wandered off and did not terminate in five minutes. `in_bounds`
+against the scope extent fixes it, and it is a reminder that the scope
+is not just an optimisation -- without a boundary the search has no
+reason to stop.
+
+**Obstacle queries must be indexed, not scanned.** `column_blockers`
+walks every track on every layer, which is right for a question asked
+once and ruinous per node expansion. Bucketed once per search: 3741
+boxes, 1000 via checks in 0.010s. Deduplicating mattered too -- one pin
+spans many tracks and was indexed 45 times.
+
+**A via pad is wider than the resistor's pin pitch, and that is the
+whole story.** The resistor's terminals are 4000 apart; a via pad is
+8800. A pad centred on one covers the other, so NO layer change is
+possible directly on either pin -- not by another net, and not by the
+net that owns it. This is the physical fact under every hand-routing
+short, and no amount of track or layer picking could have fixed it. The
+router is right to detour, and it is the first thing in this codebase
+that can even state the constraint.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to
@@ -173,9 +210,11 @@ spans over 20 real nets on OTAR.
 2b. **Resolve pin nets through the node graph.** DONE.
 2c. **`column_blockers`.** DONE -- and it, not `crosses_pin`, is what
    the router must ask.
-3. **Dijkstra over one scope**, no hierarchy yet. Validate on
-   `LELOTEMP_OTAR`'s `mid` channel against the known answer: the bars
-   must land on the free tracks the `tracks` tool already reports.
+3. **Dijkstra over one scope.** DONE -- `core/mazerouter.py`, 9 tests.
+   Still returns a PATH, not geometry; nothing is drawn yet.
+3b. **Emit geometry from a path** -- turn the node list into rects and
+   cuts, and route one real OTAR net with it end to end. This is the
+   next step and the first that can change a layout.
 4. **Promote a stack to a cell** and LVS it standalone. `r_deg` is the
    right first subject — it is 4 instances and already has clean LVS as
    `HRPPO12`, so a mismatch is the promotion's fault and nothing else.

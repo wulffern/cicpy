@@ -42,11 +42,28 @@ class Track:
         self.horizontal = horizontal
         #- net -> (min, max) along the track
         self.spans = defaultdict(lambda: [None, None])
+        #- net -> list of (lo, hi) pin spans. Kept apart from `spans`
+        #- because they answer a different question: a wire of another
+        #- net is something to avoid overlapping, a PIN of another net
+        #- is something no route may cross at all.
+        self.pins = defaultdict(list)
 
     def occupy(self, net, lo, hi):
         span = self.spans[net]
         span[0] = lo if span[0] is None else min(span[0], lo)
         span[1] = hi if span[1] is None else max(span[1], hi)
+
+    def block(self, net, lo, hi):
+        self.pins[net].append((lo, hi))
+
+    def blocking(self, net):
+        """Spans on this track that `net` may not cross: every other
+        net's pins."""
+        return [s for n, spans in self.pins.items() if n != net for s in spans]
+
+    def crosses_pin(self, net, lo, hi):
+        """True if a wire of `net` from lo..hi would run over a foreign pin."""
+        return any(not (hi <= a or lo >= b) for a, b in self.blocking(net))
 
     @property
     def nets(self):
@@ -73,8 +90,14 @@ class TrackMap:
     """
 
     DEFAULT_DIRECTIONS = {"M2": "v", "M3": "h", "M4": "v", "M5": "h"}
+    #- M1 is not a routing layer here -- it is the pin layer, and the
+    #- house rule reserves it for power. It still has to be in the map
+    #- when pins are being modelled, because that is where every pin
+    #- is: measured on LELOTEMP_OTAR, all 213 of them.
+    PIN_DIRECTIONS = {"M1": "h"}
 
-    def __init__(self, layout, directions=None, extent=None, scope=None):
+    def __init__(self, layout, directions=None, extent=None, scope=None,
+                 block_pins=False):
         """
         ``scope`` restricts the map to one subtree -- a CellGroup, a
         stack, a single instance -- instead of the whole cell.
@@ -91,7 +114,11 @@ class TrackMap:
         self.layout = layout
         self.scope = scope
         self.rules = Rules.getInstance()
+        self.block_pins = block_pins
         self.directions = dict(directions or self.DEFAULT_DIRECTIONS)
+        if block_pins:
+            for k, v in self.PIN_DIRECTIONS.items():
+                self.directions.setdefault(k, v)
         self.hpitch = int(self._rule("ROUTE", "horizontalgrid", 3000))
         self.vpitch = int(self._rule("ROUTE", "verticalgrid", 4000))
         self.extent = extent
@@ -106,7 +133,8 @@ class TrackMap:
     def build(self):
         #- _collectPhysicalRects already walks an arbitrary subtree, so
         #- scoping costs one argument
-        rects = [r for r in self.layout._collectPhysicalRects(self.scope)
+        rects = [r for r in self.layout._collectPhysicalRects(
+                     self.scope, include_ports=self.block_pins)
                  if getattr(r, "layer", "") in self.directions]
         if not rects:
             self.log.warning("no geometry on any routing layer")
@@ -141,11 +169,29 @@ class TrackMap:
             first = max(0, int((a - lo) // pitch))
             last = min(len(self.tracks[layer]) - 1, int((b - lo) // pitch))
             net = getattr(r, "net", "") or "?"
+            is_pin = bool(getattr(r, "isPin", False))
             for i in range(first, last + 1):
                 span_lo = r.x1 if horizontal else r.y1
                 span_hi = r.x2 if horizontal else r.y2
                 self.tracks[layer][i].occupy(net, span_lo, span_hi)
+                if is_pin:
+                    self.tracks[layer][i].block(net, span_lo, span_hi)
         return self
+
+    def free_for(self, net, layer, span_lo, span_hi, lo=None, hi=None):
+        """Track indices `net` can use over span_lo..span_hi.
+
+        Stricter than `free_between`: a track is rejected if it carries
+        another net at all, and also if crossing it would run over
+        another net's PIN. The second test is the one the old router
+        could not make -- every OTAR failure was a trunk laid through a
+        pin that nothing was looking at.
+        """
+        out = []
+        for i in self.free_between(layer, span_lo, span_hi, lo, hi):
+            if not self.tracks[layer][i].crosses_pin(net, span_lo, span_hi):
+                out.append(i)
+        return out
 
     #-----------------------------------------------------------------
     #- questions worth asking

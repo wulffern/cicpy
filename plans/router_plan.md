@@ -118,14 +118,34 @@ touch `route.py`. The existing `addConnectivityRoute` and
 net. Power stays on the existing `addRouteRing`/`addPowerStrap` — rings
 and straps are not a search problem and the user has excluded them.
 
+## Pin attribution is the next gap, and it is known
+
+Step 2 works: 171 pin-bearing track entries appear on LELOTEMP_OTAR
+where there were 0, and 93 M1 tracks are correctly reported as carrying
+a pin foreign to `VS`. But the nets read `B`, `S`, `P`, `N` -- those are
+CELL-LOCAL port names from subcells, not the net the instance terminal
+is wired to. Pin attribution is only correct for top level ports.
+
+The router cannot use `crosses_pin` for real until that is closed. The
+mapping already exists: `getNodeAccessRects` resolves instance ports to
+nets through the node graph. So the division is:
+
+    node graph   which net a pin belongs to
+    TrackMap     where everything is, and what is free
+
+and the router asks both. That is step 2b, before Dijkstra.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to
    `_collectPhysicalRects`. Smallest change, immediately useful to the
    `tracks` tool.
-2. **Pins as obstacles.** Teach `TrackMap` to mark other nets' pin rects
-   as blocked, not merely occupied. Failure mode 2 becomes visible in
-   the `tracks` report before anything is drawn.
+2. **Pins as obstacles.** DONE. `_collectPhysicalRects(include_ports=)`,
+   `Track.block/blocking/crosses_pin`, `TrackMap(block_pins=)` and
+   `free_for(net, ...)`. M1 joins the map when pins are modelled,
+   because that is where all 213 of OTAR's pins are.
+2b. **Resolve pin nets through the node graph** -- see above. Without it
+   `crosses_pin` compares cell-local port names.
 3. **Dijkstra over one scope**, no hierarchy yet. Validate on
    `LELOTEMP_OTAR`'s `mid` channel against the known answer: the bars
    must land on the free tracks the `tracks` tool already reports.
@@ -142,12 +162,46 @@ today. `VO`, the five ladder nets and `R1` are all the same shape, so a
 router that closes one should close all of them — and if it closes only
 some, the difference is the measurement worth having.
 
+## Escape direction is a degree of freedom, not a cell defect
+
+An earlier draft of this plan concluded that P and N sharing a contact
+band was a cell defect needing an M1 jog or an odd stripe count. That is
+wrong. Two pins at the same x do not have to be left by the same route:
+`-|--` (LEFT) and `--|-` (RIGHT) escape on opposite sides, and
+`offsetlow`/`offsethigh` shift the escape within a side. Nothing has to
+run through anything.
+
+Measured on LELOTEMP_OTAR, 2026-08-08:
+
+- All three crossings escaping LEFT (`-|--`): **0 shorts.** The escape
+  does remove every collision. But all three then read open -- an escape
+  leaves the pin without completing the far end.
+- Channel routes (`hchannel`/`htrack`) **close all three** but short,
+  because the pin drops still land together.
+- Channel routes plus `offsetlow`/`offsethigh`: still close all three,
+  still short. The offset is one routing width and a via pad is 8800
+  across, so the pads clash before the wires do.
+
+So the two halves are each solved and do not compose by hand: the
+channel completes the route, the escape separates the pins, and nothing
+in the present API applies both with an offset large enough to clear a
+pad. **That composition is precisely what the search is for.** The
+router must treat, per net:
+
+    escape side      left or right out of the pin
+    escape offset    quantised to the VIA PAD, not the wire width
+    channel + track  where the long haul runs
+    layer            where a via is cheaper than a detour
+
+as one cost-minimised choice rather than four independent options a
+human sets in sequence. Every failure above is a pair of those four
+chosen well and the other two chosen blind.
+
 ## What this does not fix
 
-The resistor cell still puts P and N on the same contact band. A router
-that models pins as obstacles will route *around* that, at the cost of a
-detour per net; putting the terminals at opposite ends of the cell
-removes the detour. That is a cell decision — it needs either an M1 jog
-across the cell or an odd stripe count, and an odd count costs the
-gradient cancellation the series pair exists for — and it is worth
-taking separately from the router.
+Nothing here helps a net whose two pins are genuinely enclosed — a port
+reachable only through another net's geometry, with no escape on either
+side. No such case has been found in OTAR: every one that looked like it
+turned out to be an escape the API could express and a human did not.
+Worth stating, so that if the router fails on one, that failure is known
+to be a new shape rather than this one again.

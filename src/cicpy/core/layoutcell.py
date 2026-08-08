@@ -647,7 +647,8 @@ class LayoutCell(Cell):
         out.sort(key=lambda r: (r.centerY(), r.centerX(), r.x1))
         return out
 
-    def _collectPhysicalRects(self, obj=None, dx=0, dy=0, out=None, active=None):
+    def _collectPhysicalRects(self, obj=None, dx=0, dy=0, out=None, active=None,
+                              include_ports=False):
         if out is None:
             out = []
         if obj is None:
@@ -666,6 +667,29 @@ class LayoutCell(Cell):
                 continue
 
             if (hasattr(child, "isPort") and child.isPort()) or (hasattr(child, "isInstancePort") and child.isInstancePort()):
+                #- Ports are skipped by default: they are not conductors
+                #- in their own right and counting them would double the
+                #- geometry of every net.
+                #-
+                #- A router needs them anyway, and needs them marked as
+                #- PINS rather than as wire. A pin of another net is not
+                #- merely occupied space to be shared -- it is space that
+                #- must not be crossed at all. Every routing failure in
+                #- LELOTEMP_OTAR was a trunk run through another net's
+                #- pin, and none of them were visible here because of
+                #- this `continue`.
+                if include_ports:
+                    pr = child.getCopy()
+                    pr.translate(dx, dy)
+                    pr.parent = obj
+                    pr.isPin = True
+                    #- getCopy() returns a plain Rect and drops the
+                    #- port's identity, so the net has to be carried
+                    #- across by hand -- without it every pin reads as
+                    #- net "?" and none can be told from another.
+                    if not pr.net:
+                        pr.setNet(getattr(child, "name", "") or "")
+                    out.append(pr)
                 continue
 
             if child.isInstance():
@@ -687,11 +711,11 @@ class LayoutCell(Cell):
                             child._cell_obj = resolved
                             child_cell = resolved
                 if child_cell is not None:
-                    self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active)
+                    self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
                 continue
 
             if child.isCell():
-                self._collectPhysicalRects(child, dx, dy, out, active)
+                self._collectPhysicalRects(child, dx, dy, out, active, include_ports)
                 continue
 
             if child.isRect():

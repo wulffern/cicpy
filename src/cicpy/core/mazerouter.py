@@ -625,6 +625,40 @@ def stack_of(instance_name):
     return m.group(1) if m else ""
 
 
+def stack_membership(layout):
+    """{instance name: stack name}, from the design's own CellGroups.
+
+    A stack is a StackGroup. Identified by TYPE, not by shape: a
+    StackGroup's children include RouteBundles, which carry `.instances`
+    too, so "a group with instances and no sub-groups" walks past the
+    real stack onto a bundle -- and bundles have no tap_instances, so
+    every tap then falls into a pseudo-stack of its own.
+
+    Falls back to the leading non-digit run of the instance name, which
+    is ciccreator's placement-group rule, when a design has no groups --
+    a .cic reloaded from disk has none.
+    """
+    from cicpy.core.cellgroup import CellGroup, StackGroup
+    member = {}
+
+    def _walk(grp):
+        if isinstance(grp, StackGroup):
+            gname = getattr(grp, "name", "")
+            for inst in (list(getattr(grp, "instances", []))
+                         + list(getattr(grp, "tap_instances", []))):
+                nm = getattr(inst, "instanceName", "") or ""
+                if nm and gname:
+                    member[nm] = gname
+            return  #- below a stack is routing, not placement
+        for c in getattr(grp, "children", []) or []:
+            if isinstance(c, (StackGroup, CellGroup)):
+                _walk(c)
+
+    for grp in getattr(layout, "cellgroups", []) or []:
+        _walk(grp)
+    return member
+
+
 def pins_by_stack(layout, layer=None):
     """{stack: {net: [rect, ...]}} for everything the node graph knows."""
     from collections import defaultdict
@@ -632,6 +666,7 @@ def pins_by_stack(layout, layer=None):
         from cicpy.core.trackmap import TrackMap
         layer = TrackMap(layout).pin_layer
     out = defaultdict(lambda: defaultdict(list))
+    member = stack_membership(layout)
     for net in getattr(layout, "nodeGraphList", []):
         g = layout.nodeGraph.get(net)
         if g is None:
@@ -641,11 +676,11 @@ def pins_by_stack(layout, layer=None):
             name = getattr(inst, "instanceName", "") if inst else ""
             rect = port.get(layer) if hasattr(port, "get") else None
             if name and rect is not None:
-                out[stack_of(name)][net].append(rect)
+                out[member.get(name) or stack_of(name)][net].append(rect)
     return out
 
 
-def route_stack_level(layout, margin=8000, log=None):
+def route_stack_level(layout, margin=8000, log=None, only=None):
     """Route every net inside every stack. Returns (routed, blocked).
 
     Level one of three. Each stack is solved against its OWN extent, so
@@ -662,7 +697,16 @@ def route_stack_level(layout, margin=8000, log=None):
     log = log or logging.getLogger("MazeRouter")
     routed, blocked = [], []
     by_stack = pins_by_stack(layout)
+    #- `only` names the stacks to route. One at a time is the sane way
+    #- to bring this up: a stack that is not clean is then the only
+    #- thing that can have made the layout dirty, and the next one
+    #- starts from a known good state instead of from a pile.
+    wanted = None
+    if only:
+        wanted = {only} if isinstance(only, str) else set(only)
     for stack in sorted(by_stack):
+        if wanted is not None and stack not in wanted:
+            continue
         subs = {n: rs for n, rs in by_stack[stack].items() if len(rs) >= 2}
         if not subs:
             continue
@@ -723,43 +767,13 @@ def plan_stack_cells(layout, parent_name=None):
     #- while the devices are named by prefix (xnd, xns), so a prefix
     #- grouping puts every tap in a one-instance stack of its own --
     #- measured, 17 bogus stacks out of 25.
-    #- The STACKS, which are not layout.cellgroups. makeCellGroup
-    #- registers the top groups (pmos, nmos, res); addStack adds a
-    #- StackGroup as a CHILD of one of those, so the stacks have to be
-    #- walked to. Looking only at layout.cellgroups finds the three top
-    #- groups and none of the eight stacks, and the fallback prefix rule
-    #- then puts every tap in a one-instance stack of its own -- 17
-    #- bogus stacks out of 25, measured.
-    #-
-    #- Note the groups exist only DURING the flow. A .cic reloaded from
-    #- disk has none, so this has to run inside a pycell hook.
-    #- A stack is a StackGroup. Identified by TYPE, not by shape: the
-    #- shape lies. A StackGroup's children include RouteBundles, which
-    #- carry `.instances` too -- they are routing helpers holding the
-    #- same devices -- so "a group with instances and no sub-groups"
-    #- walks past the real stack and lands on a bundle. The bundles have
-    #- no tap_instances, so every tap then fell out into a pseudo-stack
-    #- of its own, and only r_deg came out right, because r_deg happens
-    #- to have no bundles.
-    from cicpy.core.cellgroup import StackGroup
-    member = {}
+    #- One definition of "which stack is this instance in", shared with
+    #- pins_by_stack. They used to disagree -- this walked the
+    #- CellGroups and gave r_deg, that used the name prefix and gave xd
+    #- -- so asking the router to route "r_deg" matched nothing and
+    #- reported 0 routed, 0 blocked, which reads exactly like success.
+    member = stack_membership(layout)
 
-    def _walk(grp):
-        if isinstance(grp, StackGroup):
-            gname = getattr(grp, "name", "")
-            for inst in (list(getattr(grp, "instances", []))
-                         + list(getattr(grp, "tap_instances", []))):
-                nm = getattr(inst, "instanceName", "") or ""
-                if nm and gname:
-                    member[nm] = gname
-            return  #- do not descend: below here is routing, not placement
-        for c in getattr(grp, "children", []) or []:
-            if isinstance(c, (StackGroup, CellGroup)):
-                _walk(c)
-
-    from cicpy.core.cellgroup import CellGroup
-    for grp in getattr(layout, "cellgroups", []) or []:
-        _walk(grp)
     for inst in layout.iterInstances():
         name = getattr(inst, "instanceName", "") or ""
         st = member.get(name) or stack_of(name)

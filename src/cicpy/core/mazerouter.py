@@ -730,3 +730,88 @@ def stack_subckt(layout, entry):
     key = "|".join(f"{n}:{c}:{','.join(nd)}" for n, nd, c in devices)
     key += "||" + ",".join(sorted(ports))
     return lines, hashlib.sha1(key.encode()).hexdigest()[:12]
+
+
+def design_of(layout):
+    """The Design a layout belongs to.
+
+    `layout.design` is None during a pycell hook -- it is set later --
+    so a hook that asks for it silently does nothing. `layout.parent` is
+    the MagicDesign and is set, which is the same route cellgroup.py
+    already takes to reach getLayoutCell.
+    """
+    for attr in ("design", "parent"):
+        d = getattr(layout, attr, None)
+        if d is not None and hasattr(d, "cells") and hasattr(d, "cellnames"):
+            return d
+    return None
+
+
+def write_stack_cells(layout, design=None, plan=None, log=None):
+    """Register each stack as a real cell so a .mag is written for it.
+
+    Returns [(name, fingerprint, ports)].
+
+    This is the standalone-verification step, and deliberately NOT the
+    restructuring one. The parent keeps its instances; each stack is
+    additionally published as a cell holding the same instances, with
+    its boundary nets as ports. That is enough to get a .mag and a
+    netlist per stack and to LVS each one ALONE -- which is the gate the
+    hierarchy needs -- without disturbing a parent that currently works.
+
+    Turning the parent into a cell that REFERENCES these rather than
+    containing them is a separate change, and it should not be made
+    until the standalone LVS passes: it is the difference between
+    "generate and check" and "generate, check, and rely on".
+    """
+    from cicpy.core.layoutcell import LayoutCell
+    log = log or logging.getLogger("MazeRouter")
+    design = design if design is not None else design_of(layout)
+    if design is None:
+        log.warning("no design reachable from the layout; no stack cells written")
+        return []
+    plan = plan if plan is not None else plan_stack_cells(layout)
+    made = []
+    for entry in plan:
+        name = entry["name"]
+        if name in getattr(design, "cells", {}):
+            continue
+        cell = LayoutCell()
+        cell.name = name
+        cell.design = design
+        wanted = set(entry["instances"])
+        for inst in layout.iterInstances():
+            if (getattr(inst, "instanceName", "") or "") in wanted:
+                cell.add(inst)
+        #- the boundary nets, as ports, from the pins that carry them
+        pins = {}
+        for net in entry["ports"]:
+            g = layout.nodeGraph.get(net)
+            if g is None:
+                continue
+            for port in getattr(g, "ports", []):
+                pinst = getattr(port, "parent", None)
+                nm = getattr(pinst, "instanceName", "") if pinst else ""
+                if nm not in wanted:
+                    continue
+                rect = port.get() if hasattr(port, "get") else None
+                if rect is not None:
+                    pins.setdefault(net, rect)
+                    break
+        for net, rect in pins.items():
+            try:
+                cell.addPort(net, rect)
+            except Exception as e:
+                log.warning(f"{name}: could not add port {net}: {e}")
+        cell.updateBoundingRect()
+        lines, fp = stack_subckt(layout, entry)
+        cell.cic_subckt = lines
+        cell.cic_fingerprint = fp
+        design.cells[name] = cell
+        if hasattr(design, "cellnames") and name not in design.cellnames:
+            #- ahead of the parent, so it is defined before it is used
+            design.cellnames.insert(0, name)
+        made.append((name, fp, sorted(pins)))
+        log.info(f"stack cell {name}: {len(wanted)} instances, "
+                 f"{len(pins)} ports, fp={fp}")
+    return made

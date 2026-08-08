@@ -47,16 +47,34 @@ class MazeRouterTest(unittest.TestCase):
     def test_via_allowed_where_nothing_is(self):
         self.assertTrue(self.router("VS").via_is_free(*CLEAR))
 
-    def test_pins_closer_than_a_pad_forbid_a_via_on_either(self):
-        """The physical fact behind the hand-routing shorts.
+    def test_via_size_comes_from_the_technology(self):
+        """Not from a constant, and this test exists because of one.
 
-        The resistor's terminals are 4000 apart and a via pad is 8800,
-        so a pad centred on one covers the other. No layer change is
-        possible directly on either pin -- by anyone, including the net
-        that owns the pin. That is why the search must detour, and why
-        no amount of track picking ever fixed it.
+        An earlier version hard coded an 8800 pad, taken from a note
+        about pad clashes, and asserted here that no layer change was
+        possible on either resistor terminal because they sit 4000 apart.
+        That was the constant talking, not the layout: the real 1x1 cut
+        is 4000 square, so a via centred on one terminal reaches 2000 and
+        the neighbour at 4000 is clear. Asking Cut for the size fixed it,
+        and unblocked all five ladder nets that the wrong constant had
+        declared unroutable.
         """
-        self.assertFalse(self.router("VDS").via_is_free(*VDS_PIN))
+        r = self.router("VDS")
+        self.assertEqual(r.via_extent("M1", "M2"), (4000, 4000))
+        #- a net may via on its own pin; the neighbour 4000 away is clear
+        self.assertTrue(r.via_is_free(VDS_PIN[0], VDS_PIN[1], "M1", "M2"))
+
+    def test_a_via_only_occupies_the_layers_it_connects(self):
+        """M1->M2 under an unrelated M4 wire is not a short.
+
+        The via column model was right about a whole descent and wrong
+        about one step. Scanning every layer made an M1->M2 via illegal
+        beneath VS's M4 trunk, which blocked all five ladder nets at
+        their own pins.
+        """
+        r = self.router("net1")
+        self.assertEqual(sorted(r._via_layers("M1", "M2")), ["M1", "M2"])
+        self.assertNotIn("M4", r._via_layers("M1", "M2"))
 
     def test_index_has_no_duplicates(self):
         """A pin spans many tracks; it must be indexed once."""

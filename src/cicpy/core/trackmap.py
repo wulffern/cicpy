@@ -47,11 +47,44 @@ class Track:
         #- net is something to avoid overlapping, a PIN of another net
         #- is something no route may cross at all.
         self.pins = defaultdict(list)
+        #- net -> list of (lo, hi). `spans` merges a net down to one
+        #- min/max, which is fine for "is this track busy" and wrong for
+        #- "is THIS interval busy": a net appearing at two distant places
+        #- on one track then appears to occupy everything between them.
+        #- Measured -- using the merged extent to check via columns
+        #- blocked every via off every pin in the switch column.
+        self.wires = defaultdict(list)
 
     def occupy(self, net, lo, hi):
         span = self.spans[net]
         span[0] = lo if span[0] is None else min(span[0], lo)
         span[1] = hi if span[1] is None else max(span[1], hi)
+        self.wires[net].append((lo, hi))
+
+    #- Geometry with no net. `_collectPhysicalRects` cannot resolve a
+    #- rect inside an instance to a net -- only PORTS are attributable,
+    #- through the node graph -- so a device's internal rails all arrive
+    #- as "?". Treating that as foreign blocks a via off every pin by
+    #- the pin's OWN metal, which is what it did: every ladder net came
+    #- back "no path", explored 1 node.
+    #-
+    #- So unattributed metal does not block. The cost is real and worth
+    #- stating: a via can land on a device's internal rail without this
+    #- noticing. It is bounded, because the electrically interesting M1
+    #- in a device IS its ports, and those are attributed and checked as
+    #- pins. Closing it properly means attributing instance geometry,
+    #- which is the same job as step 2b was for pins.
+    UNATTRIBUTED = ("", "?", None)
+
+    def wire_overlaps(self, net, lo, hi):
+        """Foreign wire actually inside lo..hi on this track."""
+        for other, spans in self.wires.items():
+            if other == net or other in self.UNATTRIBUTED:
+                continue
+            for a, b in spans:
+                if not (hi <= a or lo >= b):
+                    return True
+        return False
 
     def block(self, net, lo, hi):
         self.pins[net].append((lo, hi))

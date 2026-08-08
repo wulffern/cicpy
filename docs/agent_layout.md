@@ -303,11 +303,17 @@ that, four separate times.
 
 Two facts that fall out of it and are worth carrying:
 
-- **A via pad is 8800 across.** Where pins are closer together than that
-  -- the horizontal resistor puts its terminals 4000 apart -- no layer
-  change is possible directly on either pin, by any net, including the
-  one that owns it. No choice of track or layer fixes it; the route has
-  to leave and come back.
+- **Ask the technology for the via size, never assume it.** The sky130
+  1x1 cut is 4000 square. A guess of 8800, carried over from a note about
+  pad clashes, made the router declare every ladder net in
+  LELOTEMP_OTAR unroutable: it could not leave a pin, because it believed
+  a pad centred on one terminal covered the neighbour 4000 away.
+  `Cut.getInstance(a, b, 1, 1).width()` is the answer.
+- **A via occupies only the layers it connects.** A whole descent from M4
+  down to a pin passes through everything on the way; one M1->M2 step
+  does not. Treating a single via as claiming the full column makes it
+  illegal to via beneath any unrelated upper-layer wire, which is not a
+  short in any technology.
 - **Bars land where the pins are, not where there is room.** A plain
   route takes its bar height from the net's own pins, so bars fight
   inside device rows while the channel between them sits empty.

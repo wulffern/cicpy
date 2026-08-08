@@ -41,12 +41,20 @@ class MazeRouter:
     via instead of having the preference hard coded.
     """
 
-    #- A via is not a point. Its pad is 8800 across, a little over two
-    #- 4000 pitches, so two vias on adjacent tracks clash on pads before
-    #- their wires are anywhere near each other. Measured on
-    #- LELOTEMP_OTAR: bars given a track each separated cleanly and the
-    #- routes still shorted, because the pin drops landed together.
-    VIA_PAD = 8800
+    #- A via is not a point, and its size comes from the technology, not
+    #- from here. Asking Cut for it was the fix for a bad guess: 8800
+    #- was carried over from a note about pad clashes and the real 1x1
+    #- cut is 4000 square. At 8800 the router could not leave a pin at
+    #- all in the switch column, where pins are 4000 apart -- it
+    #- reported every ladder net blocked, which was its own constant
+    #- talking rather than the layout.
+    VIA_PAD_FALLBACK = 4000
+
+    #- M1 is the pin layer here and the house rule reserves it for
+    #- power, so a route may via OFF a pin on it but never run ALONG it.
+    #- Without this the search tries to walk M1 through the pins of
+    #- every net in the column and gets nowhere.
+    PIN_ONLY_LAYERS = ("M1",)
 
     def __init__(self, trackmap, net, via_cost=None, log=None):
         self.tm = trackmap
@@ -54,7 +62,9 @@ class MazeRouter:
         #- default: a via costs what it physically occupies. Not a tuned
         #- constant -- if a detour is shorter than the pad it displaces,
         #- the detour genuinely is cheaper.
-        self.via_cost = self.VIA_PAD if via_cost is None else via_cost
+        self._via_size = {}
+        self.via_cost = (self.via_extent("M2", "M3")[0]
+                         if via_cost is None else via_cost)
         self.log = log or logging.getLogger("MazeRouter")
         self._layers = sorted(self.tm.directions)
         self._adj = self._layer_adjacency()
@@ -139,26 +149,68 @@ class MazeRouter:
         """
         if track is None:
             return False
-        t = track
-        for other, (a, b) in t.spans.items():
-            if other == self.net or a is None:
-                continue
-            if not (hi <= a or lo >= b):
-                return False
-        return not t.crosses_pin(self.net, lo, hi)
+        if track.wire_overlaps(self.net, lo, hi):
+            return False
+        return not track.crosses_pin(self.net, lo, hi)
 
-    def via_is_free(self, x, y):
+    def _via_layers(self, a_layer, b_layer):
+        """The layers a via between a_layer and b_layer occupies."""
+        try:
+            i, j = self._layers.index(a_layer), self._layers.index(b_layer)
+        except ValueError:
+            return dict(self.tm.directions)
+        lo, hi = sorted((i, j))
+        return {l: self.tm.directions[l] for l in self._layers[lo:hi + 1]
+                if l in self.tm.directions}
+
+    def via_extent(self, a_layer, b_layer):
+        """(width, height) of the real cut between two layers."""
+        key = tuple(sorted((a_layer, b_layer)))
+        if key not in self._via_size:
+            try:
+                from cicpy.core.cut import Cut
+                inst = Cut.getInstance(a_layer, b_layer, 1, 1)
+                self._via_size[key] = (int(inst.width()), int(inst.height()))
+            except Exception:
+                self._via_size[key] = (self.VIA_PAD_FALLBACK,
+                                       self.VIA_PAD_FALLBACK)
+        return self._via_size[key]
+
+    def via_is_free(self, x, y, a_layer=None, b_layer=None):
         """Can this net drop a via column at (x, y)?
 
-        The column is VIA_PAD wide and claims every layer, so this is
+        The column is the cut's real size and claims every layer, so this is
         where two nets most often collide -- and it is exactly what
         `column_blockers` was built to answer.
         """
-        half = self.VIA_PAD // 2
-        ax1, ax2, ay1, ay2 = x - half, x + half, y - half, y + half
+        w, h = self.via_extent(a_layer or "M2", b_layer or "M3")
+        hw, hh = w // 2, h // 2
+        ax1, ax2, ay1, ay2 = x - hw, x + hw, y - hh, y + hh
         for _net, (bx1, bx2, by1, by2) in self._pins_near(ax1, ax2, ay1, ay2):
             if not (ax2 <= bx1 or ax1 >= bx2) and not (ay2 <= by1 or ay1 >= by2):
                 return False
+        #- and other nets' WIRE, not only their pins. Checking pins alone
+        #- was not enough: routing five ladder nets in one column landed
+        #- a via of one on the metal of another and shorted them, with
+        #- the report blaming no route at all because the geometry came
+        #- from the emitter rather than route.py.
+        #-
+        #- But only the layers this via actually CONNECTS. An earlier
+        #- version scanned every layer in the column, on the reasoning
+        #- that a route reaching a pin comes down through all of them --
+        #- true of a whole descent, false of one step. It made an M1->M2
+        #- via illegal underneath an unrelated M4 wire, which is not a
+        #- short in any technology, and it blocked every ladder net at
+        #- its own pin.
+        for layer, direction in self._via_layers(a_layer, b_layer).items():
+            horizontal = direction == "h"
+            lo, hi = (ay1, ay2) if horizontal else (ax1, ax2)
+            a, b = (ax1, ax2) if horizontal else (ay1, ay2)
+            for t in self.tm.tracks.get(layer, []):
+                if not (lo <= t.coord <= hi):
+                    continue
+                if t.wire_overlaps(self.net, a, b):
+                    return False
         return True
 
     #-----------------------------------------------------------------
@@ -257,7 +309,7 @@ class MazeRouter:
         #- steps in x at the horizontal pitch; a vertical one in y at
         #- the vertical pitch.
         step = self.tm.hpitch if horizontal else self.tm.vpitch
-        for delta in (-step, step):
+        for delta in () if layer in self.PIN_ONLY_LAYERS else (-step, step):
             nx, ny = (x + delta, y) if horizontal else (x, y + delta)
             if not self.in_bounds(nx, ny):
                 continue
@@ -271,8 +323,8 @@ class MazeRouter:
         #- a via to an adjacent layer, if the column is clear. Asked
         #- once, not once per neighbouring layer: the column does not
         #- care which layer is being left.
-        if self._adj[layer] and self.via_is_free(x, y):
-            for other in self._adj[layer]:
+        for other in self._adj[layer]:
+            if self.via_is_free(x, y, layer, other):
                 out.append(((x, y, other), self.via_cost))
         return out
 
@@ -330,6 +382,7 @@ class MazeRouter:
         asserted on and diffed without a layout ever changing.
         """
         from cicpy.core.cut import Cut
+        from cicpy.core.rect import Rect
         runs, vias = self.segments(path)
         w = width or self.tm.hpitch
         half = w // 2
@@ -341,8 +394,13 @@ class MazeRouter:
                 lx, hx = lx - half, hx + half
             if ly == hy:
                 ly, hy = ly - half, hy + half
-            layout.addRectangle(layer, int(lx), int(ly),
-                                int(hx - lx), int(hy - ly))
+            #- built directly rather than through addRectangle so the
+            #- NET can be set. Without it the rect comes back as "?" on
+            #- the next map rebuild and the router cannot tell its own
+            #- earlier geometry from a foreign net's.
+            rr = Rect(layer, int(lx), int(ly), int(hx - lx), int(hy - ly))
+            rr.setNet(self.net)
+            layout.add(rr)
             nrect += 1
         ncut = 0
         for a_layer, b_layer, x, y in vias:

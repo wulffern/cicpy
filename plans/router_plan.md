@@ -245,6 +245,62 @@ Note also that a unit slip cost a cycle here: mag coordinates are
 internal/50, not internal/5, so a first check "found" no geometry that
 was in fact present.
 
+## The obstacle model was wrong three ways, and VO's success was luck
+
+Routing the stack-local nets exposed three errors in the model, all of
+which had been asserted confidently -- one of them in this plan, in a
+commit message, and in the field guide.
+
+**1. The via pad was a guess.** VIA_PAD was 8800, carried over from a
+note about pad clashes. The real sky130 1x1 cut is **4000 square**,
+which `Cut.getInstance(a, b, 1, 1).width()` will say. At 8800 the router
+could not leave a pin anywhere in the switch column, where pins sit 4000
+apart, and reported all five ladder nets unroutable. It also produced
+the claim -- written up as a "physical fact" -- that no layer change is
+possible on either resistor terminal. **That claim is retracted.** A via
+centred on one terminal reaches 2000; the neighbour at 4000 is clear.
+
+**2. A via was treated as claiming every layer.** True of a whole
+descent from M4 to a pin, false of one M1->M2 step. It made an M1->M2
+via illegal beneath VS's unrelated M4 trunk, which is not a short in any
+technology, and blocked every ladder net at its own pin.
+
+**3. Wire extents were merged.** `Track.spans` collapses a net to one
+min/max, so a net appearing twice on a track appeared to occupy
+everything between. Wires now keep exact intervals.
+
+And **unattributed metal cannot be treated as foreign**.
+`_collectPhysicalRects` can only attribute PORTS; a device's internal
+rails all arrive as "?". Blocking on them blocks a via off every pin by
+the pin's own metal. So "?" does not block -- at the cost, stated
+plainly, that a via can land on a device's internal rail unnoticed. It
+is bounded, because the electrically interesting M1 in a device is its
+ports, and those are attributed.
+
+**The consequence for OTAR is a retreat.** With the corrections the
+search finds a *shorter* path for VO, and that path overlaps the VS
+strap in p_in_a. The committed VO route was found by the over-strict
+model, so it was conservative enough to miss VS by accident. The route
+is stood down and the net is open again: 13 opens, 0 shorts, 0 DRC.
+
+That is worth being blunt about. VO closing was reported as the router
+beating the old flow, and the honest version is that it closed because
+the model was too cautious to find the path that shorts. The router is
+now more correct and the layout is back where it was.
+
+## What the ladder attempt showed
+
+With the model fixed, all five ladder nets find paths -- the shape that
+had defeated four hand attempts. Drawing them exposed the next real
+limitation rather than a modelling one: routed one after another,
+net1..net3 succeed and then net4 and net5 are blocked by the geometry
+net1..net3 just drew. Greedy net-at-a-time ordering with no rip-up.
+
+So the order of work gains a step that was not in the plan: **the router
+needs to route a SET, not a net.** Ordering by constrainedness, or
+rip-up-and-retry when a later net fails, or negotiated congestion. Until
+then it can close some nets in a column and will strand the rest.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to
@@ -260,9 +316,13 @@ was in fact present.
 3. **Dijkstra over one scope.** DONE -- `core/mazerouter.py`, 9 tests.
    Still returns a PATH, not geometry; nothing is drawn yet.
 3b. **Emit geometry from a path.** DONE -- segments() and emit().
-3c. **Route one real OTAR net end to end.** DONE -- VO, via an
-   afterRoute hook in LELOTEMP_OTAR.py. 0 shorts, 0 DRC, one fewer
-   open.
+3c. **Route one real OTAR net end to end.** Done, then stood down --
+   see above. The mechanism works; the route it now finds shorts.
+3d. **Route a SET of nets, not one net.** Ordering, or rip-up and retry.
+   Without it, net-at-a-time strands whatever comes last: measured,
+   net1..net3 route and then net4, net5 cannot.
+3e. **Make the wire check catch what VO's shorter path hits**, then
+   re-enable VO.
 4. **Promote a stack to a cell** and LVS it standalone. `r_deg` is the
    right first subject — it is 4 instances and already has clean LVS as
    `HRPPO12`, so a mismatch is the promotion's fault and nothing else.

@@ -708,7 +708,7 @@ def pins_by_stack(layout, layer=None):
     return out
 
 
-def route_spec(path, tm):
+def route_spec(path, tm, claimed=()):
     """Turn a searched path into a route.py command, or None.
 
     The search decides WHERE a net should go; route.py knows how to
@@ -739,26 +739,87 @@ def route_spec(path, tm):
     #-
     #- What matters is the SHAPE. A path with one x is a vertical, one y
     #- a horizontal, whatever it did about layers on the way.
+    opts = ""
+    trunk = None
     if len(xs) == 1 and len(ys) > 1:
         rtype = "||"
     elif len(ys) == 1 and len(xs) > 1:
         rtype = "-"
+    elif len(xs) > 1 and len(ys) > 1:
+        #- A bend. route.py draws these as a vertical TRUNK with
+        #- horizontal branches off it -- "-|--" puts the trunk left of
+        #- the pins, "--|-" right -- which is the same shape a search
+        #- returns whenever the two pins share neither row nor column.
+        #- Refusing them left every ladder net in p_sw unrouted, and
+        #- they are the majority of what a stack needs: pins at
+        #- different heights in different columns.
+        #-
+        #- Which side the trunk goes on is not cosmetic. It is where the
+        #- search FOUND room, so take it from the path: the trunk is the
+        #- column the path spends its vertical run in.
+        by_x = {}
+        for x, y, _l in path:
+            by_x.setdefault(x, set()).add(y)
+        #- ...and not a column another net in this stack already took.
+        #- The map is rebuilt per net, but route.py does not DRAW until
+        #- after beforeRoute returns, so every search in a stack sees a
+        #- column nobody has claimed yet and four of five ladder nets
+        #- picked the same one. What the searches cannot see from each
+        #- other, the caller remembers for them.
+        free = [x for x in by_x if x not in claimed] or list(by_x)
+        trunk = max(free, key=lambda x: (len(by_x[x]), -x))
+        rtype = "-|--" if trunk <= (min(xs) + max(xs)) // 2 else "--|-"
+        #- and SAY where. Without this route.py places the trunk from
+        #- the net's own pins, so five ladder nets in one column each
+        #- compute the same lane and land on it: measured, one component
+        #- holding VCP and net1..net5. The search already picked a column
+        #- with room in it -- per net, against a map that has the last
+        #- route in it -- and trunkx is route.py's way of being told.
+        opts = f"trunkx={trunk}"
     else:
         return None
 
-    #- and the layer is the one the ENDS are on, when they agree. Both
-    #- ends of a stack-internal net are pins, so that is the pin layer,
-    #- and a straight run of pin-layer metal between two pins is exactly
-    #- what a person would write. Asking for a routing layer instead
-    #- gave an empty route: getNodeAccessRects looked for M2 geometry on
-    #- an M1 pin and found nothing to join.
-    layer = ends[0] if ends[0] == ends[1] else None
-    if layer is None:
-        routing = [n[2] for n in path if n[2] != tm.pin_layer]
-        if not routing:
-            return None
-        layer = routing[0]
-    return (layer, rtype, "")
+    #- The layer is a ROUTING layer, never the pin layer.
+    #-
+    #- The pin layer is reserved -- power rings, tap straps, dummy fill
+    #- -- and a signal drawn on it collides with all three. Measured on
+    #- the p_sw ladder: five nets on M1 in one column came out as one
+    #- component with VCP, and no choice of trunk column fixes it,
+    #- because the trunk the search wants is 3000 from its neighbour and
+    #- the pin layer wants 6000.
+    #-
+    #- An earlier version took the layer from the path's ENDS, which are
+    #- both pins and therefore both the pin layer. It looked right
+    #- because a straight M1 run between two M1 pins is what a person
+    #- would write, and because asking for M2 had once produced an empty
+    #- route -- but that empty route was afterRoute never calling
+    #- route(), not the layer. route.py drops the vias itself.
+    #-
+    #- Which routing layer: the one that runs the way this route does.
+    vertical = rtype in ("||", "-|--", "--|-")
+    want = "v" if vertical else "h"
+    on_path = [n[2] for n in path if n[2] != tm.pin_layer]
+    candidates = [l for l in on_path if tm.directions.get(l) == want]
+    if not candidates:
+        candidates = [l for l, d in tm.directions.items() if d == want]
+    if not candidates:
+        return None
+    layer = candidates[0]
+
+    return (layer, rtype, opts, trunk)
+
+
+def _internal_nets(layout, stack):
+    """Nets wholly inside `stack` -- one source, shared with the plan.
+
+    Not recomputed here on purpose: the stack cell's port list and the
+    set of nets the stack level routes have to be the same set, or the
+    layout closes a net the generated subckt still calls a port.
+    """
+    for entry in plan_stack_cells(layout):
+        if entry["stack"] == stack:
+            return set(entry["internal"])
+    return set()
 
 
 def route_stack_level(layout, margin=8000, log=None, only=None):
@@ -789,7 +850,21 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
     for stack in sorted(by_stack):
         if wanted is not None and stack not in wanted:
             continue
-        subs = {n: rs for n, rs in by_stack[stack].items() if len(rs) >= 2}
+        #- INTERNAL nets only. A net that also has pins outside this
+        #- stack is a boundary net and belongs to the next level up:
+        #- routing it here joins the pins that happen to be inside and
+        #- calls the net done, while the rest of it is still elsewhere.
+        #-
+        #- Measured, on p_sw: VCP has two pins in the ladder column and
+        #- more outside it, and a stack level vertical between them runs
+        #- the length of a SERIES chain -- so it crosses the pin of every
+        #- intermediate node and shorts VCP to net1..net5 in one command.
+        #- The same shape at group level has the whole column to get
+        #- around them with. This is the hierarchy doing its job, not a
+        #- restriction on it.
+        internal = _internal_nets(layout, stack)
+        subs = {n: rs for n, rs in by_stack[stack].items()
+                if len(rs) >= 2 and n in internal}
         if not subs:
             continue
         insts_in_stack = sorted({n for n, st in stack_membership(layout).items()
@@ -799,6 +874,7 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
                   min(r.y1 for r in allr) - margin,
                   max(r.x2 for r in allr) + margin,
                   max(r.y2 for r in allr) + margin)
+        claimed = set()
         for net, rects in sorted(subs.items()):
             tm = TrackMap(layout, block_pins=True, extent=extent).build()
             r = MazeRouter(tm, net)
@@ -814,7 +890,7 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
                     r._own = [a, b]
                     path = r.search(start, goal,
                                     r.manhattan_heuristic(r.snap(goal)))
-                    spec = route_spec(path, tm)
+                    spec = route_spec(path, tm, claimed)
                     if spec is None:
                         raise Blocked(
                             f"path for {net} is not a shape route.py can "
@@ -827,7 +903,9 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
                 #- net's own rects, and without the scope it would take
                 #- every pin of the net in the whole cell -- which is
                 #- the top level route this is replacing.
-                layer, rtype, opts = specs[0]
+                layer, rtype, opts, trunk = specs[0]
+                if trunk is not None:
+                    claimed.add(trunk)
                 grp = groups.get(stack)
                 if grp is None:
                     raise Blocked(f"no group object for stack {stack}")

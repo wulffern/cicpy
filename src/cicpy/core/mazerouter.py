@@ -766,7 +766,31 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
         #- column nobody has claimed yet and four of five ladder nets
         #- picked the same one. What the searches cannot see from each
         #- other, the caller remembers for them.
-        free = [x for x in by_x if x not in claimed] or list(by_x)
+        #- ...and not a column another net in this stack is already
+        #- using AT THIS HEIGHT. The map is rebuilt per net, but route.py
+        #- does not DRAW until after beforeRoute returns, so every search
+        #- in a stack sees a column nobody has claimed yet. What the
+        #- searches cannot see from each other, the caller remembers.
+        #-
+        #- A claim is a column AND a y interval, and both halves are
+        #- load bearing. A bare set of x was wrong twice over: it kept
+        #- net3 out of a column net2 only used two rows away, and it let
+        #- net3 sit 3000 from net2 -- half the pitch the metal needs --
+        #- because that x was, strictly, not the claimed one.
+        span = (min(n[1] for n in path), max(n[1] for n in path))
+        clear = 0
+        try:
+            clear = router.clearance(tm.pin_layer) if router else 0
+        except Exception:
+            clear = 0
+
+        def taken(x):
+            for cx, y0, y1 in claimed:
+                if abs(cx - x) < clear and span[1] > y0 and span[0] < y1:
+                    return True
+            return False
+
+        free = [x for x in by_x if not taken(x)] or list(by_x)
         trunk = max(free, key=lambda x: (len(by_x[x]), -x))
         rtype = "-|--" if trunk <= (min(xs) + max(xs)) // 2 else "--|-"
         #- and SAY where. Without this route.py places the trunk from
@@ -811,6 +835,8 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
             return None
         layer = candidates[0]
 
+    if trunk is not None:
+        trunk = (trunk, min(n[1] for n in path), max(n[1] for n in path))
     return (layer, rtype, opts, trunk)
 
 

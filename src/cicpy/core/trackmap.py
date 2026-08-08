@@ -74,9 +74,22 @@ class TrackMap:
 
     DEFAULT_DIRECTIONS = {"M2": "v", "M3": "h", "M4": "v", "M5": "h"}
 
-    def __init__(self, layout, directions=None, extent=None):
+    def __init__(self, layout, directions=None, extent=None, scope=None):
+        """
+        ``scope`` restricts the map to one subtree -- a CellGroup, a
+        stack, a single instance -- instead of the whole cell.
+
+        This is the difference between "which tracks are free" and
+        "which tracks are free *for this piece of work*". Planning a
+        route against every rect in the design is what makes a router
+        fight geometry it can never touch: measured on LELOTEMP_OTAR, a
+        top level query reports 0 M3 tracks free across the mid channel
+        because one trunk crosses all of them, while the span a given
+        net actually needs has 27.
+        """
         self.log = logging.getLogger("TrackMap")
         self.layout = layout
+        self.scope = scope
         self.rules = Rules.getInstance()
         self.directions = dict(directions or self.DEFAULT_DIRECTIONS)
         self.hpitch = int(self._rule("ROUTE", "horizontalgrid", 3000))
@@ -91,7 +104,9 @@ class TrackMap:
             return default
 
     def build(self):
-        rects = [r for r in self.layout._collectPhysicalRects()
+        #- _collectPhysicalRects already walks an arbitrary subtree, so
+        #- scoping costs one argument
+        rects = [r for r in self.layout._collectPhysicalRects(self.scope)
                  if getattr(r, "layer", "") in self.directions]
         if not rects:
             self.log.warning("no geometry on any routing layer")

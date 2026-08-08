@@ -708,7 +708,7 @@ def pins_by_stack(layout, layer=None):
     return out
 
 
-def route_spec(path, tm, claimed=()):
+def route_spec(path, tm, claimed=(), router=None, pins=None):
     """Turn a searched path into a route.py command, or None.
 
     The search decides WHERE a net should go; route.py knows how to
@@ -779,34 +779,59 @@ def route_spec(path, tm, claimed=()):
     else:
         return None
 
-    #- The layer is a ROUTING layer, never the pin layer.
+    #- INSIDE A STACK, THE PIN LAYER.
     #-
-    #- The pin layer is reserved -- power rings, tap straps, dummy fill
-    #- -- and a signal drawn on it collides with all three. Measured on
-    #- the p_sw ladder: five nets on M1 in one column came out as one
-    #- component with VCP, and no choice of trunk column fixes it,
-    #- because the trunk the search wants is 3000 from its neighbour and
-    #- the pin layer wants 6000.
+    #- A link between two devices in one column is a short local hop and
+    #- its pins are already on the pin layer: no via, no landing pad, and
+    #- no track spent on a layer the group level wants for crossing the
+    #- cell. r_deg's R1<0> is exactly that -- two terminals one row apart
+    #- in the same column -- and it routes clean on M1.
     #-
-    #- An earlier version took the layer from the path's ENDS, which are
-    #- both pins and therefore both the pin layer. It looked right
-    #- because a straight M1 run between two M1 pins is what a person
-    #- would write, and because asking for M2 had once produced an empty
-    #- route -- but that empty route was afterRoute never calling
-    #- route(), not the layer. route.py drops the vias itself.
+    #- This was briefly forced onto a routing layer because the p_sw
+    #- ladder shorted on M1, and that was the wrong conclusion drawn from
+    #- a real failure: it moved a finished stack off the layer it should
+    #- be on to fix a different stack, which it did not fix either. The
+    #- ladder's problem is five nets wanting five trunks in an 8 micron
+    #- column, and no layer choice makes that fit.
     #-
-    #- Which routing layer: the one that runs the way this route does.
-    vertical = rtype in ("||", "-|--", "--|-")
-    want = "v" if vertical else "h"
-    on_path = [n[2] for n in path if n[2] != tm.pin_layer]
-    candidates = [l for l in on_path if tm.directions.get(l) == want]
-    if not candidates:
-        candidates = [l for l, d in tm.directions.items() if d == want]
-    if not candidates:
-        return None
-    layer = candidates[0]
+    #- "If possible" cannot be asked of is_free, and that is worth
+    #- recording: the pin layer is pin-only, so it has no entry in
+    #- ROUTE.directions and the track map holds no tracks for it. is_free
+    #- then answers False for every corridor on it -- not because
+    #- anything is in the way, but because it has nothing to look at.
+    layer = ends[0] if ends[0] == ends[1] else None
+    if layer is None:
+        vertical = rtype in ("||", "-|--", "--|-")
+        want = "v" if vertical else "h"
+        on_path = [n[2] for n in path if n[2] != tm.pin_layer]
+        candidates = ([l for l in on_path if tm.directions.get(l) == want]
+                      or [l for l, d in tm.directions.items() if d == want]
+                      or on_path)
+        if not candidates:
+            return None
+        layer = candidates[0]
 
     return (layer, rtype, opts, trunk)
+
+
+def supply_nets(layout):
+    """Nets that a device ties its BULK to -- power and ground.
+
+    From the netlist, not from a name list: "VDD" and "VSS" are this
+    design's spelling and a router that greps for them is a router for
+    this design. Every device declares its body terminal, and a net on
+    a body terminal is a supply by construction.
+    """
+    out = set()
+    for net in getattr(layout, "nodeGraphList", []):
+        g = layout.nodeGraph.get(net)
+        if g is None:
+            continue
+        for port in getattr(g, "ports", []):
+            if (getattr(port, "childName", "") or "").upper() == "B":
+                out.add(net)
+                break
+    return out
 
 
 def _internal_nets(layout, stack):
@@ -875,7 +900,15 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
                   max(r.x2 for r in allr) + margin,
                   max(r.y2 for r in allr) + margin)
         claimed = set()
-        for net, rects in sorted(subs.items()):
+        #- POWER AND GROUND FIRST. They are the widest, the least free
+        #- to detour and the ones every other route has to clear, so a
+        #- signal placed before them takes a track a supply then cannot
+        #- give up. Ordering is the cheapest form of rip-up there is:
+        #- the constrained net picks first.
+        supplies = supply_nets(layout)
+        order = sorted(subs, key=lambda n: (n not in supplies, n))
+        for net in order:
+            rects = subs[net]
             tm = TrackMap(layout, block_pins=True, extent=extent).build()
             r = MazeRouter(tm, net)
             try:
@@ -890,7 +923,7 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
                     r._own = [a, b]
                     path = r.search(start, goal,
                                     r.manhattan_heuristic(r.snap(goal)))
-                    spec = route_spec(path, tm, claimed)
+                    spec = route_spec(path, tm, claimed, r, (a, b))
                     if spec is None:
                         raise Blocked(
                             f"path for {net} is not a shape route.py can "

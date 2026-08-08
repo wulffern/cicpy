@@ -803,30 +803,48 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
     else:
         return None
 
-    #- INSIDE A STACK, THE PIN LAYER.
+    #- INSIDE A STACK, THE PIN LAYER IF IT IS FREE.
     #-
     #- A link between two devices in one column is a short local hop and
     #- its pins are already on the pin layer: no via, no landing pad, and
     #- no track spent on a layer the group level wants for crossing the
-    #- cell. r_deg's R1<0> is exactly that -- two terminals one row apart
-    #- in the same column -- and it routes clean on M1.
+    #- cell. r_deg's R1<0> is exactly that, and it routes clean on M1.
     #-
-    #- This was briefly forced onto a routing layer because the p_sw
-    #- ladder shorted on M1, and that was the wrong conclusion drawn from
-    #- a real failure: it moved a finished stack off the layer it should
-    #- be on to fix a different stack, which it did not fix either. The
-    #- ladder's problem is five nets wanting five trunks in an 8 micron
-    #- column, and no layer choice makes that fit.
+    #- "If free" is asked, and asking it correctly took two goes. It
+    #- cannot be asked of is_free: the pin layer is pin-only, so it has
+    #- no entry in ROUTE.directions and the map holds no TRACKS for it --
+    #- is_free then answers False for every corridor on it, not because
+    #- anything is there but because it has nothing to look at. It moved
+    #- a clean r_deg off M1 for no reason.
     #-
-    #- "If possible" cannot be asked of is_free, and that is worth
-    #- recording: the pin layer is pin-only, so it has no entry in
-    #- ROUTE.directions and the track map holds no tracks for it. is_free
-    #- then answers False for every corridor on it -- not because
-    #- anything is in the way, but because it has nothing to look at.
-    layer = ends[0] if ends[0] == ends[1] else None
+    #- The map does hold PINS on that layer, and that is the right
+    #- question anyway: is another net's metal in this corridor.
+    #- column_blockers answers it. Measured on p_sw, it finds VCP's strap
+    #- running the length of the column and reaching x 275200..304000,
+    #- across the ladder's whole pin band -- so the ladder falls through
+    #- to a routing layer, which is what M2 is for, while r_deg stays on
+    #- M1 because its column is clear.
+    vertical = rtype in ("||", "-|--", "--|-")
+    want = "v" if vertical else "h"
+
+    layer = None
+    if tm.pin_layer and router is not None and ends[0] == ends[1] == tm.pin_layer:
+        ys = [n[1] for n in path]
+        col = trunk if trunk is not None else path[0][0]
+        pad = 0
+        try:
+            pad = Rules.getInstance().get(tm.pin_layer, "space")
+        except Exception:
+            pad = 0
+        try:
+            hits = tm.column_blockers(router.net, col - pad, col + pad,
+                                      min(ys), max(ys))
+        except Exception:
+            hits = None
+        if hits == []:
+            layer = tm.pin_layer
+
     if layer is None:
-        vertical = rtype in ("||", "-|--", "--|-")
-        want = "v" if vertical else "h"
         on_path = [n[2] for n in path if n[2] != tm.pin_layer]
         candidates = ([l for l in on_path if tm.directions.get(l) == want]
                       or [l for l, d in tm.directions.items() if d == want]
@@ -860,6 +878,48 @@ def supply_nets(layout):
     return out
 
 
+def draw_supplies_first(layout, log=None):
+    """Draw the queued supply routes before anything searches. Returns how many.
+
+    POWER AND GROUND FIRST, and this is what that has to mean
+    mechanically. Ordering the list is not enough: a route added in
+    beforeRoute is not DRAWN until the routing phase, so a stack search
+    running in beforeRoute looks at a column with no strap in it and
+    happily routes through one. Measured on p_sw: all five ladder nets
+    came out shorted to VCP's strap, which the search never saw.
+
+    route() is idempotent only in the sense that nothing calls it twice
+    -- LayoutCell.route() skips anything flagged _pre_routed, which is
+    the hook this uses. Without the flag the geometry is drawn again in
+    the routing phase.
+
+    INCOMPLETE, and measured as such: on LELOTEMP_OTAR this draws 0.
+    The rings and straps do not arrive as Route objects on layout.routes
+    -- addRouteRing and addPowerConnection build their geometry another
+    way -- so there is nothing here to pre-draw yet. It is not dead
+    weight: the queued signal routes it does catch are real, and the
+    remaining work is to find where the supply geometry is queued. Until
+    then a stack search still cannot see a strap, which is why p_sw
+    falls back off the pin layer rather than avoiding VCP on it.
+    """
+    log = log or logging.getLogger("MazeRouter")
+    supplies = supply_nets(layout)
+    drawn = 0
+    for r in getattr(layout, "routes", []):
+        if not r.isRoute() or getattr(r, "_pre_routed", False):
+            continue
+        if getattr(r, "name", "") not in supplies:
+            continue
+        try:
+            r.route()
+            r._pre_routed = True
+            drawn += 1
+        except Exception as e:
+            log.warning(f"supply {getattr(r, 'name', '?')}: {e}")
+    log.info(f"supplies drawn before stack search: {drawn}")
+    return drawn
+
+
 def _internal_nets(layout, stack):
     """Nets wholly inside `stack` -- one source, shared with the plan.
 
@@ -889,6 +949,8 @@ def route_stack_level(layout, margin=8000, log=None, only=None):
     from cicpy.core.trackmap import TrackMap
     log = log or logging.getLogger("MazeRouter")
     routed, blocked = [], []
+    #- before ANY search: the straps have to exist to be avoided
+    draw_supplies_first(layout, log)
     by_stack = pins_by_stack(layout)
     groups = stack_groups(layout)
     #- `only` names the stacks to route. One at a time is the sane way
@@ -1243,7 +1305,14 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
             for ch in getattr(node, "children", []) or []:
                 if ch is None:
                     continue
+                #- ...except a via, which IS an instance. Skipping every
+                #- instance dropped the cuts and left the wires floating
+                #- over the pins they were supposed to land on: opens in
+                #- LVS and enclosure errors in DRC, from a stack whose
+                #- wires all looked present.
                 if hasattr(ch, "isInstance") and ch.isInstance():
+                    if type(ch).__name__ == "InstanceCut":
+                        out.append(ch)
                     continue
                 if hasattr(ch, "isPort") and ch.isPort():
                     continue
@@ -1254,6 +1323,13 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
 
         routed = []
         _routed(layout, routed)
+        #- and the ROUTES, which are not in children. Walking children
+        #- alone found 32 rects in the whole parent -- the li tabs and
+        #- nothing else -- so a stack cell came out with its devices and
+        #- none of the wires between them, and LVS saw six unconnected
+        #- transistors.
+        for r in getattr(layout, "routes", []) or []:
+            _routed(r, routed)
         added = 0
         for r in routed:
             if (r.x1 >= sx1 and r.x2 <= sx2

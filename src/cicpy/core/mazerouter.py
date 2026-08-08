@@ -741,6 +741,40 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
     #- a horizontal, whatever it did about layers on the way.
     opts = ""
     trunk = None
+
+    #- BEFORE anything else: do the two pins simply face each other?
+    #-
+    #- The search returns a PATH, and a path bends for its own reasons --
+    #- it steps off the pin layer to move at all, so it comes back on a
+    #- neighbouring track and reads as a bend even when the pins are
+    #- squarely in line. Taking the shape from the path therefore asked
+    #- route.py for a trunk and branches where a plain vertical would do.
+    #-
+    #- These devices are nf=2: source on both sides, drain in the middle,
+    #- so a ladder link leaves one device's drain and lands on the next
+    #- device's source with 16400 of shared column between them --
+    #- measured on net1, x 275200..291200 overlap, clear of VCP's strap
+    #- at 300800. A straight route down that overlap is what a person
+    #- would draw, and it needs no trunk to be placed and no lane to be
+    #- reserved.
+    if pins and len(pins) == 2:
+        a, b = pins
+        ox1, ox2 = max(a.x1, b.x1), min(a.x2, b.x2)
+        oy1, oy2 = max(a.y1, b.y1), min(a.y2, b.y2)
+        if ox2 > ox1 and oy2 <= oy1:
+            #- share a column, separated vertically
+            #- and SAY which column. Left to itself route.py takes the
+            #- bar from the net's own rects, which for two offset pins
+            #- is their UNION -- 268800..297600 on net1, wider than
+            #- either pin and into VCP and VDD_1V8. The overlap is the
+            #- only part both pins actually share.
+            mid = (ox1 + ox2) // 2
+            return (ends[0] if ends[0] == ends[1] else tm.pin_layer,
+                    "||", f"trunkx={mid}", None)
+        if oy2 > oy1 and ox2 <= ox1:
+            #- share a row, separated horizontally
+            return (ends[0] if ends[0] == ends[1] else tm.pin_layer,
+                    "-", "", None)
     if len(xs) == 1 and len(ys) > 1:
         rtype = "||"
     elif len(ys) == 1 and len(xs) > 1:

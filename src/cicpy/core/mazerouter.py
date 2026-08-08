@@ -63,6 +63,7 @@ class MazeRouter:
         #- constant -- if a detour is shorter than the pad it displaces,
         #- the detour genuinely is cheaper.
         self._via_size = {}
+        self._clearance = {}
         self.via_cost = (self.via_extent("M2", "M3")[0]
                          if via_cost is None else via_cost)
         self.log = log or logging.getLogger("MazeRouter")
@@ -136,22 +137,52 @@ class MazeRouter:
     def _coords(self, layer):
         return [t.coord for t in self.tm.tracks.get(layer, [])]
 
-    def is_free(self, track, lo, hi):
-        """Can this net occupy `track` from lo..hi?
+    def rule(self, layer, name, default=3000):
+        try:
+            from cicpy.core.rules import Rules
+            return int(Rules.getInstance().get(layer, name))
+        except Exception:
+            return default
 
-        Two questions, and the second is the one that matters: is the
-        span clear of other nets' wire, and would occupying it cross
-        another net's pin.
+    def clearance(self, layer):
+        """How far a foreign wire must be from this one's centreline.
 
-        Takes the Track rather than an index: TrackMap.track_at returns
-        the object, and converting back to an index was a bug waiting to
-        be written.
+        width + space, which is the wire pitch the technology actually
+        allows. THE TRACK GRID IS FINER THAN THAT. In sky130 here the
+        metal is 3000 wide and wants 3000 of space, so wires must sit
+        6000 apart -- while TrackMap cuts tracks every 3000. Two nets on
+        ADJACENT tracks abut exactly and short.
+
+        That is what shorted VD2 into VS: the route was legal on its own
+        track, which is all is_free used to check, and touched the
+        neighbour's.
         """
-        if track is None:
+        if layer not in self._clearance:
+            self._clearance[layer] = (self.rule(layer, "width")
+                                      + self.rule(layer, "space"))
+        return self._clearance[layer]
+
+    def is_free(self, layer, coord, lo, hi):
+        """Can this net occupy `layer` at `coord`, from lo..hi?
+
+        Checks the track AND every track within one clearance of it,
+        because a wire is wider than a track pitch. Takes the coordinate
+        rather than a Track so the neighbours can be found at all.
+        """
+        tracks = self.tm.tracks.get(layer)
+        if not tracks:
             return False
-        if track.wire_overlaps(self.net, lo, hi):
-            return False
-        return not track.crosses_pin(self.net, lo, hi)
+        reach = self.clearance(layer)
+        near = False
+        for t in tracks:
+            if abs(t.coord - coord) >= reach:
+                continue
+            near = True
+            if t.wire_overlaps(self.net, lo, hi):
+                return False
+            if t.crosses_pin(self.net, lo, hi):
+                return False
+        return near
 
     def _via_layers(self, a_layer, b_layer):
         """The layers a via between a_layer and b_layer occupies."""
@@ -313,11 +344,8 @@ class MazeRouter:
             nx, ny = (x + delta, y) if horizontal else (x, y + delta)
             if not self.in_bounds(nx, ny):
                 continue
-            track = self.tm.track_at(layer, y if horizontal else x)
-            if track is None:
-                continue
             lo, hi = sorted(((x, nx) if horizontal else (y, ny)))
-            if self.is_free(track, lo, hi):
+            if self.is_free(layer, y if horizontal else x, lo, hi):
                 out.append(((nx, ny, layer), abs(delta)))
 
         #- a via to an adjacent layer, if the column is clear. Asked
@@ -346,8 +374,13 @@ class MazeRouter:
         start = path[0]
         for prev, node in zip(path, path[1:]):
             if node[2] != prev[2]:
-                #- a layer change ends the run and makes a via
-                if (start[0], start[1]) != (prev[0], prev[1]) or start is path[0]:
+                #- A layer change ends the run and makes a via. A run of
+                #- ZERO length is not emitted: it is a point, and the
+                #- only thing there is the via, which already lands on
+                #- whatever it is joining. Emitting it anyway put a
+                #- small square of metal on the pin layer beside the
+                #- device rails and produced 14 li.3 spacing errors.
+                if (start[0], start[1]) != (prev[0], prev[1]):
                     runs.append((prev[2], start[0], start[1], prev[0], prev[1]))
                 vias.append((prev[2], node[2], prev[0], prev[1]))
                 start = node
@@ -384,10 +417,13 @@ class MazeRouter:
         from cicpy.core.cut import Cut
         from cicpy.core.rect import Rect
         runs, vias = self.segments(path)
-        w = width or self.tm.hpitch
-        half = w // 2
         nrect = 0
         for layer, x1, y1, x2, y2 in runs:
+            #- the technology's width, not the track pitch. They happen
+            #- to be equal here, which is exactly why the two were
+            #- confused and why adjacent tracks abutted.
+            w = width or self.rule(layer, "width")
+            half = w // 2
             lx, hx = sorted((x1, x2))
             ly, hy = sorted((y1, y2))
             if lx == hx:

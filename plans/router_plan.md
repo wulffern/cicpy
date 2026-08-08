@@ -335,6 +335,53 @@ routes for VS and VDS, which cut across every stack. They predate the
 hierarchy and they are what level 1 keeps colliding with. The real test
 of the model is to remove them and let the router do all three levels.
 
+## Three real bugs found by asking "why is level 1 not clean"
+
+**1. The track grid is finer than the technology allows.** sky130 metal
+here is `width` 3000 and `space` 3000, so wires must sit 6000 apart --
+while `TrackMap` cuts tracks every 3000. Two nets on ADJACENT tracks
+abut exactly. `is_free` only ever checked the track itself, so a route
+was "legal" on its own track while touching its neighbour's. It now
+checks every track within width+space of the centreline.
+
+**2. Unattributed metal must block above the pin layer.** Letting `?`
+through on all layers shorted VD2 to VS through **five device-internal
+M2 rails** -- and invisibly, because neither net had a single rect in
+common with the other: the bridge belonged to neither. Tolerating `?` is
+only defensible on the pin layer, where a port's own metal is
+unattributable and blocking on it blocks a via off every pin by the pin
+itself. Fixing this took the short to **0**.
+
+**3. Zero-length runs are not wire.** A degenerate run is a point whose
+only content is the via; emitting it put a square of metal on the pin
+layer beside device rails.
+
+Level 1 after all three: **0 shorts, 13 opens -> 10, and 14 li.3
+errors.** Better, still not clean, so nothing is built on it and the
+layout is reverted to 13/0/0.
+
+## What is left, and it is specific
+
+The li.3 errors are the VIA LANDING PADS, not the wires. An M1M2 cut
+places a `locali` pad, and on the pin layer unattributed metal is
+tolerated, so the pad lands within 0.17 of a device rail.
+
+The fix is not to tolerate less -- that reinstates bug 2's mirror image
+and blocks every via off every pin. It is to tell the two apart, which
+the router CAN do and currently does not: `connect` is handed the
+endpoint pin rects, so *those* are its own metal and every other
+unattributed rect is foreign. Passing them into the obstacle check is
+the next change.
+
+Two things this makes obvious in hindsight:
+
+- **Every one of these was a place where the model said "close enough".**
+  A track is a track, unattributed is unattributable, a point is a wire.
+  Each was fine until a real layout disagreed.
+- **A clean DRC and a clean connectivity are different questions.** Two
+  of the three bugs traded one for the other, and only running both
+  after every change showed which.
+
 ## Order of work
 
 1. **Scope `TrackMap`** to a subtree — pass `obj` through to

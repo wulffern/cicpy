@@ -75,11 +75,24 @@ class Track:
     #- pins. Closing it properly means attributing instance geometry,
     #- which is the same job as step 2b was for pins.
     UNATTRIBUTED = ("", "?", None)
+    #- Layers where unattributed metal must be tolerated. Only the pin
+    #- layer: a port's own metal is unattributable and unavoidable, and
+    #- blocking on it blocks a via off every pin by the pin itself.
+    #-
+    #- ABOVE it, unattributed metal is a device's internal routing and
+    #- absolutely does block. Letting it through on all layers shorted
+    #- VD2 to VS through five device-internal M2 rails -- and it did so
+    #- invisibly, because neither net had any geometry in common: the
+    #- bridge belonged to neither.
+    TOLERATE_UNATTRIBUTED_ON = ("M1",)
 
     def wire_overlaps(self, net, lo, hi):
         """Foreign wire actually inside lo..hi on this track."""
         for other, spans in self.wires.items():
-            if other == net or other in self.UNATTRIBUTED:
+            if other == net:
+                continue
+            if (other in self.UNATTRIBUTED
+                    and self.layer in self.TOLERATE_UNATTRIBUTED_ON):
                 continue
             for a, b in spans:
                 if not (hi <= a or lo >= b):

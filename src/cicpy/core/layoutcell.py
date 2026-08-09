@@ -2174,7 +2174,7 @@ class LayoutCell(Cell):
     def addRouteConnection(self, name:str, includeInstances:str="",
                            location:str="t", layer:str="M2",
                            excludeInstances:str="", align:str="center",
-                           cuts:int=1, key:str=None):
+                           cuts:int=1, key:str=None, pin_cut:bool=True):
         """Drop a net's pins onto its rail -- ChannelRoute or ring.
 
         The signal sibling of addPowerConnection: where that stretches
@@ -2236,8 +2236,15 @@ class LayoutCell(Cell):
                                            int(rail.centerY()), int(w))
             drop.net = name
             routering.add(drop)
-            for a, b, yc in ((layer, r.layer, r.centerY()),
-                             (layer, rail.layer, rail.centerY())):
+            #- pin_cut=False lands the drop on metal the subcell
+            #- already provides at the pin (its own via stack); a
+            #- second stack there is a partial via overlap, which the
+            #- rules forbid.
+            ends = ((layer, r.layer, r.centerY()),
+                    (layer, rail.layer, rail.centerY()))
+            if not pin_cut:
+                ends = ends[1:]
+            for a, b, yc in ends:
                 if a == b:
                     continue
                 ct = Cut.getInstance(a, b, 1, cuts)

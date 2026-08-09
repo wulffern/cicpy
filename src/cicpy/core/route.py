@@ -497,9 +497,35 @@ class Route(Cell):
             self.add(t)
 
 
+    def _alignCutsToWire(self, rects, cuts):
+        """Move each end cut under the wire it joins.
+
+        The horizontal leaves a pin at its centerX; a cut aligned to
+        the pin's EDGE can sit half a pin away from that wire --
+        measured 14000 of clean gap on a wide bar, with the cut
+        connected to nothing but the pin it decorated. Each cut goes
+        to the centerX of the rect it overlaps most, clamped to stay
+        on the pin.
+        """
+        for c in cuts:
+            if c is None:
+                continue
+            best, ov = None, float("-inf")
+            for r in rects:
+                o = min(c.x2, r.x2) - max(c.x1, r.x1)
+                if o > ov:
+                    best, ov = r, o
+            if best is None:
+                continue
+            half = c.width() / 2
+            xc = min(max(best.centerX(), best.x1 + half), best.x2 - half)
+            c.moveCenter(int(xc), int(c.centerY()))
+
     def routeOne(self):
         self.log.info(f"routeOne: net={self.net}, layer={self.routeLayer}, route={self.route_}, options={self.options}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
-        
+        self._alignCutsToWire(self.startRects, self.startCutRects)
+        self._alignCutsToWire(self.stopRects, self.endCutRects)
+
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         space = rules.get(self.routeLayer, "space")

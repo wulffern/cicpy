@@ -643,8 +643,13 @@ def subcell_spec(layout):
 
         subcells:
           - name: p_in
-            match: "^(xbl4|xbl5|xbl[12]<\\d+>)$"
+            match: '^(xbl4|xbl5|xbl[12]<\\d+>)$'
             type: diffpair          # stack | diffpair | mirror
+
+    SINGLE quotes around the regex. In YAML double quotes, \\d is an
+    escape sequence and the whole file fails to parse -- loudly, with
+    the line number, but still: single quotes pass a regex through
+    untouched.
 
     Declarative on purpose. A subcell is a statement about the DESIGN
     -- which devices form a unit, and what kind of unit -- and a
@@ -1403,7 +1408,28 @@ def plan_subcells(layout, parent_name=None):
     #- the declared type rides along; "stack" when undeclared, because
     #- that is what an undeclared subcell IS -- one the StackGroup walk
     #- found
-    types = {e["name"]: e["type"] for e in subcell_spec(layout)}
+    spec = subcell_spec(layout)
+    types = {e["name"]: e["type"] for e in spec}
+    #- A DESIGN THAT DECLARES, DECLARES EVERYTHING. Once a <CELL>.yaml
+    #- exists the decomposition is a stated decision, and a subcell that
+    #- appears anyway -- found by the group walk, not the file -- is the
+    #- statement being incomplete. Say so, with the entry that would
+    #- close the gap. Not an error: the fallback is what lets a design
+    #- adopt the file one subcell at a time.
+    if spec:
+        found = sorted(st for st in insts if st not in types)
+        if found:
+            log = logging.getLogger("MazeRouter")
+            log.warning(
+                f"{layout.name}.yaml declares {len(spec)} subcells but the "
+                f"layout has {len(found)} more: {', '.join(found)}")
+            for st in found:
+                names = sorted(insts[st])
+                head = [n for n in names if not n.startswith(("xfill_",
+                                                              "xstack_"))]
+                log.warning(f"  undeclared {st}: instances "
+                            f"{', '.join(head[:6])}"
+                            + (" ..." if len(head) > 6 else ""))
     out = []
     for st in sorted(insts):
         nets = counts.get(st, {})

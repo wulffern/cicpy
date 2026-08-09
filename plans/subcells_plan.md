@@ -201,6 +201,22 @@ The payoff is the point of the exercise: the top stops being 70 devices
 and ~2000 rects and becomes 8 instances routed port to port, and each
 subcell is verified before the top exists.
 
+## The placement hierarchy (the current frontier)
+
+The flat afterPlace builds the hierarchy from devices every run. The
+target is the inverse: `spi2mag` on `<CELL>_HIER.spice` (generated,
+tracked), placing EIGHT SUBCELL INSTANCES the way it places any
+library cell, with a pycell that is two rows and an abut. What stands
+in the way, measured:
+
+- **subcells are not origin-normalised**, and cannot be by simple
+  translation: they hold the parent's own instance objects, so
+  translating one drags the parent's devices (2 shorts, 23 DRC).
+  The restructuring step -- instances leaving the parent, cell copies
+  or real ownership transfer -- is where normalisation happens.
+- **the subcell .mag must place from maglib** like any primitive:
+  ports exist, `placed_at` records the cut offset.
+
 ## Order of work
 
 1. attribute instance geometry (the fix above) — unblocks everything

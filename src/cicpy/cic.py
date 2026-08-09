@@ -432,9 +432,17 @@ def _write_subcells(design,lcell,libdir,lib,rules):
         log.warning(f"{lcell.name}: no subcells found; nothing to write")
         return
 
-    #- cicpy makes these itself rather than relying on the design's
-    #- afterPaint to have called write_stack_cells. Idempotent: a cell
-    #- already registered is left alone.
+    #- REBUILD, do not reuse. A design's own afterPaint may already have
+    #- published these, from whatever state the layout was in at that
+    #- moment; write_stack_cells then leaves an already registered cell
+    #- alone. Clearing them first is what makes THIS the authoritative
+    #- pass rather than a no-op behind the design's back.
+    for entry in plan:
+        nm = entry["name"]
+        getattr(design,"cells",{}).pop(nm,None)
+        names_list = getattr(design,"cellnames",None)
+        if names_list is not None and nm in names_list:
+            names_list.remove(nm)
     write_stack_cells(lcell,design=design,plan=plan,log=log)
 
     names = [e["name"] for e in plan]
@@ -449,6 +457,16 @@ def _write_subcells(design,lcell,libdir,lib,rules):
     obj.exclude = keep
     obj.print(design)
 
+    #- The CUT cells travel with every subcell. A route that changes
+    #- layer places an InstanceCut referring to cut_<A><B>_NxM, and a
+    #- .cic that does not define those cells resolves the via to
+    #- nothing -- so the route checker reads the corridor as empty and
+    #- says the column is free. A wrong "nothing blocks" is worse than
+    #- an error, and they are a few hundred bytes each.
+    from cicpy.core.cut import Cut as _Cut
+    cuts = {n: c for n, c in getattr(design,"cells",{}).items()
+            if isinstance(c, _Cut)}
+
     for entry in plan:
         name = entry["name"]
         cellobj = design.cells.get(name)
@@ -456,15 +474,23 @@ def _write_subcells(design,lcell,libdir,lib,rules):
             continue
         cicfile = libdir + lib + os.path.sep + name + ".cic"
         one = cic.Design()
-        one.cells = {name: cellobj}
+        one.cells = dict(cuts)
+        one.cells[name] = cellobj
         if hasattr(one,"cellnames"):
-            one.cellnames = [name]
+            #- cuts first: defined before they are used
+            one.cellnames = sorted(cuts) + [name]
         try:
             with open(cicfile,"w") as fo:
                 fo.write(json.dumps(one.toJson(),indent=4))
         except Exception as ex:
             log.warning(f"{name}: could not write {cicfile}: {ex}")
         log.info(f"  {name}: {' '.join(entry['ports']) or '(no ports)'}")
+
+    #- Say how to check them. The route tools need the device library
+    #- passed in, and working that out from scratch is a papercut every
+    #- single time.
+    log.info(f"  check one with:  cicpy svg <libdir>/{lib}/<SUBCELL>.cic "
+             f"<techfile> <SUBCELL> --I <device-library>.cic")
 
 
 def _ensure_default_pycell(dirname, cell):

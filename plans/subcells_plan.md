@@ -129,6 +129,36 @@ That single change:
 same job as step 2b was for pins". It is the highest-value change left
 in the router.
 
+## A subcell `.cic`, for the route checker
+
+`sch2subcells` writes a `.cic` per subcell so the MCP route tools work
+on one subcell instead of the whole cell. Verified: `blockers` on a
+subcell reports the same 110 pin spans as the parent does over the same
+box, and `cell_info` reads the placement and ports.
+
+Two things that had to be right:
+
+- **the cut cells travel with it.** A route that changes layer places an
+  `InstanceCut` referring to `cut_<A><B>_NxM`, and a `.cic` that does
+  not define those cells resolves the via to nothing -- so the checker
+  reads the corridor as empty and answers "nothing blocks". A wrong
+  "nothing blocks" is worse than an error.
+- **the device library still has to be passed in**, with `--I`. The
+  subcell holds instances, not device geometry, and without the include
+  every pin is invisible.
+
+`tracks` on a subcell whose routing is all on the pin layer says "no
+geometry on any routing layer". That is correct, not a failure: the pin
+layer has no `ROUTE.directions` entry and therefore no tracks.
+
+**Open, and it belongs with the boundary work:** a subcell generated
+with `boundary=True` came out with its M2 wires and **no `InstanceCut`
+at all** -- wires floating over the pins they should land on. Whether
+route.py is not placing the vias or `write_stack_cells`'s copy is
+dropping them was not established; the parent on disk was a
+`boundary=False` build, so it could not be used to tell the two apart.
+Settle that before trusting any boundary-routed subcell.
+
 ## Then: the top instantiates the subcells
 
 Two things remain after LVS passes.

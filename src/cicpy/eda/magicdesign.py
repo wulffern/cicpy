@@ -22,6 +22,19 @@ class MagicFile():
         if(self._lay is None):
             self._lay = cic.Layout(self.parent.techlib)
             self._lay.readFromFile(self.filename)
+            #- A LIBRARY CELL STARTS AT THE ORIGIN. A generated subcell
+            #- keeps its parent's absolute coordinates on disk (the
+            #- restructuring step owns changing that), and placing it
+            #- unnormalised lands its body at placement + offset. Here
+            #- the .mag has just been parsed into objects nothing else
+            #- shares, so the translation that was unsafe on the live
+            #- design graph is safe by construction. A no-op for every
+            #- cell already drawn at the origin.
+            self._lay.updateBoundingRect()
+            ox, oy = int(self._lay.x1), int(self._lay.y1)
+            if ox or oy:
+                self._lay.translate(-ox, -oy)
+                self._lay.updateBoundingRect()
 #            if(re.search(r"CH_\d+C\d+F\d+",self.name)):
 #                topName = re.sub(r"C\d+F\d+","CTAPTOP",self.filename)
 #                if(os.path.exists(topName)):

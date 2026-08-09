@@ -1989,9 +1989,11 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- MERGE their guards -- shared in the parent, and paid in full
         #- by a stack standing alone. The size is right; nothing to trim.
         #-
-        #- What does look wrong is the position: these cells keep the
-        #- parent's absolute coordinates, so reading extents straight
-        #- out of the .mag makes them appear to start far from origin.
+        #- Normalised to the origin below, like any library cell: a
+        #- placeable cell whose content starts at the parent's absolute
+        #- offset is only placeable at one position. The offset it was
+        #- cut from is kept on the cell as `placed_at`, which is where
+        #- a hierarchical parent puts its instance.
         cell.boundaryIgnoreRouting = True
         wanted = set(entry["instances"])
         for inst in layout.iterInstances():
@@ -2116,6 +2118,14 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
             except Exception as e:
                 log.warning(f"{name}: could not add port {net}: {e}")
         cell.updateBoundingRect()
+        #- NOT normalised to the origin, and the reason is structural:
+        #- this cell holds the PARENT'S OWN instance objects, not
+        #- copies, so translating it drags the parent's devices with it
+        #- -- measured, 2 shorts and 23 DRC in a top that was clean.
+        #- Origin-normalisation belongs to the restructuring step where
+        #- the instances genuinely move out of the parent. Until then
+        #- placed_at records the offset a hierarchical parent needs.
+        cell.placed_at = (int(cell.x1), int(cell.y1))
         lines, fp = stack_subckt(layout, entry)
         cell.cic_subckt = lines
         cell.cic_fingerprint = fp

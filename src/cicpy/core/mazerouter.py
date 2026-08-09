@@ -635,17 +635,69 @@ def stack_of(instance_name):
     return m.group(1) if m else ""
 
 
+def subcell_spec(layout):
+    """The design's subcell declarations, from a sidecar YAML.
+
+    ``<CELL>.subcells.yaml`` beside the pycell:
+
+        subcells:
+          - name: p_in
+            match: "^(xbl4|xbl5|xbl[12]<\\d+>)$"
+            type: diffpair          # stack | diffpair | mirror
+
+    Declarative on purpose. A subcell is a statement about the DESIGN
+    -- which devices form a unit, and what kind of unit -- and a
+    statement belongs in data, where it can be read without running
+    anything, rather than in whichever pycell hook happens to build the
+    groups. The type is the router's hint: a diffpair wants its halves
+    routed symmetrically, a mirror wants gates bussed, a stack wants
+    the series links. Only the stack router exists today, and the
+    others say so instead of routing wrongly.
+
+    Returns [{name, match (compiled), type}], or [] when no file.
+    """
+    import os
+    import yaml
+    dirname = getattr(layout, "dirname", "") or ""
+    path = os.path.join(dirname, f"{layout.name}.subcells.yaml")
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as fi:
+            doc = yaml.safe_load(fi) or {}
+    except Exception as e:
+        logging.getLogger("MazeRouter").error(f"{path}: {e}")
+        return []
+    out = []
+    for entry in doc.get("subcells") or []:
+        name = str(entry.get("name", "") or "")
+        match = str(entry.get("match", "") or "")
+        if not name or not match:
+            logging.getLogger("MazeRouter").warning(
+                f"{path}: a subcell needs both name and match: {entry}")
+            continue
+        try:
+            rx = re.compile(match)
+        except re.error as e:
+            logging.getLogger("MazeRouter").error(
+                f"{path}: {name}: bad match regex: {e}")
+            continue
+        out.append({"name": name, "match": rx,
+                    "type": str(entry.get("type", "stack") or "stack")})
+    return out
+
+
 def subcell_membership(layout):
-    """{instance name: subcell name}, from the design's own CellGroups.
+    """{instance name: subcell name}, from the sidecar, else the groups.
 
     A SUBCELL is whatever the design wants to publish as a cell of its
-    own. Two ways to be one, checked in this order:
+    own. Three ways to be one, checked in this order:
 
-      1. any CellGroup with ``subcell = True`` set on it. This is the
-         general case and it is the design's decision: a differential
-         pair spread over two columns, a whole pmos side, a matched
-         quad -- none of which is a stack.
-      2. failing that, a StackGroup. A column of devices is the
+      1. an entry in ``<CELL>.subcells.yaml`` whose ``match`` regex
+         takes the instance name. First entry wins, so order the file
+         from specific to general. See subcell_spec.
+      2. any CellGroup with ``subcell = True`` set on it.
+      3. failing both, a StackGroup. A column of devices is the
          decomposition that needs no thought, so it is the default.
 
     A stack is identified by TYPE, not by shape: a StackGroup's children
@@ -667,11 +719,22 @@ def subcell_membership(layout):
     from cicpy.core.cellgroup import CellGroup, StackGroup
     member = {}
 
+    spec = subcell_spec(layout)
+    if spec:
+        for inst in layout.iterInstances():
+            nm = getattr(inst, "instanceName", "") or ""
+            if not nm or nm in member:
+                continue
+            for entry in spec:
+                if entry["match"].search(nm):
+                    member[nm] = entry["name"]
+                    break
+
     def _claim(grp, gname):
         for inst in (list(getattr(grp, "instances", []) or [])
                      + list(getattr(grp, "tap_instances", []) or [])):
             nm = getattr(inst, "instanceName", "") or ""
-            if nm and gname:
+            if nm and gname and nm not in member:
                 member[nm] = gname
         for c in getattr(grp, "children", []) or []:
             if isinstance(c, (StackGroup, CellGroup)):
@@ -689,6 +752,8 @@ def subcell_membership(layout):
             if isinstance(c, (StackGroup, CellGroup)):
                 _walk(c)
 
+    #- the groups fill in around the sidecar, never over it: _claim
+    #- respects an instance the YAML already took
     for grp in getattr(layout, "cellgroups", []) or []:
         _walk(grp)
     return member
@@ -1138,6 +1203,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     wanted = None
     if only:
         wanted = {only} if isinstance(only, str) else set(only)
+    types = {e["name"]: e["type"] for e in subcell_spec(layout)}
     #- a stack whose own pycell already wired it is finished. Routing it
     #- again lays a second set of wires over the first.
     by_pycell = getattr(layout, "_stacks_routed_by_pycell", None) or set()
@@ -1168,6 +1234,18 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         pycell_did = stack in by_pycell
         if pycell_did and not boundary:
             log.info(f"{stack}: routed by its own pycell, not searching")
+            continue
+        #- the TYPE picks the router, and only the stack router exists.
+        #- A declared diffpair or mirror wants symmetry or gate bussing
+        #- that a series-link search knows nothing about; running it
+        #- anyway routes wrongly with a confident log. Decline and say
+        #- why -- a pycell routes any type, and takes precedence anyway.
+        sc_type = types.get(stack, "stack")
+        if sc_type != "stack" and not pycell_did:
+            blocked.append((stack, "", f"no {sc_type} router yet; "
+                            f"ship a {stack} pycell or retype it"))
+            log.warning(f"{stack}: declared type={sc_type}, and only the "
+                        f"stack router exists; not routing")
             continue
         subs = {n: rs for n, rs in by_stack[stack].items()
                 if len(rs) >= 2 and (n in internal or boundary)}
@@ -1321,6 +1399,10 @@ def plan_subcells(layout, parent_name=None):
     for nm in (getattr(ckt, "nodes", None) or ()):
         parent_ports.add(nm)
 
+    #- the declared type rides along; "stack" when undeclared, because
+    #- that is what an undeclared subcell IS -- one the StackGroup walk
+    #- found
+    types = {e["name"]: e["type"] for e in subcell_spec(layout)}
     out = []
     for st in sorted(insts):
         nets = counts.get(st, {})
@@ -1331,6 +1413,7 @@ def plan_subcells(layout, parent_name=None):
         out.append({
             "name": f"{parent_name or layout.name}_{st}".upper(),
             "stack": st,
+            "type": types.get(st, "stack"),
             "instances": sorted(insts[st]),
             "ports": ports,
             "internal": internal,

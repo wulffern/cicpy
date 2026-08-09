@@ -5,12 +5,39 @@ Generate each subcell as a real cell -- its own `.mag`, `.sch`, `.sym`,
 its own DRC and LVS -- and have the top instantiate those cells and
 route only between their ports.
 
-**A subcell is not a stack.** It is any CellGroup the design marks with
-`subcell = True`, and failing that every stack, a column of devices
-being the decomposition that needs no thought. A differential pair
-spread over two columns, or a whole side, publishes the same way.
-`subcell_membership` and `subcell_groups` both follow that rule and
-have to stay in step.
+**A subcell is not a stack.** Three ways to be one, in priority order:
+
+1. an entry in **`<CELL>.subcells.yaml`**, the sidecar beside the
+   pycell -- name, member regex, and the KIND of unit:
+
+       subcells:
+         - name: p_in
+           match: "^(xbl[45]|xbl[12]<\\d+>|xstack_p_in_[ab]_(top|bot)|xfill_p_in_[ab]_\\d+)$"
+           type: diffpair          # stack | diffpair | mirror
+
+   Declarative on purpose: a subcell is a statement about the design,
+   and a statement belongs in data, not in whichever pycell hook builds
+   the groups. First entry wins, so order specific to general.
+   Measured on the OTA: this exact entry merges the two input columns
+   into one `LELOTEMP_OTAR_P_IN` with the diffpair's whole port list --
+   `VD1 VD2 VD3 VDD_1V8 VIN VIP VS` -- which is the pair-symmetry unit
+   the flat flow could never mirror.
+2. any CellGroup with `subcell = True` set on it.
+3. failing both, every stack -- a column of devices being the
+   decomposition that needs no thought.
+
+`subcell_membership` and `subcell_groups` follow the same rule and have
+to stay in step.
+
+**The type picks the router, and only the stack router exists.** A
+declared `diffpair` or `mirror` wants symmetry or gate bussing that a
+series-link search knows nothing about, so `route_stack_level` declines
+it with a warning instead of routing wrongly -- a pycell routes any
+type and takes precedence anyway. Writing the diffpair router (route
+the halves identically, mirrored) and the mirror router (bus the gates)
+is where the type becomes worth more than documentation. The OTA does
+not ship the p_in declaration until one of those exists: it would trade
+two clean stack subcells for one that nothing can route.
 
 Everything below is measured on 2026-08-08, on a 70-device OTA
 (`LELOTEMP_OTAR`, 8 stacks). Numbers are from the tools, not estimates.

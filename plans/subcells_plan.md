@@ -7,8 +7,9 @@ route only between their ports.
 
 **A subcell is not a stack.** Three ways to be one, in priority order:
 
-1. an entry in **`<CELL>.subcells.yaml`**, the sidecar beside the
-   pycell -- name, member regex, and the KIND of unit:
+1. an entry in **`<CELL>.yaml`**, the cell's sidecar beside the
+   pycell -- `subcells:` is its first key, not its last; name, member
+   regex, and the KIND of unit:
 
        subcells:
          - name: p_in

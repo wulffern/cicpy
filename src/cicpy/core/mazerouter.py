@@ -636,9 +636,10 @@ def stack_of(instance_name):
 
 
 def subcell_spec(layout):
-    """The design's subcell declarations, from a sidecar YAML.
+    """The design's subcell declarations, from its sidecar YAML.
 
-    ``<CELL>.subcells.yaml`` beside the pycell:
+    ``<CELL>.yaml`` beside the pycell -- the cell's one declarative
+    sidecar, of which ``subcells:`` is the first key and not the last:
 
         subcells:
           - name: p_in
@@ -659,7 +660,7 @@ def subcell_spec(layout):
     import os
     import yaml
     dirname = getattr(layout, "dirname", "") or ""
-    path = os.path.join(dirname, f"{layout.name}.subcells.yaml")
+    path = os.path.join(dirname, f"{layout.name}.yaml")
     if not os.path.exists(path):
         return []
     try:
@@ -693,7 +694,7 @@ def subcell_membership(layout):
     A SUBCELL is whatever the design wants to publish as a cell of its
     own. Three ways to be one, checked in this order:
 
-      1. an entry in ``<CELL>.subcells.yaml`` whose ``match`` regex
+      1. an entry in ``<CELL>.yaml`` whose ``match`` regex
          takes the instance name. First entry wins, so order the file
          from specific to general. See subcell_spec.
       2. any CellGroup with ``subcell = True`` set on it.

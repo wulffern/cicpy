@@ -1,4 +1,4 @@
-"""The subcell sidecar: <CELL>.subcells.yaml.
+"""The subcell declarations in the cell sidecar: <CELL>.yaml.
 
 A subcell is a statement about the design -- which devices form a unit,
 and what kind -- and the sidecar is where that statement lives. These
@@ -39,7 +39,7 @@ class SubcellSpec(unittest.TestCase):
         self.tmp.cleanup()
 
     def _write(self, text):
-        with open(os.path.join(self.dirname, "TOP.subcells.yaml"), "w") as f:
+        with open(os.path.join(self.dirname, "TOP.yaml"), "w") as f:
             f.write(text)
 
     def _layout(self, instances=()):

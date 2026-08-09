@@ -821,8 +821,48 @@ def pins_by_stack(layout, layer=None):
             name = getattr(inst, "instanceName", "") if inst else ""
             rect = port.get(layer) if hasattr(port, "get") else None
             if name and rect is not None:
+                #- which TERMINAL this pin is, carried on the rect. The
+                #- router assigns lanes by it: a source net belongs on
+                #- the left edge of its pins, a drain net on the right.
+                rect.terminal = getattr(port, "childName", "") or ""
                 out[member.get(name) or stack_of(name)][net].append(rect)
     return out
+
+
+def _terminal_lane(rects, layer, rtype):
+    """A trunkx for a net that lives on one kind of terminal, or None.
+
+    Left aligned on the sources, right aligned on the drains. The house
+    style, and not for looks: S and D overlap in x on a compact cell,
+    so two searched trunks land wherever there was room the moment each
+    was asked -- often the same lane, always somewhere new. Assigned by
+    terminal, every source net in the design shares the left lane,
+    every drain net the right, they can never contest a track, and the
+    drain lane stays clear of the gate tab that sits above the drain
+    bar on this kind of library.
+
+    Only for a vertical on pins that are ALL one terminal. A series
+    link joins a D to an S and keeps the overlap the search found; a
+    gate net lands on tabs that have no lane convention.
+    """
+    if rtype != "||" or not rects:
+        return None
+    terms = {getattr(r, "terminal", "") for r in rects}
+    if len(terms) != 1:
+        return None
+    term = terms.pop()
+    if term not in ("S", "D"):
+        return None
+    try:
+        w = int(Rules.getInstance().get(layer, "width"))
+    except Exception:
+        return None
+    if term == "S":
+        #- the left edge every pin shares
+        edge = max(int(r.x1) for r in rects)
+        return edge + w // 2
+    edge = min(int(r.x2) for r in rects)
+    return edge - w // 2
 
 
 def _pin_layer_if_clear(path, tm, router, pins, trunk, extent_rects=None):
@@ -1320,6 +1360,15 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 #- every pin of the net in the whole cell -- which is
                 #- the top level route this is replacing.
                 layer, rtype, opts, trunk = specs[0]
+                #- the lane the terminal owns beats the lane the search
+                #- found: left edge for a source net, right edge for a
+                #- drain net. The search still proved a path exists.
+                lane = _terminal_lane(rects, layer, rtype)
+                if lane is not None:
+                    opts = f"trunkx={lane}"
+                    ys_all = ([int(r.y1) for r in rects]
+                              + [int(r.y2) for r in rects])
+                    trunk = (lane, min(ys_all), max(ys_all))
                 if trunk is not None:
                     claimed.add(trunk)
                 grp = groups.get(stack)

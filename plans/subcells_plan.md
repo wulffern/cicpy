@@ -125,11 +125,27 @@ enclosure lands where nothing checked:
 - within 0.14 um of neighbouring metal (the 20 met1.2 on p_in_a --
   DRC only, LVS passes anyway)
 
+The exact mechanism, measured on n_load_a's VD1: the net is
+diode-connected (D and G), its trunk must reach a GATE TAB, and
+route.py lands a **1x2 cut -- 8400 of M1 enclosure -- on a 4000-tall
+tab**. The enclosure runs down to exactly the top edge of the D bar
+below, which carries another net. Abutment, merged, shorted.
+
 Fix belongs in route.py's cut placement (`_addCuts` /
-`Cut.getCutsForRects`): give it the same keep-out the search used --
-foreign pins to clear, own-net metal to either clear or MERGE with
-(a pad 0.1 from its own net's metal should extend to touch it, not
-leave a sliver). The blocked-not-shorted nets (one per subcell,
+`Cut.getCutsForRects`), in two rules:
+
+1. **never choose a cut array whose enclosure exceeds the pin it lands
+   on** -- a 4000 tab takes a 1x1, whatever min-area would prefer;
+2. give placement the same keep-out the search used -- foreign pins to
+   clear, own-net metal to either clear or MERGE with (a pad 0.1 from
+   its own net's metal should extend to touch it, not leave a sliver;
+   that is the 20 met1.2).
+
+Terminal lanes are in (`_terminal_lane`): a net living wholly on
+sources takes the LEFT edge of its pins, wholly on drains the RIGHT --
+deterministic, never contested, and the drain lane clears the gate tab
+above the drain bar. A mixed-terminal net (any diode connection) keeps
+the searched lane, which is precisely the case that still shorts. The blocked-not-shorted nets (one per subcell,
 mostly supplies) come after; blocked is the correct behaviour until
 the landing is legal.
 

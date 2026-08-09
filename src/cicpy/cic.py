@@ -492,6 +492,36 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
 
     obj = cic.XschemPrinter(libdir + lib,rules)
     obj.exclude = keep
+    #- The printer must KNOW every referenced cell before anything
+    #- prints. symbolAndWrite returns SILENTLY when an instantiated
+    #- cell is missing from printer.cells -- no wires, no error, and
+    #- the position counter never advances, so the output is a pile of
+    #- symbols at one spot that netlists without complaint. It happened
+    #- here because sch2mag's design holds the devices in maglib, not
+    #- in design.cells; their SUBCKTS are in the cicspi registry from
+    #- the netlist that placed them, and that is what the printer
+    #- actually reads (instcell.ckt.nodes), so stand-ins carrying the
+    #- registry subckt are the whole requirement.
+    obj.cells.update(getattr(design, "cells", {}))
+    referenced = set()
+    for entry in plan:
+        cellobj = design.cells.get(entry["name"])
+        ckt = getattr(cellobj, "ckt", None)
+        for inst in (getattr(ckt, "instances", None) or []):
+            nm = getattr(inst, "subcktName", "")
+            if nm:
+                referenced.add(nm)
+    for nm in sorted(referenced):
+        if nm in obj.cells:
+            continue
+        sub = cicspi.Subckt.getSubckt(nm)
+        if sub is None:
+            log.warning(f"{nm}: no subckt in the registry; its instances "
+                        f"will print without wires")
+            continue
+        stand_in = cic.Cell(nm)
+        stand_in.ckt = sub
+        obj.cells[nm] = stand_in
     obj.print(design)
 
     #- The CUT cells travel with every subcell. A route that changes

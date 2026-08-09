@@ -401,7 +401,13 @@ E {}
             _libname = os.path.basename(instcell.libpath)
 
         if(_libname == ""):
-            _libname = self.libname
+            #- the LIBRARY name, not the path it was opened by. The
+            #- printer may be constructed with "../design/LIB" from a
+            #- work directory, and that string embedded in a symbol
+            #- reference resolves relative to the .sch's own directory
+            #- -- one level too deep. The basename is the same library
+            #- whichever directory it was reached from.
+            _libname = os.path.basename(str(self.libname).rstrip(os.path.sep))
 
 
         dstr = "C {" + f"{_libname}/{o.subcktName}" + ".sym}" +  f" {self.ix1} {self.iy1}" + " 0 0 {name=" + f"X{o.name}" + "}\n"

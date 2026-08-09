@@ -1486,6 +1486,7 @@ def stack_subckt(layout, entry):
     """
     import hashlib
     devices = []
+    fills = []
     for inst in layout.iterInstances():
         name = getattr(inst, "instanceName", "") or ""
         if name not in entry["instances"]:
@@ -1495,16 +1496,58 @@ def stack_subckt(layout, entry):
         #- diode connected device, which is placed as the D variant.
         cell = (getattr(inst, "schematicCell", "")
                 or getattr(inst, "cell", "") or "")
-        #- Skip instances with no nodes. Taps and fillers are LAYOUT,
-        #- not circuit: the parent netlist has no such devices either,
-        #- they are added by the placement. Emitting them produced a
-        #- schematic the printer refused --
-        #-   instance xfill_p_sw_0: []
-        #-   cell <PCH variant with a diode tie>: ['D','G','S','B']
-        #- and they would have had nothing to match in LVS anyway, since
-        #- they extract as geometry rather than as devices.
+        #- An instance with no nodes is layout, not circuit -- but the
+        #- two kinds of layout differ in what magic makes of them, and
+        #- LVS only forgives one:
+        #-
+        #-   taps    guard and well, no transistor. Extract as geometry
+        #-           and appear in no netlist. Skip.
+        #-   FILLS   a real transistor. Magic extracts it -- measured,
+        #-           D, G and S each floating on its own node and B on
+        #-           the stack's supply -- and a schematic without it is
+        #-           one device short, every time, on every subcell.
+        #-
+        #- So a fill is emitted the way it extracts: terminals floating,
+        #- bulk on the supply. Floating is stated with a unique node
+        #- name per pin, which is exactly how the extractor states it.
         if not nodes:
+            if name.startswith("xfill_"):
+                fills.append((name, cell))
             continue
+        devices.append((name, nodes, cell))
+    devices.sort()
+
+    #- which pin is bulk, and which net it rides: read it off the
+    #- SIBLINGS. Every real device in the stack ties one terminal to a
+    #- supply; the position of that terminal in the cell's port order is
+    #- the bulk index, and the net is the stack's supply. Asking the
+    #- devices beats naming "B": a library is free to call it anything.
+    supplies = supply_nets(layout)
+    for name, cell in sorted(fills):
+        bulk_i, bulk_net = None, None
+        for _dn, dnodes, dcell in devices:
+            if dcell != cell and not dcell.startswith(cell):
+                continue
+            for i, nd in enumerate(dnodes):
+                if nd in supplies:
+                    bulk_i, bulk_net = i, nd
+                    break
+            if bulk_i is not None:
+                break
+        if bulk_i is None:
+            #- no sibling of the same cell: fall back to any device
+            for _dn, dnodes, _dc in devices:
+                for i, nd in enumerate(dnodes):
+                    if nd in supplies:
+                        bulk_i, bulk_net = i, nd
+                        break
+                if bulk_i is not None:
+                    break
+        if bulk_i is None:
+            continue
+        width = max((len(d[1]) for d in devices), default=4)
+        nodes = [f"{name}_f{i}" for i in range(width)]
+        nodes[bulk_i] = bulk_net
         devices.append((name, nodes, cell))
     devices.sort()
     ports = list(entry["ports"])

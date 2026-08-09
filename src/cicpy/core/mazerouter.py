@@ -825,7 +825,7 @@ def pins_by_stack(layout, layer=None):
     return out
 
 
-def _pin_layer_if_clear(path, tm, router, pins, trunk):
+def _pin_layer_if_clear(path, tm, router, pins, trunk, extent_rects=None):
     """The pin layer, but only where nothing else is on it. Else None.
 
     A link between two devices in one column is a short local hop and
@@ -871,7 +871,17 @@ def _pin_layer_if_clear(path, tm, router, pins, trunk):
         return None
     if not (path[0][2] == path[-1][2] == tm.pin_layer):
         return None
+    #- over the FULL span the drawn route will cover, not the span the
+    #- search proved. route.py takes its trunk from every rect the net
+    #- has in scope, so on a net of six pins the search's two-pin path
+    #- is a fraction of the geometry: measured, a trunk drawn y
+    #- 59000..223000 was cleared against a path reaching 99000 and ran
+    #- straight through a gate pin at 173000.
     ys = [n[1] for n in path]
+    xs = [n[0] for n in path]
+    for r in (extent_rects or ()):
+        ys.extend((int(r.y1), int(r.y2)))
+        xs.extend((int(r.x1), int(r.x2)))
     col = trunk if trunk is not None else path[0][0]
     try:
         pad = Rules.getInstance().get(tm.pin_layer, "space")
@@ -897,7 +907,8 @@ def _pin_layer_if_clear(path, tm, router, pins, trunk):
     return tm.pin_layer
 
 
-def route_spec(path, tm, claimed=(), router=None, pins=None):
+def route_spec(path, tm, claimed=(), router=None, pins=None,
+               extent_rects=None):
     """Turn a searched path into a route.py command, or None.
 
     The search decides WHERE a net should go; route.py knows how to
@@ -969,7 +980,8 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
             facing = None
         if facing is not None:
             rtype, opts = facing
-            layer = _pin_layer_if_clear(path, tm, router, pins, None)
+            layer = _pin_layer_if_clear(path, tm, router, pins, None,
+                                        extent_rects)
             if layer is None:
                 on_path = [n[2] for n in path if n[2] != tm.pin_layer]
                 want = "v" if rtype == "||" else "h"
@@ -1050,7 +1062,8 @@ def route_spec(path, tm, claimed=(), router=None, pins=None):
     vertical = rtype in ("||", "-|--", "--|-")
     want = "v" if vertical else "h"
 
-    layer = _pin_layer_if_clear(path, tm, router, pins, trunk)
+    layer = _pin_layer_if_clear(path, tm, router, pins, trunk,
+                                extent_rects)
 
     if layer is None:
         on_path = [n[2] for n in path if n[2] != tm.pin_layer]
@@ -1292,7 +1305,8 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     r._own = [a, b]
                     path = r.search(start, goal,
                                     r.manhattan_heuristic(r.snap(goal)))
-                    spec = route_spec(path, tm, claimed, r, (a, b))
+                    spec = route_spec(path, tm, claimed, r, (a, b),
+                                      extent_rects=rects)
                     if spec is None:
                         raise Blocked(
                             f"path for {net} is not a shape route.py can "
@@ -1678,13 +1692,35 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- transistors.
         for r in getattr(layout, "routes", []) or []:
             _routed(r, routed)
-        added = 0
+        added = vias = 0
         for r in routed:
-            if (r.x1 >= sx1 and r.x2 <= sx2
+            if not (r.x1 >= sx1 and r.x2 <= sx2
                     and r.y1 >= sy1 and r.y2 <= sy2):
-                cell.add(r.getCopy())
-                added += 1
-        log.info(f"{name}: {added} routed rects of {len(routed)} inside")
+                continue
+            #- A VIA IS NOT A RECT and getCopy() flattens it into one:
+            #- Rect.getCopy returns a bare Rect, so a copied InstanceCut
+            #- lost its class and its cut cell and the subcell came out
+            #- with wires floating over the pins they land on. Clone it
+            #- as what it is -- the cut cell reference and the position
+            #- are the whole of its state.
+            if type(r).__name__ == "InstanceCut":
+                from cicpy.core.instancecut import InstanceCut
+                c2 = InstanceCut()
+                c2.name = getattr(r, "name", "")
+                c2.cell = getattr(r, "cell", "") or c2.name
+                c2.instanceName = getattr(r, "instanceName", "") or c2.name
+                c2.layer = getattr(r, "layer", "")
+                for attr in ("_cell_obj", "layoutcell", "design"):
+                    if getattr(r, attr, None) is not None:
+                        setattr(c2, attr, getattr(r, attr))
+                c2.setRect(r)
+                cell.add(c2)
+                vias += 1
+                continue
+            cell.add(r.getCopy())
+            added += 1
+        log.info(f"{name}: {added} routed rects and {vias} vias "
+                 f"of {len(routed)} inside")
 
         #- the boundary nets, as ports, from the pins that carry them
         pins = {}

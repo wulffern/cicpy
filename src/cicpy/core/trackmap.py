@@ -29,6 +29,10 @@ down.
 import logging
 from collections import defaultdict
 
+#- the reserved owner of device-internal metal: not a net, never equal
+#- to one, so it blocks every net alike
+DEVICE_METAL = "!device"
+
 from .rules import Rules
 from .layer import Layer
 
@@ -318,10 +322,20 @@ class TrackMap:
             b = r.y2 if horizontal else r.x2
             first = max(0, int((a - lo) // pitch))
             last = min(len(self.tracks[layer]) - 1, int((b - lo) // pitch))
+            span_lo = r.x1 if horizontal else r.y1
+            span_hi = r.x2 if horizontal else r.y2
+            #- DEVICE METAL IS A PIN OF NOBODY. A rect inside an
+            #- instance that coincides with none of its pins belongs to
+            #- no net and may not be crossed, landed on, or tolerated:
+            #- it is blocked under a name no net can ever equal. This
+            #- replaces "unattributed, so tolerated", which is the hole
+            #- a via pad fell through on five of eight subcells.
+            if getattr(r, "device_metal", False):
+                for i in range(first, last + 1):
+                    self.tracks[layer][i].block(DEVICE_METAL, span_lo, span_hi)
+                continue
             net = getattr(r, "net", "") or "?"
             for i in range(first, last + 1):
-                span_lo = r.x1 if horizontal else r.y1
-                span_hi = r.x2 if horizontal else r.y2
                 self.tracks[layer][i].occupy(net, span_lo, span_hi)
         if self.block_pins:
             self._mark_pins()

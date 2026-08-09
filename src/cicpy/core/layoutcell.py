@@ -733,7 +733,9 @@ class LayoutCell(Cell):
                             child._cell_obj = resolved
                             child_cell = resolved
                 if child_cell is not None:
+                    start = len(out)
                     self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
+                    self._attributeInstanceBody(child, out, start, dx, dy)
                 continue
 
             if child.isCell():
@@ -751,6 +753,88 @@ class LayoutCell(Cell):
 
         active.remove(obj_id)
         return out
+
+    def _attributeInstanceBody(self, inst, out, start, dx=0, dy=0):
+        """Resolve the rects inside one instance: a net, or an obstacle.
+
+        An instance KNOWS what its terminals are wired to -- its
+        InstancePorts carry the net and the placed pin rect -- and until
+        now that knowledge never reached the geometry: every rect inside
+        a device body came out with no net, was reported as "?", and had
+        to be TOLERATED on the pin layer so that a via could land on a
+        pin at all. That tolerance is the hole every remaining boundary
+        routing failure fell through -- a via pad on a device's own
+        rail, relabelled by the connectivity flood, reported as two
+        signal nets shorting.
+
+        The rule is the obvious one:
+
+          - a body rect overlapping one of the instance's own pins, on
+            the pin's layer, belongs to that pin's NET
+          - everything else inside the instance belongs to NO net and is
+            a HARD OBSTACLE -- marked ``device_metal``, blocked by the
+            track map for every net, never tolerated
+
+        The net FLOODS through the body: a rect touching an attributed
+        rect of the same layer takes its net, to a fixpoint. Without
+        this, only the rect directly under a pin was attributed, and the
+        pin's own conductor one row up -- present in every device --
+        blocked the pin's own via: measured, every boundary net in every
+        subcell came back "no path, closest approach 0 away", the search
+        unable to take its first step off its own pin. Same-layer
+        adjacency only: a chain that crosses layers inside a device is
+        rare, and a missed one leaves an obstacle, never a wrong net.
+
+        What stays unattributed after the flood is a HARD OBSTACLE. It
+        belongs to no terminal reachable from outside, so no via may
+        land on it and no run may cross it, for any net.
+        """
+        pins = []
+        for pi in getattr(inst, "children", []) or []:
+            if pi is None:
+                continue
+            if not ((hasattr(pi, "isPort") and pi.isPort())
+                    or (hasattr(pi, "isInstancePort") and pi.isInstancePort())):
+                continue
+            net = getattr(pi, "name", "") or ""
+            if not net:
+                continue
+            layer = getattr(pi, "routeLayer", "") or getattr(pi, "layer", "")
+            pins.append((net, layer,
+                         pi.x1 + dx, pi.y1 + dy, pi.x2 + dx, pi.y2 + dy))
+        body = [rr for rr in out[start:]
+                if not getattr(rr, "net", "") and not getattr(rr, "isPin", False)]
+        #- seed: the rect directly under a pin carries the pin's net
+        for rr in body:
+            layer = getattr(rr, "layer", "")
+            for pnet, pl, px1, py1, px2, py2 in pins:
+                if pl != layer:
+                    continue
+                if (rr.x1 < px2 and rr.x2 > px1
+                        and rr.y1 < py2 and rr.y2 > py1):
+                    rr.setNet(pnet)
+                    break
+        #- flood: touching metal of the same layer is the same conductor.
+        #- Touch includes abutment (closed intervals) -- cicpy draws a
+        #- conductor as abutting rects more often than overlapping ones.
+        changed = True
+        while changed:
+            changed = False
+            for rr in body:
+                if getattr(rr, "net", ""):
+                    continue
+                for other in body:
+                    onet = getattr(other, "net", "")
+                    if not onet or other.layer != rr.layer:
+                        continue
+                    if (rr.x1 <= other.x2 and rr.x2 >= other.x1
+                            and rr.y1 <= other.y2 and rr.y2 >= other.y1):
+                        rr.setNet(onet)
+                        changed = True
+                        break
+        for rr in body:
+            if not getattr(rr, "net", ""):
+                rr.device_metal = True
 
     def _getRouteSource(self, rect):
         if hasattr(rect, "route_owner_info"):

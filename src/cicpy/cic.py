@@ -404,6 +404,17 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
             if has_placement(_spec):
                 pycell = SidecarPycell(_spec)
                 pycellData = pycell.data
+        elif lcell.name.endswith("_HIER"):
+            #- the scaffold cell: assembled from the base cell's
+            #- sidecar when it carries a `hier:` stanza
+            yamlfile = lcell.dirname + lcell.name[:-5] + ".yaml"
+            if os.path.exists(yamlfile):
+                import yaml as _yaml
+                from cicpy.core.sidecarcell import AssemblyPycell
+                with open(yamlfile) as _f:
+                    _spec = _yaml.safe_load(_f) or {}
+                if "hier" in _spec:
+                    pycell = AssemblyPycell(_spec)
 
     lcell.strict_route = strict
     lcell.layout(pycell,pycellData)
@@ -764,6 +775,20 @@ def _ensure_default_pycell(dirname, cell):
     pycell_path = os.path.join(dirname, cell + ".py")
     if os.path.exists(pycell_path):
         return
+
+    #- a sidecar that declares the placement IS the pycell: writing a
+    #- template over it would shadow the recipe with empty hooks
+    base = cell[:-5] if cell.endswith("_HIER") else cell
+    yamlfile = os.path.join(dirname, base + ".yaml")
+    if os.path.exists(yamlfile):
+        try:
+            import yaml as _yaml
+            with open(yamlfile) as _f:
+                _spec = _yaml.safe_load(_f) or {}
+            if "rows" in _spec or "hier" in _spec:
+                return
+        except Exception:
+            pass
 
     os.makedirs(dirname, exist_ok=True)
     with open(pycell_path, "w") as fo:

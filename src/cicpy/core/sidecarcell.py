@@ -150,3 +150,108 @@ class SidecarPycell:
     def afterPaint(self, layout):
         from cicpy.core.mazerouter import write_stack_cells
         write_stack_cells(layout, log=layout.log)
+
+
+class AssemblyPycell:
+    """The hierarchical top from the same sidecar.
+
+    Places the published subcells at their published offsets (rows
+    reused from the flat declaration), opens the assembly channel,
+    registers the channels by the declared names, and routes every
+    crossing net from the `hier: routes:` table -- a ChannelRoute
+    per net with addRouteConnection drops -- plus the supply rings
+    with addPowerConnection. The scaffold cell <CELL>_HIER finds
+    this when <CELL>.yaml carries a `hier:` stanza and no
+    <CELL>_HIER.py exists.
+    """
+
+    def __init__(self, spec):
+        self.spec = spec
+
+    def beforePlace(self, layout):
+        layout.noPowerRoute = True
+        layout.place_xspace = [0]
+        layout.place_yspace = [0]
+        layout.place_groupbreak = [len(self.spec.get("rows", [[]])[0])]
+
+    def afterPlace(self, layout):
+        hier = self.spec.get("hier", {})
+        channel = hier.get("channel", 8) * layout.um
+        rows = [["x" + n for n in row] for row in self.spec.get("rows", [])]
+
+        #- Within a row the cells keep their PUBLISHED relative
+        #- offsets: they overlap-tile, and the published coordinates
+        #- are the arrangement DRC has already accepted. The painted
+        #- reference needs xcell = -origin, the ports already land.
+        y = 0
+        row_tops = []
+        for row in rows:
+            anchor_x, tallest = None, 0
+            for nm in row:
+                inst = layout.getInstanceFromInstanceName(nm)
+                if inst is None:
+                    continue
+                sub = inst.layoutcell
+                if anchor_x is None:
+                    anchor_x = int(sub.x1)
+                inst.moveTo(int(sub.x1) - anchor_x, y)
+                inst.xcell = -int(sub.x1)
+                inst.ycell = -int(sub.y1)
+                tallest = max(tallest, int(inst.height()))
+            row_tops.append(y + tallest)
+            y += tallest + channel
+        layout.updateBoundingRect()
+
+        if len(rows) >= 2:
+            top_inst = layout.getInstanceFromInstanceName(rows[1][0])
+            layout.addRoutingChannel("mid", row_tops[0], int(top_inst.y1))
+        for e in self.spec.get("subcells", []):
+            inst = layout.getInstanceFromInstanceName("x" + e["name"])
+            if inst is not None and e.get("channel"):
+                layout.addRoutingChannel(e["channel"], int(inst.x1),
+                                         int(inst.x2), horizontal=False)
+
+    def beforeRoute(self, layout):
+        hier = self.spec.get("hier", {})
+        for r in hier.get("routes", []):
+            net = r["net"]
+            layout.addChannelRoute(r.get("bar_layer", "M3"), net,
+                                   r.get("channel", "mid"),
+                                   r.get("track", 0))
+            #- drops are DISCOVERED: every subcell instance exposing
+            #- the net gets one, with the route's defaults; the
+            #- `drops:` list only overrides -- layer, align, cuts,
+            #- pin_cut -- for the instances that need it.
+            defaults = {"layer": r.get("layer", "M2"),
+                        "align": r.get("align", "center"),
+                        "cuts": r.get("cuts", 2),
+                        "pin_cut": r.get("pin_cut", True)}
+            overrides = {}
+            for d in r.get("drops", []):
+                if isinstance(d, dict):
+                    overrides[d["inst"]] = d
+                else:
+                    o = {"inst": d[0]}
+                    if len(d) > 1: o["layer"] = d[1]
+                    if len(d) > 2: o["align"] = d[2]
+                    if "nopin" in d[3:]: o["pin_cut"] = False
+                    overrides[d[0]] = o
+            for inst in layout.iterInstances():
+                nm = getattr(inst, "instanceName", "")
+                if net not in getattr(inst, "instancePorts", {}):
+                    continue
+                o = dict(defaults)
+                o.update(overrides.get(nm.lstrip("x"), {}))
+                layout.addRouteConnection(net, f"^{re.escape(nm)}$", "t",
+                                          o["layer"], align=o["align"],
+                                          cuts=o["cuts"],
+                                          pin_cut=o["pin_cut"])
+            layout.trimChannelRoute(net)
+        for sup in self.spec.get("supplies", []):
+            side = sup.get("ring")
+            if not side:
+                continue
+            layout.addRouteRing("M1", sup["net"], side,
+                                widthmult=3, spacemult=2)
+            layout.addPowerConnection(sup["net"], "",
+                                      "top" if "t" in side else "bottom")

@@ -2181,7 +2181,7 @@ class LayoutCell(Cell):
     def addRouteConnection(self, name:str, includeInstances:str="",
                            location:str="t", layer:str="M2",
                            excludeInstances:str="", align:str="center",
-                           cuts:int=1, key:str=None, pin_cut:bool=True):
+                           cuts:int=2, key:str=None, pin_cut:bool=True):
         """Drop a net's pins onto its rail -- ChannelRoute or ring.
 
         The signal sibling of addPowerConnection: where that stretches
@@ -2246,19 +2246,29 @@ class LayoutCell(Cell):
             #- pin_cut=False lands the drop on metal the subcell
             #- already provides at the pin (its own via stack); a
             #- second stack there is a partial via overlap, which the
-            #- rules forbid.
-            ends = ((layer, r.layer, r.centerY()),
-                    (layer, rail.layer, rail.centerY()))
+            #- rules forbid. Cuts go through getCutsForRects: two
+            #- cuts along the target's long side for reliability,
+            #- auto-shrunk where a narrow tab only fits one.
+            ends = ((r, r.centerY()),
+                    (rail, rail.centerY()))
             if not pin_cut:
                 ends = ends[1:]
-            for a, b, yc in ends:
-                if a == b:
+            for target, yc in ends:
+                if layer == target.layer:
                     continue
-                ct = Cut.getInstance(a, b, 1, cuts)
-                if ct is None:
-                    ct = Cut.getInstance(b, a, 1, cuts)
-                if ct is not None:
-                    ct.moveCenter(int(x), int(yc))
+                cs = Cut.getCutsForRects(layer, [target.getCopy()],
+                                         cuts, 1, True)
+                if cs:
+                    ct = cs[0]
+                    #- the cut slides inside the target while the
+                    #- wire keeps its alignment: an aligned drop with
+                    #- a two-cut pad otherwise overhangs the pin edge
+                    #- into the neighbouring lane (li.3, measured).
+                    #- The wide pad still covers the wire.
+                    half = ct.width() / 2
+                    lo, hi = target.x1 + half, target.x2 - half
+                    xc = x if lo > hi else min(max(x, lo), hi)
+                    ct.moveCenter(int(xc), int(yc))
                     routering.add(ct)
 
     def trimChannelRoute(self, name:str, ends:str="lr"):

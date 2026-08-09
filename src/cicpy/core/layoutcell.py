@@ -2098,7 +2098,7 @@ class LayoutCell(Cell):
             self.add(rr)
 
     def addChannelRoute(self, layer:str, name:str, channel:str, track:int=0,
-                        widthmult:int=1):
+                        widthmult:int=1, key:str=None):
         """A RouteRing variant lying ACROSS the cell on a channel track.
 
         The bar spans the full width of the top-level cell at the
@@ -2118,15 +2118,63 @@ class LayoutCell(Cell):
         from .routering import ChannelRoute
         cr = ChannelRoute(layer, name, int(self.x1), int(self.x2),
                           int(y), int(mw))
-        self.updatePort(name, cr.getDefault())
-        self.named_rects[f"rail_{name}"] = cr
+        #- keyed: one net may own several bars -- a segment per track,
+        #- bridged where the traffic wants -- and each is addressed by
+        #- its key. The unkeyed call keeps the ring-compatible name.
+        key = key or name
+        if key == name:
+            self.updatePort(name, cr.getDefault())
+        self.named_rects[f"rail_{key}"] = cr
         self.add(cr)
         return cr
+
+    def addChannelBridge(self, name:str, key_a:str, key_b:str,
+                         layer:str="M2", x:int=None):
+        """Join two ChannelRoutes of one net inside the channel.
+
+        A vertical on ``layer`` between the two bars, cut at each. By
+        default it stands at the middle of the bars' x overlap; pass
+        ``x`` (e.g. a channelTrackCoord of a vertical channel) to
+        place it. On a layer other than the bars' own it crosses any
+        bar between them; on the same layer it must not have to.
+        """
+        a = self.named_rects.get(f"rail_{key_a}")
+        b = self.named_rects.get(f"rail_{key_b}")
+        if a is None or b is None:
+            self.log.error(f"addChannelBridge: missing rail {key_a} or {key_b}")
+            return
+        ra, rb = a.getDefault(), b.getDefault()
+        if x is None:
+            lo = max(ra.x1, rb.x1)
+            hi = min(ra.x2, rb.x2)
+            if lo > hi:
+                self.log.error(f"addChannelBridge: bars of {name} do not overlap; pass x")
+                return
+            x = (lo + hi) / 2
+        rules = Rules.getInstance()
+        w = rules.get(layer, "width")
+        from .rect import VerticalRectangleFromTo
+        from .cut import Cut
+        v = VerticalRectangleFromTo(layer, int(x - w / 2),
+                                    int(ra.centerY()), int(rb.centerY()),
+                                    int(w))
+        v.net = name
+        a.add(v)
+        for rail, ring in ((ra, a), (rb, b)):
+            if layer == rail.layer:
+                continue
+            ct = Cut.getInstance(layer, rail.layer, 1, 1)
+            if ct is None:
+                ct = Cut.getInstance(rail.layer, layer, 1, 1)
+            if ct is not None:
+                ct.moveCenter(int(x), int(rail.centerY()))
+                ring.add(ct)
+        return v
 
     def addRouteConnection(self, name:str, includeInstances:str="",
                            location:str="t", layer:str="M2",
                            excludeInstances:str="", align:str="center",
-                           cuts:int=1):
+                           cuts:int=1, key:str=None):
         """Drop a net's pins onto its rail -- ChannelRoute or ring.
 
         The signal sibling of addPowerConnection: where that stretches
@@ -2139,8 +2187,9 @@ class LayoutCell(Cell):
         column.
         """
         rr_key = None
-        for k in (f"rail_{name}", f"power_{name}"):
-            if k in self.named_rects:
+        for k in (f"rail_{key}" if key else None,
+                  f"rail_{name}", f"power_{name}"):
+            if k and k in self.named_rects:
                 rr_key = k
                 break
         if rr_key is None:

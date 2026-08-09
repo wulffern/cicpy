@@ -1,9 +1,16 @@
-# Stacks as cells: generate once, instantiate in the top
+# Subcells: generate once, instantiate in the top
 
 Goal: stop laying out a big analog cell as one flat field of devices.
-Generate each stack as a real cell -- its own `.mag`, `.sch`, `.sym`,
+Generate each subcell as a real cell -- its own `.mag`, `.sch`, `.sym`,
 its own DRC and LVS -- and have the top instantiate those cells and
 route only between their ports.
+
+**A subcell is not a stack.** It is any CellGroup the design marks with
+`subcell = True`, and failing that every stack, a column of devices
+being the decomposition that needs no thought. A differential pair
+spread over two columns, or a whole side, publishes the same way.
+`subcell_membership` and `subcell_groups` both follow that rule and
+have to stay in step.
 
 Everything below is measured on 2026-08-08, on a 70-device OTA
 (`LELOTEMP_OTAR`, 8 stacks). Numbers are from the tools, not estimates.
@@ -14,29 +21,49 @@ The generation machinery is done and verified:
 
 | step | state |
 |---|---|
-| `plan_stack_cells` — names, instances, ports, internal nets | works |
+| `plan_subcells` — names, instances, ports, internal nets | works |
 | `run_stack_pycells` — a stack's own `<CELL>.py route(layout, entry)` | works, runs between afterPlace and beforeRoute |
 | `route_stack_level` — search-based routing per stack | works |
-| `write_stack_cells` — publishes each stack as a cell, writes `.mag` | works |
+| `write_stack_cells` — publishes each one as a cell, writes `.mag` | works |
 | `stack_subckt` — the generated subckt | works |
-| `make stacksch` — writes `.sch` and `.sym` per stack | **now works** |
-| **standalone DRC of every generated stack cell** | **all 8 clean** |
+| `cicpy sch2subcells` / `make subcells` — `.mag`, `.cic`, `.sch`, `.sym` per subcell, parent untouched | **works** |
+| **standalone DRC of every generated subcell** | **all 8 clean** |
 
-`make stacksch` and the schematics were broken until today by two bugs
-in `XschemPrinter`, both now fixed (cicpy 474cdb2): the printer never
-looked for symbols in the library it was writing, and a symbol read and
-written back grew a duplicate `K` block every run. Before the fix the
-generated stack schematic put every wire on a placeholder pin grid
-touching nothing, xschem connected nothing, and netgen merged six
-identical devices into one — which reads as "6 devices, 24 wires" and
-looks like success.
+The flow is two steps now, and the order is the point:
 
-So a stack cell can be generated and is DRC clean. What it cannot yet
-do is pass **LVS**, and that is the whole gate.
+    make subcells CELL=X     a cell per subcell, parent never written
+    make mag      CELL=X     the parent
+
+That replaced a second `transpile --xschem` carrying a negative
+lookahead over the cell name, which had to be documented as "not
+optional" because getting it wrong wrote a generated schematic over the
+hand-drawn source. The list comes from the plan by name now.
+
+Four bugs had to go first, all of which made a generated cell lie:
+
+- the printer never looked for symbols in the library it was writing,
+  so transpiling a generated cell died on its own devices
+- a symbol read and written back grew a duplicate `K` block per run
+- a cell being printed found its OWN previously generated `.sym` and
+  replayed it, freezing its port list — and xschem takes the subckt
+  ports from the symbol, so a new port appeared in `*.PININFO` and was
+  missing from `.subckt`
+- **a net that is a port of the parent is a port of the subcell**, even
+  when every device pin on it sits inside one subcell. An input pair's
+  gate had all six pins in one column, so the cell swallowed it and
+  there was no way to drive it once the parent instantiated the cell
+
+Before those, the generated schematic put every wire on a placeholder
+pin grid touching nothing, xschem connected nothing, and netgen merged
+six identical devices into one — which reads as "6 devices, 24 wires"
+and looks like success.
+
+So a subcell can be generated and is DRC clean. What it cannot yet do
+is pass **LVS**, and that is the whole gate.
 
 ## The one thing in the way
 
-**A stack cell must join every net it has two or more pins of** —
+**A subcell must join every net it has two or more pins of** —
 boundary nets included. A net with pins outside becomes a port; a cell
 that leaves its internal pins apart presents the same net at several
 ports and hands the parent a problem it just invented.
@@ -102,35 +129,35 @@ That single change:
 same job as step 2b was for pins". It is the highest-value change left
 in the router.
 
-## Then: the top instantiates the stacks
+## Then: the top instantiates the subcells
 
 Two things remain after LVS passes.
 
 **Fill devices.** The layout has them, the schematic does not: measured
-on one stack, 7 devices in the extracted netlist against 6 in the
+on one subcell, 7 devices in the extracted netlist against 6 in the
 schematic. The same gap exists at the top (2 `xfill` in the extracted
 `.spi`, 0 in the CDL) and is invisible there only because the top has
-never passed LVS anyway. A stack cell has nowhere to hide it. Either
-`stack_subckt` emits the fill devices, or the stack `.mag` excludes
+never passed LVS anyway. A subcell has nowhere to hide it. Either
+`stack_subckt` emits the fill devices, or the subcell `.mag` excludes
 them. Emitting them is the honest one — they are real transistors.
 
-**A hierarchical top.** Today `write_stack_cells` publishes stack cells
+**A hierarchical top.** Today `write_stack_cells` publishes subcells
 *alongside* a parent that still contains the devices — deliberately, so
 a working flat design is not disturbed. The last step replaces that: a
-top schematic that instantiates the eight stack symbols instead of ~70
-devices, with `plan_stack_cells`'s `ports` as the connections. All the
+top schematic that instantiates the eight subcell symbols instead of ~70
+devices, with `plan_subcells`'s `ports` as the connections. All the
 information needed is already computed.
 
 The payoff is the point of the exercise: the top stops being 70 devices
 and ~2000 rects and becomes 8 instances routed port to port, and each
-stack is verified before the top exists.
+subcell is verified before the top exists.
 
 ## Order of work
 
 1. attribute instance geometry (the fix above) — unblocks everything
-2. re-measure the 8 stacks with `boundary=True`; expect all clean
+2. re-measure the 8 subcells with `boundary=True`; expect all clean
 3. fill devices into `stack_subckt`
-4. per-stack LVS as a gate in the flow
+4. per-subcell LVS as a gate in `make subcells`
 5. emit the hierarchical top
 
 Do not skip to 5. Each level must be LVS clean before the next is built
@@ -140,7 +167,7 @@ just tidier.
 ## State the design was left in
 
 `LELOTEMP_OTAR`: **0 DRC, 0 shorts, 11 opens**, `STACK_ROUTING =
-("r_deg", "p_sw")`, `STACK_BOUNDARY = False`. All 8 stack cells
+("r_deg", "p_sw")`, `STACK_BOUNDARY = False`. All 8 subcells
 generate and pass DRC standalone. The 11 opens are group- and top-level
 signal routing that the hierarchy is meant to replace, so they are not
 worth chasing flat.

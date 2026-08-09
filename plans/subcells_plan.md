@@ -113,41 +113,40 @@ Measured, all 8 with `boundary=True`:
 | `r_deg`, `p_sw` | partial | clean, 1 blocked each |
 | `p_bias`, `n_load_a/b`, `n_mirr` | most routed | **1 short each** |
 
-## The one thing in the way now: route.py cut placement
+## State after the routing round of 2026-08-09
 
-Every remaining failure is the same mechanism. The search clears a
-1x1 via footprint at a grid point; route.py then places the cut ITS
-way -- 1x2 where min-area wants it, aligned to the pin -- and the
-enclosure lands where nothing checked:
+`make hier` exists: the top as eight subcell instances, identity
+transforms, DRC clean, extracted hierarchically by magic.
 
-- on the diagonal GATE pin ~2 um away (the 4 shorts; G sits above and
-  beside the wide D bar in this library)
-- within 0.14 um of neighbouring metal (the 20 met1.2 on p_in_a --
-  DRC only, LVS passes anyway)
+The boundary sweep stands at **6 of 8 shorts-free** (was 4), p_in_a
+DRC clean + LVS matched standalone. What that round fixed, each
+measured before and after:
 
-The exact mechanism, measured on n_load_a's VD1: the net is
-diode-connected (D and G), its trunk must reach a GATE TAB, and
-route.py lands a **1x2 cut -- 8400 of M1 enclosure -- on a 4000-tall
-tab**. The enclosure runs down to exactly the top edge of the D bar
-below, which carries another net. Abutment, merged, shorted.
+- **M1 is the cheapest layer** (`ROUTE.pintravel` + `ROUTE.costs` in
+  the tech; the search may travel the pin layer, priced lowest).
+  Attribution is what made it safe.
+- **claims are consulted by every shape** -- the facing vertical and
+  the terminal lane used to bypass `taken()`, and the bend branch fell
+  back onto a claimed column when nothing was free. A net with no
+  clear column is BLOCKED now, which is truthful.
+- **landings are claimed, not only trunks** -- a routed net's pins,
+  and the PARENT's queued routes overlapping the stack extent (the
+  top's power-up route lands on a gate inside the load column).
+- **a cut never bigger than the pin it lands on**
+  (`Cut.getCutsForRects`): the 1x2-on-a-4000-tab shorts are gone.
 
-Fix belongs in route.py's cut placement (`_addCuts` /
-`Cut.getCutsForRects`), in two rules:
+## What remains: pad POSITION
 
-1. **never choose a cut array whose enclosure exceeds the pin it lands
-   on** -- a 4000 tab takes a 1x1, whatever min-area would prefer;
-2. give placement the same keep-out the search used -- foreign pins to
-   clear, own-net metal to either clear or MERGE with (a pad 0.1 from
-   its own net's metal should extend to touch it, not leave a sliver;
-   that is the 20 met1.2).
+Both remaining shorts (n_load_a, n_load_b) are one mechanism: a pad
+LEGAL ON ITS OWN PIN whose 8800 width overhangs into the diagonal
+gate tab beside it. The cut fits the pin; the pin's free width from
+the trunk to the neighbour is smaller than the pad. The fix is to
+shift the pad along the pin away from foreign geometry -- route.py's
+cut placement needs the keep-out, which it still does not have.
 
-Terminal lanes are in (`_terminal_lane`): a net living wholly on
-sources takes the LEFT edge of its pins, wholly on drains the RIGHT --
-deterministic, never contested, and the drain lane clears the gate tab
-above the drain bar. A mixed-terminal net (any diode connection) keeps
-the searched lane, which is precisely the case that still shorts. The blocked-not-shorted nets (one per subcell,
-mostly supplies) come after; blocked is the correct behaviour until
-the landing is legal.
+The blocked-not-shorted nets (one or two per subcell, mostly supplies
+and diode nets with no clear column) come after; blocked is correct
+until the landing is legal.
 
 ## A subcell `.cic`, for the route checker
 

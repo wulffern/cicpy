@@ -62,7 +62,9 @@ class Route(Cell):
         #- that errors -- the log looks like consent.
         self.hasAbsoluteTrunk = False
         self.absoluteTrunk = 0
-        m = re.search(r"trunkx=(-?[0-9]+(?:\.[0-9]+)?)", self.options)
+        #- with or without '=': _resolveChannelOptions emits the bare
+        #- form (trunkx273300), hand-written options the '=' form.
+        m = re.search(r"trunkx=?(-?[0-9]+(?:\.[0-9]+)?)", self.options)
         if m:
             self.hasAbsoluteTrunk = True
             self.absoluteTrunk = int(float(m.group(1)))
@@ -134,12 +136,15 @@ class Route(Cell):
             m = re.search(regex, self.options)
             return m.group(1) if m else default
 
-        self.startCuts = get_int(r"(\\d+)startcuts(\\s+|,|$)", 0)
-        self.startVCuts = get_int(r"(\\d+)startvcuts(\\s+|,|$)", 0)
-        self.endCuts = get_int(r"(\\d+)endcuts(\\s+|,|$)", 0)
-        self.endVCuts = get_int(r"(\\d+)endvcuts(\\s+|,|$)", 0)
-        self.cuts = get_int(r"(\\d+)cuts", 2)
-        self.vcuts = get_int(r"(\\d+)vcuts", 1)
+        #- single backslash: as r"(\\d+)" these matched a literal
+        #- backslash and every Ncuts option silently parsed to the
+        #- default
+        self.startCuts = get_int(r"(\d+)startcuts(\s+|,|$)", 0)
+        self.startVCuts = get_int(r"(\d+)startvcuts(\s+|,|$)", 0)
+        self.endCuts = get_int(r"(\d+)endcuts(\s+|,|$)", 0)
+        self.endVCuts = get_int(r"(\d+)endvcuts(\s+|,|$)", 0)
+        self.cuts = get_int(r"(\d+)cuts", 2)
+        self.vcuts = get_int(r"(\d+)vcuts", 1)
         self.routeWidthRule = get_str(r"routeWidth=([^,\\s+,$]+)", "width")
         self.startLayer = get_str(r"startLayer=([^,\\s+,$]+)", "")
         self.stopLayer = get_str(r"stopLayer=([^,\\s+,$]+)", "")
@@ -341,6 +346,10 @@ class Route(Cell):
     def _allowedCutCounts(self, hcuts, vcuts):
         hcuts = int(hcuts)
         vcuts = int(vcuts)
+        #- an explicit "1cuts" means a single cut: a 2x1 pad is 8400
+        #- wide and a tab beside a guard ring has no room for it
+        if hcuts == 1 and vcuts <= 1:
+            return (1, 1)
         if vcuts > hcuts:
             return (1, 2)
         return (2, 1)
@@ -667,7 +676,39 @@ class Route(Cell):
                 return int((overlap_left + overlap_right) / 2)
             return int(r1.centerX())
 
+        #- One cut per pin cluster on a shared trunk: a diode variant
+        #- exposes its tied bar and tab as two rects a few hundred
+        #- apart, and a pad on each leaves a sub-min gap between two
+        #- same-net pads (measured: 36 met1/mcon errors down one
+        #- stack). The second connection adds nothing the trunk metal
+        #- does not already carry.
+        placed_cut_ys = []
+        placed_cut_ids = set()
+
+        def _cut_crowded(cut):
+            if cut is None:
+                return False
+            if id(cut) in placed_cut_ids:
+                #- the same start cut serves every connection; seeing
+                #- it again is not a collision with itself
+                return False
+            yc = cut.centerY()
+            if any(abs(yc - y) < 4800 for y in placed_cut_ys):
+                #- drop it entirely: left in place it is a stray pad
+                #- on the pin, and the pad gap it was skipped for
+                #- would just reappear there
+                if cut in self.children:
+                    self.children.remove(cut)
+                return True
+            placed_cut_ys.append(yc)
+            placed_cut_ids.add(id(cut))
+            return False
+
         def add_connection(r1, r2, start_cut=None, end_cut=None):
+            if _cut_crowded(start_cut):
+                start_cut = None
+            if _cut_crowded(end_cut):
+                end_cut = None
             xc_center = connection_center(r1, r2)
             if start_cut is not None:
                 start_cut.moveCenter(xc_center, start_cut.centerY())
@@ -1042,9 +1083,12 @@ class OrthogonalLayerRoute(Route):
         else:
             y1 = upper_pad.y2
             y2 = lower_pad.y1
+        #- x is the LEFT edge in VerticalRectangleFromTo; centerX put
+        #- every jog width/2 off its pads and left a sub-width M3 step
+        #- over each one (met3.1, measured on the M4 jog columns).
         return VerticalRectangleFromTo(
             self.verticalLayer,
-            lower_pad.centerX(),
+            lower_pad.centerX() - width / 2,
             y1,
             y2,
             width,

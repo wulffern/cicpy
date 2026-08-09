@@ -1806,26 +1806,34 @@ def stack_subckt(layout, entry):
     #- the bulk index, and the net is the stack's supply. Asking the
     #- devices beats naming "B": a library is free to call it anything.
     supplies = supply_nets(layout)
+
+    def _bulk_of(dev_list):
+        #- The bulk index is the one on a supply in EVERY sibling; a
+        #- source can ride the supply too (a whole bias stack does),
+        #- but not on all devices of all stacks -- and when both
+        #- qualify, bulk is the later terminal. Taking the FIRST
+        #- supply position put the fill's supply on S in p_bias,
+        #- where magic extracts B on the well and S floating.
+        if not dev_list:
+            return None, None
+        width = min(len(d[1]) for d in dev_list)
+        for i in reversed(range(width)):
+            nets = {d[1][i] for d in dev_list}
+            if nets and all(nd in supplies for nd in nets):
+                return i, dev_list[0][1][i]
+        for i in reversed(range(width)):
+            nd = dev_list[0][1][i]
+            if nd in supplies:
+                return i, nd
+        return None, None
+
     for name, cell in sorted(fills):
-        bulk_i, bulk_net = None, None
-        for _dn, dnodes, dcell in devices:
-            if dcell != cell and not dcell.startswith(cell):
-                continue
-            for i, nd in enumerate(dnodes):
-                if nd in supplies:
-                    bulk_i, bulk_net = i, nd
-                    break
-            if bulk_i is not None:
-                break
+        sibs = [d for d in devices
+                if d[2] == cell or d[2].startswith(cell)]
+        bulk_i, bulk_net = _bulk_of(sibs)
         if bulk_i is None:
             #- no sibling of the same cell: fall back to any device
-            for _dn, dnodes, _dc in devices:
-                for i, nd in enumerate(dnodes):
-                    if nd in supplies:
-                        bulk_i, bulk_net = i, nd
-                        break
-                if bulk_i is not None:
-                    break
+            bulk_i, bulk_net = _bulk_of(devices)
         if bulk_i is None:
             continue
         width = max((len(d[1]) for d in devices), default=4)

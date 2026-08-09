@@ -2468,6 +2468,53 @@ class LayoutCell(Cell):
             options = (options + "," if options else "") + f"{key}{int(coord)}"
         return options.strip(",")
 
+    def addChannelConnection(self, verticalLayer, horizontalLayer, regex,
+                             channel, track, cuts=1, includeInstances="",
+                             excludeInstances="", options=""):
+        """Connect pins to a track of a named routing channel.
+
+        The channel analog of addPowerConnection to a ring: the
+        channel is registered by addRoutingChannel, the track is an
+        index on it, and each call drops the selected pins onto that
+        track. Successive calls for the SAME net on the same track
+        extend one shared bar across the union of their spans, so a
+        net can be attached group by group -- the pattern that
+        otherwise takes two orthogonal routes whose bars only meet if
+        their pin spans happen to overlap.
+        """
+        opts = f"hchannel={channel},htrack={track}"
+        if options:
+            opts += "," + options
+        r = self.addOrthogonalConnectivityRoute(
+            verticalLayer, horizontalLayer, regex, opts, cuts,
+            excludeInstances, includeInstances)
+        #- the shared bar: remember this call's span and pave the
+        #- union, so the next call's bar lands on the same metal
+        coord = self.channelTrackCoord(channel, track)
+        if coord is None:
+            return r
+        rects = self.getNodeAccessRects(regex.strip("^$"), verticalLayer,
+                                        includeInstances=includeInstances,
+                                        excludeInstances=excludeInstances)
+        if not rects:
+            return r
+        x1 = min(rr.x1 for rr in rects)
+        x2 = max(rr.x2 for rr in rects)
+        if not hasattr(self, "_channel_bars"):
+            self._channel_bars = {}
+        key = (channel, int(track), regex)
+        if key in self._channel_bars:
+            ox1, ox2 = self._channel_bars[key]
+            x1, x2 = min(x1, ox1), max(x2, ox2)
+        self._channel_bars[key] = (x1, x2)
+        rules = Rules.getInstance()
+        hw = rules.get(horizontalLayer, "width")
+        bar = Rect(horizontalLayer, int(x1), int(coord - hw / 2),
+                   int(x2 - x1), int(hw))
+        bar.net = regex.strip("^$")
+        self.add(bar)
+        return r
+
     def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, includeGroups=""):
         options = self._resolveChannelOptions(options)
         self.log.info(
@@ -2487,6 +2534,14 @@ class LayoutCell(Cell):
             if len(rects) == 0:
                 self.log.error(f"Could not find rectangles on {node} {regex} {len(rects)}")
                 continue
+            #- accessLayer=X: the pin already carries same-net metal on
+            #- X (a subcell's own rail pad), so the route attaches
+            #- there instead of stacking from the pin layer -- whose
+            #- cut would partially overlap the subcell's own cut,
+            #- which the via rules forbid.
+            m = re.search(r"accessLayer=(\w+)", options or "")
+            if m:
+                rects = [r.getCopy(m.group(1)) for r in rects]
             try:
                 from .route import OrthogonalLayerRoute
                 r = OrthogonalLayerRoute(node, verticalLayer, horizontalLayer, rects, options, cuts=cuts)

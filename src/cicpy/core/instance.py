@@ -233,6 +233,13 @@ class Instance(Cell):
         elif self.angle == "MX":
             rect.mirrorX(0)
             rect.translate(self.xcell, self.ycell)
+        else:
+            #- R0 carries xcell/ycell too: a stack subcell is published in
+            #- the parent's absolute coordinates, and xcell = -origin is
+            #- what cancels it. getCellPoint already honors this; without
+            #- the same here the painted reference and the occupied rects
+            #- disagree by exactly the subcell origin.
+            rect.translate(self.xcell, self.ycell)
         rect.translate(self.x1, self.y1)
         return rect
 

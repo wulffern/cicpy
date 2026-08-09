@@ -596,6 +596,16 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
             nm = getattr(inst, "subcktName", "")
             if nm:
                 referenced.add(nm)
+    #- and every sibling library's symbols are findable, so a device
+    #- cell resolves to ITS OWN library. Without this the printer only
+    #- saw symbols in the library being written, which required local
+    #- COPIES of every device symbol -- 392 of them, in one repo,
+    #- committed by accident -- and stamped the generated schematics
+    #- with references to the copies instead of the originals.
+    import glob as _glob
+    for symfile in _glob.glob(os.path.join(libdir, "*", "*.sym")):
+        if symfile not in obj.lib_symbols:
+            obj.lib_symbols.append(symfile)
     for nm in sorted(referenced):
         if nm in obj.cells:
             continue
@@ -606,6 +616,16 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
             continue
         stand_in = cic.Cell(nm)
         stand_in.ckt = sub
+        #- the library the symbol actually lives in, preferring a
+        #- sibling over the library being written: the reference
+        #- embedded in the .sch is <libname>/<cell>.sym, and it should
+        #- name the device library, not a local copy
+        own = os.path.join(libdir, lib, nm + ".sym")
+        for symfile in sorted(_glob.glob(os.path.join(libdir, "*",
+                                                      nm + ".sym"))):
+            if os.path.abspath(symfile) != os.path.abspath(own):
+                stand_in.libpath = os.path.dirname(symfile)
+                break
         obj.cells[nm] = stand_in
     obj.print(design)
 

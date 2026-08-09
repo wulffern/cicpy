@@ -236,3 +236,12 @@ just tidier.
 generate and pass DRC standalone. The 11 opens are group- and top-level
 signal routing that the hierarchy is meant to replace, so they are not
 worth chasing flat.
+
+---
+
+**STATUS 2026-08-09: shipped, and superseded as documentation.** The
+subcell flow is the production path (LELOTEMP_OTAR: 8 subcells + top,
+all DRC/LVS clean, zero per-cell python). Publication code moved to
+`src/cicpy/core/subcell.py`. The current method is documented in
+`docs/agent_layout.md` ("The sidecar flow"); this plan stays for the
+measurements and failed attempts.

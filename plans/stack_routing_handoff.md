@@ -196,3 +196,10 @@ exclude and copy back the one file.
   never drawn. Delete it.
 - Router routes a net, not a set — no ordering or rip-up beyond the
   trunk claims.
+
+---
+
+**STATUS 2026-08-09: resolved.** Both root causes fixed (stack pycells
+run between afterPlace and beforeRoute; pin-layer blocker attribution).
+p_sw routes via its stack pycell `LELOTEMP_OTAR_P_SW.py`, which now
+imports from `cicpy.core.subcell`. See `docs/agent_layout.md`.

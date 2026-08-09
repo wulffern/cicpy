@@ -15,6 +15,130 @@ The API reference lives in [pycell](pycell.md), [layout](layout.md) and
 conventions, and the facts about the libraries and the design rules that
 are expensive to rediscover.
 
+## The sidecar flow — the current best method
+
+Everything below this section still works and is still the reference
+for the primitives, but since 2026-08 the way to lay out a large
+analog cell is **hierarchical and declarative**: one YAML sidecar
+beside the design holds the whole truth, the cell is built as
+published subcells plus an assembled top, and there is **no per-cell
+python at all**. `LELOTEMP_OTAR` in lelo_temp_sky130a is the worked
+example — eight subcells and the top, all DRC clean and LVS
+"Circuits match uniquely", from one `LELOTEMP_OTAR.yaml`.
+
+### One file, four stanzas
+
+`design/<LIB>/<CELL>.yaml`:
+
+```yaml
+place: {groupbreak: 6, channel: 6}     # flat-build placement knobs
+
+subcells:                              # what publishes as a cell
+  - name: p_bias
+    match: '^(xba\d+|xstack_p_bias_(top|bot)|xfill_p_bias_\d+)$'
+    type: stack                        # stack | diffpair | mirror
+    group: pmos
+    channel: bias                      # register a named vertical channel
+    order: ['xba1', 'xba8', 'xba2', 'xba6', 'xba7', 'xba3']
+  - name: r_deg
+    match: '^(xd2<\d+>|...)$'
+    type: stack
+    fill: false                        # no dummy fill for resistors
+
+rows:                                  # the floorplan, bottom row first
+  - [n_load_a, n_load_b, n_mirr, r_deg]
+  - [p_in_a, p_in_b, p_bias, p_sw]
+
+supplies:                              # rings + strap connections
+  - {net: VDD_1V8, ring: t, strap: top, guard_exclude: '^xbs6$'}
+  - {net: VSS,     ring: b, strap: bottom, strap_exclude: '^xd2<[1-9]'}
+
+hier:                                  # the assembled top
+  channel: 8                           # um between the rows
+  routes:                              # one ChannelRoute per crossing net
+    - {net: VCP, track: 6,  drops: [[n_mirr, M2, left], [p_bias, M2, right]]}
+    - {net: VS,  track: 14, layer: M4, drops: [[r_deg, M4, left]]}
+```
+
+The recipes that execute this live in cicpy
+(`core/sidecarcell.py`: `SidecarPycell` for the flat build,
+`AssemblyPycell` for the top; publication in `core/subcell.py`). A
+`<CELL>.py` beside the yaml still wins if one exists — the escape
+hatch for a cell the recipe cannot say — and per-STACK pycells
+(`<SUBCELLNAME>.py`, e.g. a hand-routed switch ladder) run between
+afterPlace and beforeRoute exactly as before.
+
+### The flow
+
+```bash
+cd work
+make subcells CELL=X     # flat build; publishes each subcell's
+                         # .mag/.cic/.sch/.sym and X_HIER.spice
+make hier     CELL=X     # assembles the top from the published cells
+                         # and writes X.mag (spi2mag --outcell X)
+make drc      CELL=X_P_BIAS       # every subcell verifies standalone
+make gds cdl lvs CELL=X_P_BIAS    # gds FIRST or extraction is stale
+make drc      CELL=X
+make gds cdl lvs CELL=X
+```
+
+Read the LVS verdict from the **`Final result:`** line and nowhere
+else: netgen prints "Netlists match uniquely **with port errors**" on
+*failing* runs, so grepping for "match uniquely" green-lights broken
+cells. Measured — a subcell shipped with its ladder unrouted behind
+exactly that false positive.
+
+### ChannelRoutes and drops
+
+Each `hier: routes:` entry lays one full-width bar (a `ChannelRoute`,
+default M3) on a named channel track and connects pins to it with
+`addRouteConnection` drops. **Drops are discovered**: every placed
+subcell whose ports expose the net gets one, using the route-level
+defaults (`layer: M2`, `align: center`, `cuts: 2`, pin cut on). The
+`drops:` list only *overrides* — `[inst, layer, align, 'nopin']` or
+the dict form `{inst:, layer:, align:, cuts:, pin_cut:}` — for the
+columns where pins share an x and must split by layer or alignment.
+After the drops, the bar is trimmed to its outermost connection and
+the port refreshed.
+
+Via and cut behaviour worth knowing (all enforced in cicpy, not in
+the design):
+
+- **A lone 1x1 via is the last resort everywhere.** Cut selection
+  walks 2x1 → 1x2 → 1x1 and takes the first that fits the target;
+  the maze router's via emitter does the same, space-checked at the
+  candidate's own extent.
+- **The pin cut follows the align**: flush left on `align: left`,
+  flush right on `right`, centered and clamped inside the pin
+  otherwise. A centered two-cut pad on an aligned drop otherwise
+  overhangs the pin into the neighbouring lane (li.3, measured).
+- **The rail cut avoids the trunk traffic**: it slides along the
+  channel bar away from other nets' drop verticals, within the
+  window where its pad still covers the wire.
+
+### Conventions that are load-bearing
+
+- **Schematic instance names are lowercase.** The netlist keeps the
+  name verbatim; `name=Xxfill_...` reached the tools as `xxfill_...`,
+  slipped past every `xfill_` check, and published two phantom
+  subcells at the origin on top of a device row. The `xfill_` prefix
+  is reserved for fill devices (layout-generated dummies and their
+  schematic LVS counterparts).
+- **Stack order is placement**: the `order:` list is bottom-to-top,
+  and it is where tab-lane conflicts are solved. An N stack puts its
+  gate device (`xns*`) at the BOTTOM so the tab-lane rail spans the
+  rows above it; interleaved gate tabs in one 3.2 um lane are
+  unroutable at any layer pair.
+- **Published subcells keep parent-absolute coordinates**; the
+  assembly cancels them per instance (`xcell = -sub.x1`). The publish
+  frame shifts whenever flat content changes, which makes every .mag
+  diff 100% churn — diff geometry normalized by the label shift, not
+  line by line.
+- Design pycells import publication helpers from
+  `cicpy.core.subcell` (a compat forward from `mazerouter` exists,
+  because a failed pycell import is swallowed and the stack silently
+  publishes without its routes).
+
 ## The loop
 
 Layout is an iteration, not a single generation. Every change goes through
@@ -207,8 +331,9 @@ horizLayer, netRegex, options, cuts)`): routes a whole net using the
 access geometry the devices already expose. Options place the horizontal
 bar: `track<n>` counts routing tracks (negative counts from the other
 side), `onTopLeft`/`onTopRight`/`onTopB` pick the attachment side.
-Pin geometry comes from the port's own layer; there is no accessLayer
-argument any more.
+Pin geometry comes from the port's own layer; `accessLayer=X` in the
+options attaches at a pin's same-net metal on X instead of stacking
+from the pin layer.
 
 **Power and ports**, the pattern from a finished cell:
 

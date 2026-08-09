@@ -284,7 +284,11 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 @click.option("--xspace",default="0",help="Group X space")
 @click.option("--yspace",default="0",help="Group Y space")
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
+@click.option("--subcell","subcells",multiple=True,
+              help="Write only this subcell. Repeatable. Matches the "
+                   "subcell's short name (p_sw) or its cell name "
+                   "(MYCELL_P_SW).")
+def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,subcells):
     """Generate a cell per subcell: .mag, .cic, .sch and .sym.
 
     Step one of two. Place the cell exactly as sch2mag would, then write
@@ -310,7 +314,7 @@ def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
     os.system(f"make xsch LIB={lib} CELL={cell}")
     spi = "xsch/" + cell + ".spice"
     _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,
-             subcells_only=True)
+             subcells_only=True,only_subcells=subcells)
 
 
 @cli.command("spi2mag")
@@ -332,7 +336,7 @@ def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectiv
 
 
 def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,
-             subcells_only=False):
+             subcells_only=False,only_subcells=()):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -390,10 +394,25 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     design.addCuts()
 
     if subcells_only:
-        _write_subcells(design,lcell,libdir,lib,rules)
+        _write_subcells(design,lcell,libdir,lib,rules,only_subcells)
         return
 
     obj = cic.MagicPrinter(libdir + lib,rules)
+    #- The parent step does not write subcells. Both commands used to
+    #- write the same eight .mag files and only agreed by luck: the
+    #- parent's copies are made by the design's afterPaint, mid layout,
+    #- while sch2subcells rebuilds them as its own authoritative pass.
+    #- Whichever ran last won, silently. One owner each.
+    #-
+    #- The .cic still carries them, so the parent remains a complete
+    #- description and the route tools can be pointed at either.
+    try:
+        from cicpy.core.mazerouter import plan_subcells
+        subnames = [e["name"] for e in plan_subcells(lcell)]
+    except Exception:
+        subnames = []
+    if subnames:
+        obj.exclude = "^(?:" + "|".join(re.escape(n) for n in subnames) + ")$"
     obj.print(design)
     #for m in design.maglib.values():
         #if(m._lay is not None):
@@ -423,14 +442,31 @@ def _keep_only(names):
     return f"^(?!(?:{alts})$).*"
 
 
-def _write_subcells(design,lcell,libdir,lib,rules):
-    """Write a cell per subcell and nothing else."""
+def _write_subcells(design,lcell,libdir,lib,rules,only=()):
+    """Write a cell per subcell and nothing else.
+
+    `only` narrows WHAT IS WRITTEN, never what is built: the cell is
+    placed and routed exactly as it always is, so a subcell taken on its
+    own is the same subcell it would be in a full run. Anything else
+    would make iterating on one a different experiment from the real
+    thing.
+    """
     from cicpy.core.mazerouter import plan_subcells, write_stack_cells
 
     plan = plan_subcells(lcell)
     if not plan:
         log.warning(f"{lcell.name}: no subcells found; nothing to write")
         return
+
+    if only:
+        want = {o.upper() for o in only}
+        chosen = [e for e in plan
+                  if e["name"].upper() in want or e["stack"].upper() in want]
+        if not chosen:
+            have = ", ".join(sorted(e["stack"] for e in plan))
+            raise click.ClickException(
+                f"no subcell matches {', '.join(only)}. This cell has: {have}")
+        plan = chosen
 
     #- REBUILD, do not reuse. A design's own afterPaint may already have
     #- published these, from whatever state the layout was in at that
@@ -447,7 +483,8 @@ def _write_subcells(design,lcell,libdir,lib,rules):
 
     names = [e["name"] for e in plan]
     keep = _keep_only(names)
-    log.info(f"{lcell.name}: writing {len(names)} subcells")
+    log.info(f"{lcell.name}: writing {len(names)} subcell"
+             f"{'s' if len(names) != 1 else ''}")
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.exclude = keep

@@ -176,11 +176,20 @@ class TrackMap:
         self.block_pins = block_pins
         self.pin_layer = self._route_str("pinlayer")
         self.directions = dict(directions or self._tech_directions())
+        #- ROUTE.pintravel is the technology saying the pin layer may
+        #- be TRAVELLED, and which way. Without it the pin layer is
+        #- pin-only: it joins the map so pins can be modelled, but no
+        #- search may run along it.
+        self.pin_travel = self._route_str("pintravel")
+        if self.pin_travel not in ("h", "v"):
+            self.pin_travel = ""
         if block_pins and self.pin_layer:
             #- the pin layer joins the map when pins are modelled: it is
-            #- not routed on, but it is where every pin is
+            #- not routed on unless pintravel says so, but it is where
+            #- every pin is
             self.directions.setdefault(self.pin_layer,
-                                       self._pin_layer_direction())
+                                       self.pin_travel
+                                       or self._pin_layer_direction())
         self.hpitch = int(self._rule("ROUTE", "horizontalgrid", 3000))
         self.vpitch = int(self._rule("ROUTE", "verticalgrid", 4000))
         self.extent = extent
@@ -233,6 +242,23 @@ class TrackMap:
         for d in self.directions.values():
             return "v" if d == "h" else "h"
         return "h"
+
+    def layer_cost(self, layer):
+        """The relative price of travelling on `layer`, from ROUTE.costs.
+
+        The technology says what it wants used: here the pin layer is
+        the cheapest, so a search prefers it wherever its corridors are
+        clear, and the attributed device metal is what keeps that
+        honest. A layer the tech does not price costs the default 2 --
+        more than a priced pin layer, less than a discouraged one.
+        """
+        costs = self._route_raw("costs")
+        if isinstance(costs, dict) and layer in costs:
+            try:
+                return max(1, int(costs[layer]))
+            except (TypeError, ValueError):
+                pass
+        return 2
 
     def metal_stack(self):
         """Metal layers in stack order, from the tech's own chain.

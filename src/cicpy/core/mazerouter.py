@@ -434,14 +434,26 @@ class MazeRouter:
         #- a step along the layer's own direction. A horizontal layer
         #- steps in x at the horizontal pitch; a vertical one in y at
         #- the vertical pitch.
+        #-
+        #- The pin layer is travelled only when the technology said so
+        #- (ROUTE.pintravel), and then it is usually the CHEAPEST
+        #- (ROUTE.costs): a wire that stays on the metal its pins live
+        #- on needs no via, no landing pad, and no track on a layer the
+        #- level above wants. What made this safe to allow is instance
+        #- attribution -- the device rails that used to be invisible
+        #- are hard obstacles now, so a cheap M1 path cannot be a
+        #- quietly wrong one.
+        travel_ok = (layer not in self.pin_only
+                     or getattr(self.tm, "pin_travel", ""))
         step = self.tm.hpitch if horizontal else self.tm.vpitch
-        for delta in () if layer in self.pin_only else (-step, step):
+        weight = self.tm.layer_cost(layer)
+        for delta in (-step, step) if travel_ok else ():
             nx, ny = (x + delta, y) if horizontal else (x, y + delta)
             if not self.in_bounds(nx, ny):
                 continue
             lo, hi = sorted(((x, nx) if horizontal else (y, ny)))
             if self.is_free(layer, y if horizontal else x, lo, hi):
-                out.append(((nx, ny, layer), abs(delta)))
+                out.append(((nx, ny, layer), abs(delta) * weight))
 
         #- a via to an adjacent layer, if the column is clear. Asked
         #- once, not once per neighbouring layer: the column does not
@@ -972,6 +984,43 @@ def route_spec(path, tm, claimed=(), router=None, pins=None,
     ys = {n[1] for n in path}
     ends = (path[0][2], path[-1][2])
 
+    #- What a claim blocks, computed ONCE and consulted by every shape.
+    #- The facing-pins shortcut used to bypass this entirely: a straight
+    #- vertical took the overlap's middle whatever the claims said, and
+    #- ran through the landing pad a previous net had already spoken
+    #- for. A rule the shortcut skips is not a rule.
+    span_ys = [n[1] for n in path]
+    for _er in (extent_rects or ()):
+        span_ys.extend((int(_er.y1), int(_er.y2)))
+    span = (min(span_ys), max(span_ys))
+    try:
+        clear = router.clearance(tm.pin_layer) if router else 0
+    except Exception:
+        clear = 0
+
+    def taken(x):
+        #- a claim is (x, y0, y1) for a trunk, or (x, y0, y1, hw) for
+        #- something with its own width -- a routed net's pin, which
+        #- will take a LANDING PAD somewhere along itself
+        for c in claimed:
+            cx, y0, y1 = c[0], c[1], c[2]
+            hw = c[3] if len(c) > 3 else 0
+            if abs(cx - x) < clear + hw and span[1] > y0 and span[0] < y1:
+                return True
+        return False
+
+    def free_x_in(lo, hi, want):
+        """The free x nearest `want`, in lo..hi, or None."""
+        if taken(want) is False:
+            return want
+        step = max(1, int(getattr(tm, "hpitch", 1)))
+        cands = sorted(range(int(lo), int(hi) + 1, step),
+                       key=lambda x: abs(x - want))
+        for x in cands:
+            if not taken(x):
+                return x
+        return None
+
     #- A path ALWAYS changes layer, so "is it one layer" is never the
     #- question. The pin layer is pin-only -- a route may via off it and
     #- not run along it -- so the search has to leave it to move at all,
@@ -1006,7 +1055,13 @@ def route_spec(path, tm, claimed=(), router=None, pins=None,
             #- is their UNION, which is wider than either pin and
             #- reaches whatever sits beside the column. The overlap is
             #- the only part both pins actually share.
-            mid = (ox1 + ox2) // 2
+            #- the overlap's middle, or the nearest UNCLAIMED lane in
+            #- the overlap; a fully claimed overlap is a blocked net,
+            #- not a licence
+            w2 = clear // 2
+            mid = free_x_in(ox1 + w2, ox2 - w2, (ox1 + ox2) // 2)
+            if mid is None:
+                return None
             #- FALL THROUGH for the layer. This used to return here with
             #- the pin layer, which skipped every check below it -- the
             #- "is the pin layer actually free" test never ran on the
@@ -1070,20 +1125,14 @@ def route_spec(path, tm, claimed=(), router=None, pins=None,
         #- a net out of a column its neighbour only used two rows
         #- away, and it let two nets sit half the pitch the metal needs
         #- apart, because that x was, strictly, not the claimed one.
-        span = (min(n[1] for n in path), max(n[1] for n in path))
-        clear = 0
-        try:
-            clear = router.clearance(tm.pin_layer) if router else 0
-        except Exception:
-            clear = 0
-
-        def taken(x):
-            for cx, y0, y1 in claimed:
-                if abs(cx - x) < clear and span[1] > y0 and span[0] < y1:
-                    return True
-            return False
-
-        free = [x for x in by_x if not taken(x)] or list(by_x)
+        free = [x for x in by_x if not taken(x)]
+        #- NO fallback onto a claimed column. There used to be one --
+        #- `or list(by_x)` -- and it turned every full corridor into a
+        #- silent short: the claim said the lane was spoken for, and the
+        #- route took it anyway. A net that cannot get a clear column is
+        #- BLOCKED, which is a truthful answer the caller can act on.
+        if not free:
+            return None
         trunk = max(free, key=lambda x: (len(by_x[x]), -x))
         rtype = "-|--" if trunk <= (min(xs) + max(xs)) // 2 else "--|-"
         #- and SAY where. Without this route.py places the trunk from
@@ -1322,6 +1371,29 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                   max(r.x2 for r in allr) + margin,
                   max(r.y2 for r in allr) + margin)
         claimed = set()
+        #- THE PARENT'S QUEUED ROUTES CLAIM THEIR LANDINGS TOO. A route
+        #- the top level created in its own beforeRoute is not drawn yet
+        #- -- nothing is, that is this flow's original sin -- so the
+        #- stack search cannot see the pad it will drop on a pin inside
+        #- this very stack. Measured: the top's power-up route lands on
+        #- a gate in the load column, and the stack's drain trunk chose
+        #- exactly that x. The route object knows its rects; claim them,
+        #- tagged by net so a net does not block itself.
+        preclaims = []
+        for ro in getattr(layout, "routes", []) or []:
+            rnet = getattr(ro, "net", "") or ""
+            for rr in (list(getattr(ro, "startRects", []) or [])
+                       + list(getattr(ro, "stopRects", []) or [])):
+                if rr is None:
+                    continue
+                if (rr.x2 < extent[0] or rr.x1 > extent[2]
+                        or rr.y2 < extent[1] or rr.y1 > extent[3]):
+                    continue
+                preclaims.append((rnet,
+                                  (int((rr.x1 + rr.x2) // 2),
+                                   int(rr.y1) - margin,
+                                   int(rr.y2) + margin,
+                                   int((rr.x2 - rr.x1) // 2 + margin // 2))))
         #- POWER AND GROUND FIRST. They are the widest, the least free
         #- to detour and the ones every other route has to clear, so a
         #- signal placed before them takes a track a supply then cannot
@@ -1338,6 +1410,8 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 #- search proves a path exists and says which layer and
                 #- direction it wants; the drawing is not ours to do.
                 specs = []
+                other_claims = claimed | {c for n2, c in preclaims
+                                          if n2 != net}
                 for a, b in zip(rects, rects[1:]):
                     layer = getattr(a, "layer", None) or tm.pin_layer
                     start = (*r.pin_centre(a), layer)
@@ -1345,7 +1419,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     r._own = [a, b]
                     path = r.search(start, goal,
                                     r.manhattan_heuristic(r.snap(goal)))
-                    spec = route_spec(path, tm, claimed, r, (a, b),
+                    spec = route_spec(path, tm, other_claims, r, (a, b),
                                       extent_rects=rects)
                     if spec is None:
                         raise Blocked(
@@ -1364,6 +1438,20 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 #- found: left edge for a source net, right edge for a
                 #- drain net. The search still proved a path exists.
                 lane = _terminal_lane(rects, layer, rtype)
+                if lane is not None and claimed:
+                    #- a lane is a convention, not a right of way: if a
+                    #- routed net's pin or trunk already spans it, the
+                    #- searched column stands
+                    _ys = ([int(rr.y1) for rr in rects]
+                           + [int(rr.y2) for rr in rects])
+                    _lo, _hi = min(_ys), max(_ys)
+                    _cl = r.clearance(tm.pin_layer)
+                    for c in claimed:
+                        hw = c[3] if len(c) > 3 else 0
+                        if (abs(c[0] - lane) < _cl + hw
+                                and _hi > c[1] and _lo < c[2]):
+                            lane = None
+                            break
                 if lane is not None:
                     opts = f"trunkx={lane}"
                     ys_all = ([int(r.y1) for r in rects]
@@ -1405,6 +1493,21 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     raise Blocked(f"no group object for stack {stack}")
                 grp.addConnectivityRoute(layer, f"^{re.escape(net)}$",
                                          rtype, opts, 1)
+                #- CLAIM THE LANDINGS, not only the trunk. A routed net
+                #- will drop a via pad somewhere on each of its pins,
+                #- and none of it is drawn until the phase ends, so the
+                #- next net's trunk sails through the spot: measured, a
+                #- trunk chosen at the exact x where the previous net's
+                #- pad landed on its own pin, pad on wire, one short.
+                #- Each pin is claimed across its width plus half a pad,
+                #- for the pad's own height around it.
+                if layer != tm.pin_layer:
+                    pad_w = int(r.via_cost)
+                    for pr in rects:
+                        claimed.add((int((pr.x1 + pr.x2) // 2),
+                                     int(pr.y1) - pad_w,
+                                     int(pr.y2) + pad_w,
+                                     int((pr.x2 - pr.x1) // 2 + pad_w // 2)))
                 routed.append((stack, net))
             except Blocked as e:
                 blocked.append((stack, net, str(e)))

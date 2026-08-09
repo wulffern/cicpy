@@ -63,17 +63,23 @@ class MazeRouterTest(unittest.TestCase):
         self.assertEqual(r.via_extent("M1", "M2"), (4000, 4000))
 
     def test_a_via_on_the_pin_layer_needs_to_know_its_own_pin(self):
-        """The contract that replaced "tolerate everything on M1".
+        """The contract, third edition.
 
-        Unattributed metal on the pin layer is indistinguishable from a
-        device's internal rail, so a router that does not know which pin
-        it is landing on must refuse -- otherwise it drops pads within
-        0.17 of a rail (14 li.3 errors, measured). Told which rect is
-        its own, it may proceed.
+        First: tolerate everything unattributed on M1 (shorted through
+        device rails). Second: refuse unless told which rect is your
+        own (this test's old first assertion). Third, now that instance
+        geometry is ATTRIBUTED: the metal at a pin is KNOWN to be the
+        pin's net, so a via on your own pin is allowed whether or not
+        anyone told you -- and a via on another net's pin refuses,
+        which is the half that was always the point.
         """
         r = self.router("VDS")
-        #- knows nothing: refuses
-        self.assertFalse(r.via_is_free(VDS_PIN[0], VDS_PIN[1], "M1", "M2"))
+        #- its own pin, and the map knows it: allowed
+        self.assertTrue(r.via_is_free(VDS_PIN[0], VDS_PIN[1], "M1", "M2"))
+        #- the same spot for another net: refused
+        self.assertFalse(
+            self.router("VS").via_is_free(VDS_PIN[0], VDS_PIN[1],
+                                          "M1", "M2"))
         #- told that this pin is its own: allowed
         g = self.cell.nodeGraph.get("VDS")
         own = [p.get("M1") for p in g.ports

@@ -280,7 +280,32 @@ class Cut(Cell):
                     if (r.isVertical() and inst.isHorizontal()) or (r.isHorizontal() and inst.isVertical()):
                         # Got the wrong cut orientation, swap horizontal and vertical cuts
                         inst = Cut.getInstance(routeLayer, r.layer, vcuts, cuts)
-                    
+
+                    #- NEVER A CUT BIGGER THAN THE PIN IT LANDS ON. The
+                    #- orientation swap fits the shape and not the size:
+                    #- a 4000-tall gate tab took a 1x2 array whose 8400
+                    #- of enclosure ran to exactly the top edge of the
+                    #- drain bar below -- another net's -- and merged
+                    #- with it. Abutment is a short here, and min-area
+                    #- preferences do not outrank someone else's metal.
+                    #- Shrink toward 1x1; if even that overhangs, take
+                    #- it anyway as the least harm on offer.
+                    def _fits(i):
+                        return (i is not None
+                                and i.width() <= r.width()
+                                and i.height() <= r.height())
+                    if not _fits(inst):
+                        alt = Cut.getInstance(routeLayer, r.layer, vcuts, cuts)
+                        if _fits(alt):
+                            inst = alt
+                        else:
+                            one = Cut.getInstance(routeLayer, r.layer, 1, 1)
+                            if one is not None and (
+                                    _fits(one)
+                                    or one.width() * one.height()
+                                    < inst.width() * inst.height()):
+                                inst = one
+
                     # Position the cut
                     if leftAlignCut:
                         inst.moveTo(r.x1, r.y1)

@@ -264,14 +264,18 @@ def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 @click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
-def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
+@click.option("--hier", is_flag=True,
+              help="The top INSTANTIATES its subcells instead of "
+                   "containing their devices. Run sch2subcells first.")
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,hier):
     """Netlist a xschem to spice, and load file to Magic"""
 
     os.system(f"make xsch LIB={lib} CELL={cell}")
 
     spi = "xsch/" + cell + ".spice"
 
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,
+             hier=hier)
 
 
 
@@ -336,7 +340,7 @@ def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectiv
 
 
 def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,
-             subcells_only=False,only_subcells=()):
+             subcells_only=False,only_subcells=(),hier=False):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -397,6 +401,9 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
         _write_subcells(design,lcell,libdir,lib,rules,only_subcells)
         return
 
+    if hier:
+        _hierarchify(design,lcell,log)
+
     obj = cic.MagicPrinter(libdir + lib,rules)
     #- The parent step does not write subcells. Both commands used to
     #- write the same eight .mag files and only agreed by luck: the
@@ -440,6 +447,84 @@ def _keep_only(names):
         return ".*"
     alts = "|".join(re.escape(n) for n in sorted(names))
     return f"^(?!(?:{alts})$).*"
+
+
+def _hierarchify(design,lcell,log):
+    """The top references its subcells instead of containing them.
+
+    The restructuring step write_stack_cells deliberately defers: every
+    device instance that belongs to a subcell leaves the top, and one
+    Instance of the subcell arrives in its place. Because a published
+    subcell keeps the parent's absolute coordinates, that Instance sits
+    at the origin with the identity transform and the geometry lands
+    exactly where the flat devices were.
+
+    The top's own routing -- rings, straps, inter-subcell routes -- is
+    untouched. Routes whose geometry was COPIED into a subcell stay in
+    the top as well: the copies overlap their originals exactly, on the
+    same net, which costs bytes and nothing else, and removing the
+    originals means proving for each that every rect went along, which
+    is a verification burden this step does not need yet.
+    """
+    from cicpy.core.mazerouter import plan_subcells
+    from cicpy.core.instance import Instance
+
+    plan = plan_subcells(lcell)
+    if not plan:
+        log.warning(f"{lcell.name}: no subcells; nothing to hierarchify")
+        return
+    missing = [e["name"] for e in plan
+               if e["name"] not in getattr(design, "cells", {})]
+    if missing:
+        log.error(f"{lcell.name}: subcells not registered: "
+                  f"{', '.join(missing)}. Run sch2subcells first; "
+                  f"keeping the flat top.")
+        return
+
+    leaving = set()
+    for entry in plan:
+        leaving.update(entry["instances"])
+
+    def _prune(node):
+        kept = []
+        for ch in getattr(node, "children", []) or []:
+            if ch is None:
+                continue
+            if (hasattr(ch, "isInstance") and ch.isInstance()
+                    and (getattr(ch, "instanceName", "") or "") in leaving):
+                continue
+            if hasattr(ch, "children"):
+                _prune(ch)
+            kept.append(ch)
+        node.children = kept
+
+    _prune(lcell)
+
+    for entry in plan:
+        sub = design.cells[entry["name"]]
+        inst = Instance()
+        inst.design = design
+        #- name too: Cell.isEmpty is "has no name", and printReference
+        #- drops an empty instance without a word
+        inst.name = entry["name"]
+        inst.cell = entry["name"]
+        inst.instanceName = f"x{entry['stack']}"
+        inst.angle = "R0"
+        inst.xcell = 0
+        inst.ycell = 0
+        inst.layoutcell = sub
+        inst._cell_obj = sub
+        #- the rect covers the content, for every bbox this side of the
+        #- printer; xcell cancels x1 so the PLACEMENT POINT is the
+        #- origin -- a published subcell keeps the parent's absolute
+        #- coordinates, so the use must map identity, and the first
+        #- attempt (placement at sub.x1) put every subcell at twice its
+        #- own offset
+        inst.setRect(sub)
+        inst.xcell = -int(sub.x1)
+        inst.ycell = -int(sub.y1)
+        lcell.add(inst)
+        log.info(f"{lcell.name}: x{entry['stack']} = {entry['name']}")
 
 
 def _write_subcells(design,lcell,libdir,lib,rules,only=()):

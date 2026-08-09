@@ -391,6 +391,19 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
         pycell = importlib.import_module(lcell.name)
         if(hasattr(pycell,"data")):
             pycellData = pycell.data
+    else:
+        #- no pycell: the sidecar may declare the whole placement.
+        #- A .py wins when it exists -- a file is for the cell that
+        #- needs something the recipe cannot say.
+        yamlfile = lcell.dirname + lcell.name + ".yaml"
+        if os.path.exists(yamlfile):
+            import yaml as _yaml
+            from cicpy.core.sidecarcell import SidecarPycell, has_placement
+            with open(yamlfile) as _f:
+                _spec = _yaml.safe_load(_f) or {}
+            if has_placement(_spec):
+                pycell = SidecarPycell(_spec)
+                pycellData = pycell.data
 
     lcell.strict_route = strict
     lcell.layout(pycell,pycellData)

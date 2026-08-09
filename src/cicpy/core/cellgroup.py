@@ -1140,8 +1140,12 @@ class StackGroup(CellGroup):
     def height(self):
         if not self.instances:
             return 0
-        self.sort()
-        return self.instances[-1].y2 - self.instances[0].y1
+        #- order-independent: preserve_order makes sort() a no-op, and
+        #- a bottom-filled dummy is then LAST in the list while lowest
+        #- in y -- last.y2 - first.y1 read ~0 and the fill loop never
+        #- terminated, measured.
+        return (max(i.y2 for i in self.instances)
+                - min(i.y1 for i in self.instances))
 
     def width(self):
         if not self.instances:
@@ -1267,6 +1271,14 @@ class StackGroup(CellGroup):
             width = 320
         cy = int(inst.centerY())
         rect = Rect("M1", int(inst.x1), cy - width // 2, int(inst.width()), int(width))
+        #- the tie is SUPPLY metal, and the router must know: net-less
+        #- li across the fill row reads as an unattributed blocker and
+        #- kills every route crossing it -- including the router's own
+        #- supply hop to the fill's terminals. The netlist knows the
+        #- net: the schematic fill instance carries it on every pin.
+        net = self._fill_supply_net(inst)
+        if net:
+            rect.setNet(net)
         #- The strap belongs to the stack, like the filler it covers. Left in
         #- the layout's placement tree as well it is translated twice on
         #- resetOrigin, once as a layout child and once through the stack's
@@ -1290,8 +1302,10 @@ class StackGroup(CellGroup):
                 f"No tap cells found for {base.cell}, stack {self.name} is left untapped")
             return self
         name = prefix or self.name
-        bot = self.layout.addPhysicalInstance(bot_cell, f"xstack_{name}_bot", int(base.x1), int(base.y1 - 24000))
-        top = self.layout.addPhysicalInstance(top_cell, f"xstack_{name}_top", int(base.x1), int(self.instances[-1].y2))
+        y_lo = min(int(i.y1) for i in self.instances)
+        y_hi = max(int(i.y2) for i in self.instances)
+        bot = self.layout.addPhysicalInstance(bot_cell, f"xstack_{name}_bot", int(base.x1), y_lo - 24000)
+        top = self.layout.addPhysicalInstance(top_cell, f"xstack_{name}_top", int(base.x1), y_hi)
         if bot is not None and bot not in self.tap_instances:
             self.tap_instances.append(bot)
             self.layout.detachPlacementChild(bot, keepParent=self)
@@ -1303,12 +1317,55 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
+    def _fill_supply_net(self, inst):
+        ckt = getattr(self.layout, "ckt", None)
+        nm = getattr(inst, "instanceName", "") or ""
+        if ckt is None or not nm:
+            return None
+        try:
+            ci = ckt.getInstance(nm)
+        except Exception:
+            ci = None
+        nodes = list(getattr(ci, "nodes", []) or []) if ci is not None else []
+        #- only when the schematic states the tie: every pin one net
+        if nodes and len(set(nodes)) == 1:
+            return nodes[0]
+        return None
+
     def routeDummyDevices(self):
-        for inst in list(self.instances):
-            inst_name = getattr(inst, "instanceName", "") or ""
-            if not inst_name.startswith("xfill_"):
-                continue
+        fills = [i for i in self.instances
+                 if (getattr(i, "instanceName", "") or "").startswith("xfill_")]
+        for inst in fills:
             self.routeDummyTerminals(inst)
+        #- Dummies are SUPPLY devices, not floating ones: a PMOS dummy
+        #- shorts to VDD, an NMOS dummy to VSS. The straps above tie
+        #- D/G/S of each filler into one node; one M1 finger from the
+        #- farthest strap into the adjacent tap row puts that node on
+        #- the supply the taps carry. Keep the generated netlists in
+        #- step: stack_subckt emits fills with every terminal on the
+        #- stack's supply.
+        if fills and self.tap_instances:
+            rules = Rules.getInstance()
+            if rules is not None and rules.hasRules():
+                width = rules.get("M1", "width")
+            else:
+                width = 320
+            lo = min(int(i.centerY()) for i in fills)
+            hi = max(int(i.centerY()) for i in fills)
+            tap = min(self.tap_instances,
+                      key=lambda t: min(abs(int(t.centerY()) - lo),
+                                        abs(int(t.centerY()) - hi)))
+            ty = int(tap.centerY())
+            y1, y2 = min(lo, hi, ty), max(lo, hi, ty)
+            x = int(fills[0].centerX())
+            rect = Rect("M1", x - width // 2, y1, int(width), int(y2 - y1))
+            net = self._fill_supply_net(fills[0])
+            if net:
+                rect.setNet(net)
+            self.layout.add(rect)
+            self.layout.detachPlacementChild(rect, keepParent=self)
+            self.add(rect)
+            self.dummy_routes.append(rect)
         self.updateBoundingRect()
         return self
 

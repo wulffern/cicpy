@@ -93,7 +93,13 @@ class SidecarPycell:
         #- fill the groups that want it, then taps: a tap goes around
         #- the finished column, dummies included
         for gname in fills:
-            groups[gname].fillDummyTransistors()
+            #- BOTTOM, not top. A dummy is a supply device now -- its
+            #- bars ride VDD/VSS -- and every rail in a column spans
+            #- upward over the real pins: a supply bar inside that span
+            #- blocks the lane (measured: the drain lane fell to an M2
+            #- rail whose pads then blocked the gate tabs). Below the
+            #- lowest pin it is outside every span.
+            groups[gname].fillDummyTransistors(direction="bottom")
         for st in stacks.values():
             st.addTaps()
 

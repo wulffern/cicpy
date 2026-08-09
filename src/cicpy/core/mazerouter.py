@@ -802,24 +802,51 @@ def _pin_layer_if_clear(path, tm, router, pins, trunk, extent_rects=None):
         pad = Rules.getInstance().get(tm.pin_layer, "space")
     except Exception:
         pad = 0
-    try:
-        if tm.column_blockers(router.net, col - pad, col + pad,
-                              min(ys), max(ys)) != []:
+
+    def _ok(c):
+        try:
+            if tm.column_blockers(router.net, c - pad, c + pad,
+                                  min(ys), max(ys)) != []:
+                return False
+            if pins and len(pins) == 2:
+                sx1 = min(p.x1 for p in pins) - pad
+                sx2 = max(p.x2 for p in pins) + pad
+            else:
+                sx1, sx2 = c - pad, c + pad
+            return tm.column_metal(router.net, tm.pin_layer, sx1, sx2,
+                                   min(ys), max(ys)) == []
+        except Exception:
+            return False
+
+    if _ok(col):
+        return col
+    #- The natural column is taken; the pin is wider than the wire.
+    #- Scan the pins' COMMON window for a clear lane before giving up
+    #- to a routing layer -- a compact library runs foreign bars
+    #- through the middle of a wide pin, and the clear lane is off to
+    #- the side. Measured: p_in's 28800 drain bar carries the source
+    #- bar's shadow at its center, and the whole cell degraded to an
+    #- M2 rail whose via pads then blocked the gate-tab lane.
+    #- Right to left, since drains route right-aligned by convention.
+    ext = list(extent_rects or ())
+    if ext:
+        try:
+            w2 = Rules.getInstance().get(tm.pin_layer, "width") // 2
+        except Exception:
             return None
-    except Exception:
-        return None
-    if pins and len(pins) == 2:
-        sx1 = min(p.x1 for p in pins) - pad
-        sx2 = max(p.x2 for p in pins) + pad
-    else:
-        sx1, sx2 = col - pad, col + pad
-    try:
-        if tm.column_metal(router.net, tm.pin_layer, sx1, sx2,
-                           min(ys), max(ys)) != []:
+        ox1 = max(int(r.x1) for r in ext) + w2
+        ox2 = min(int(r.x2) for r in ext) - w2
+        if ox2 <= ox1:
             return None
-    except Exception:
-        return None
-    return tm.pin_layer
+        #- a handful of candidates, not a sweep: column_blockers walks
+        #- every track on every layer and a fine-grained scan turned a
+        #- 90 s build into a half-hour one, measured
+        cands = {ox2, (ox1 + 3 * ox2) // 4, (ox1 + ox2) // 2,
+                 (3 * ox1 + ox2) // 4, ox1}
+        for c in sorted(cands, reverse=True):
+            if int(c) != int(col) and _ok(int(c)):
+                return int(c)
+    return None
 
 
 def route_spec(path, tm, claimed=(), router=None, pins=None,
@@ -938,8 +965,11 @@ def route_spec(path, tm, claimed=(), router=None, pins=None,
             facing = None
         if facing is not None:
             rtype, opts = facing
-            layer = _pin_layer_if_clear(path, tm, router, pins, None,
-                                        extent_rects)
+            lane = _pin_layer_if_clear(path, tm, router, pins, None,
+                                       extent_rects)
+            layer = tm.pin_layer if lane is not None else None
+            if lane is not None and rtype == "||":
+                opts = f"trunkx={lane}"
             if layer is None:
                 on_path = [n[2] for n in path if n[2] != tm.pin_layer]
                 want = "v" if rtype == "||" else "h"
@@ -1014,8 +1044,17 @@ def route_spec(path, tm, claimed=(), router=None, pins=None,
     vertical = rtype in ("||", "-|--", "--|-")
     want = "v" if vertical else "h"
 
-    layer = _pin_layer_if_clear(path, tm, router, pins, trunk,
-                                extent_rects)
+    lane = _pin_layer_if_clear(path, tm, router, pins, trunk,
+                               extent_rects)
+    layer = tm.pin_layer if lane is not None else None
+    if lane is not None and vertical and lane != trunk:
+        #- the clear lane the scan found, not the column the search
+        #- happened to walk: route.py must be told or it recomputes
+        #- the blocked one from the pins
+        trunk = lane
+        opts = f"trunkx={lane}"
+        if rtype in ("-|--", "--|-"):
+            rtype = "-|--" if lane <= (min(xs) + max(xs)) // 2 else "--|-"
 
     if layer is None:
         on_path = [n[2] for n in path if n[2] != tm.pin_layer]

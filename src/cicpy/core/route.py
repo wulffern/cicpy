@@ -426,6 +426,48 @@ class Route(Cell):
             rect.translate(0, -width)
         self.updateBoundingRect()
 
+    def _resolveTrunkAlign(self):
+        """Pin-relative trunk options, resolved against the collected
+        rects: `trunkright` hugs the pins' right edge, `trunkleft` the
+        left, `trunktab` centres on the rightmost narrow (tab) rect.
+
+        These exist so a design never writes a coordinate: trunkx is
+        the resolved form and belongs to the tools, not to a pycell.
+        The pins themselves are the specification -- where they end is
+        where the rail goes, and it survives a resize untouched.
+        """
+        if self.hasAbsoluteTrunk:
+            return
+        m = re.search(r"trunk(right|left|tab)\b", self.options or "")
+        if not m:
+            return
+        rects = [r for r in (self.startRects + self.stopRects)
+                 if r is not None]
+        if not rects:
+            return
+        from .rules import Rules
+        w = Rules.getInstance().get(self.routeLayer, "width")
+        kind = m.group(1)
+        if kind == "tab":
+            #- the RIGHTMOST narrow rect: instances carry duplicate
+            #- subports, and the narrowest pick has landed a rail on
+            #- the neighbouring bars before (measured)
+            narrow = [r for r in rects if (r.x2 - r.x1) <= 4000]
+            pick = max(narrow or rects, key=lambda r: r.x1)
+            trunk = int(pick.x1) + int((pick.x2 - pick.x1) // 2)
+        elif kind == "right":
+            #- the COMMON overlap's right edge: the rightmost trunk
+            #- that still lies on every pin it must land on. max(x2)
+            #- would hug the widest pin and slide off the narrowest.
+            trunk = int(min(r.x2 for r in rects)) - w // 2
+        else:
+            trunk = int(max(r.x1 for r in rects)) + w // 2
+        self.hasAbsoluteTrunk = True
+        self.absoluteTrunk = trunk
+        #- the readers that parse options directly see it too
+        self.options = (self.options + f",trunkx={trunk}").lstrip(",")
+        self.log.info(f"  trunk{kind} resolved to trunkx={trunk}")
+
     def route(self):
         self.log.info(f"route() called: net={self.net}, layer={self.routeLayer}, routeType={self.routeType}, route={self.route_}, options={self.options}")
         
@@ -441,6 +483,8 @@ class Route(Cell):
             self.stopRects.append(r.getCopy())
 
         self.log.info(f"  startRects count: {len(self.startRects)}, stopRects count: {len(self.stopRects)}")
+
+        self._resolveTrunkAlign()
 
         # TODO: To make it horribly confusing, it matters for the routing which
         # sequence the cuts are added. Should they be added first, or after.

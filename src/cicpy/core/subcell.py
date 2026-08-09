@@ -393,9 +393,9 @@ def stack_subckt(layout, entry):
         #-           the stack's supply -- and a schematic without it is
         #-           one device short, every time, on every subcell.
         #-
-        #- So a fill is emitted the way it extracts: terminals floating,
-        #- bulk on the supply. Floating is stated with a unique node
-        #- name per pin, which is exactly how the extractor states it.
+        #- So a fill is emitted the way it extracts: the layout straps
+        #- D/G/S and ties the strap into the tap row, so every terminal
+        #- rides the stack's supply.
         if not nodes:
             if name.startswith("xfill_"):
                 fills.append((name, cell))
@@ -440,8 +440,10 @@ def stack_subckt(layout, entry):
         if bulk_i is None:
             continue
         width = max((len(d[1]) for d in devices), default=4)
-        nodes = [f"{name}_f{i}" for i in range(width)]
-        nodes[bulk_i] = bulk_net
+        #- every terminal on the stack's supply: the layout straps the
+        #- dummy and ties the strap into the tap row, so the extractor
+        #- sees D=G=S=B on the supply and the netlist says the same.
+        nodes = [bulk_net] * width
         devices.append((name, nodes, cell))
     devices.sort()
     ports = list(entry["ports"])
@@ -641,11 +643,18 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- instances already bring. Routed wires are not direct children
         #- either -- they live inside Route objects -- so this walks the
         #- non-instance children and takes the rects it finds.
+        _seen = set()
+
         def _routed(node, out, depth=0):
             if depth > 6:
                 return
+            #- dedup APPENDED leaves only. Marking every visited node
+            #- made the second pass (over layout.routes) return at the
+            #- door for any route already seen as a layout child, and
+            #- its wires were never collected -- the published cells
+            #- lost all their metal, measured.
             for ch in getattr(node, "children", []) or []:
-                if ch is None:
+                if ch is None or id(ch) in _seen:
                     continue
                 #- ...except a via, which IS an instance. Skipping every
                 #- instance dropped the cuts and left the wires floating
@@ -654,17 +663,42 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
                 #- wires all looked present.
                 if hasattr(ch, "isInstance") and ch.isInstance():
                     if type(ch).__name__ == "InstanceCut":
+                        _seen.add(id(ch))
                         out.append(ch)
                     continue
                 if hasattr(ch, "isPort") and ch.isPort():
                     continue
+                #- containers answer isRect() too, and appending one
+                #- publishes its BBOX as a layerless rect (a Route's
+                #- landed inside a window after a resize -- 26 DRC
+                #- errors from one blob). Their content arrives by the
+                #- dedicated paths: routes via layout.routes below,
+                #- dummy ties via the group walk.
+                if getattr(ch, "children", None):
+                    continue
                 if hasattr(ch, "isRect") and ch.isRect():
+                    _seen.add(id(ch))
                     out.append(ch)
                 else:
                     _routed(ch, out, depth + 1)
 
         routed = []
         _routed(layout, routed)
+        #- The dummy supply ties live in stack.children, behind a
+        #- CellGroup that answers isRect() and so ends the walk above.
+        #- Collect exactly them -- and ONLY them: publishing the rest
+        #- of a stack's route children duplicates geometry the parent
+        #- draws itself (its drops land cuts on the same pins), which
+        #- is a partial via overlap in the assembled top, measured.
+        def _dummy_ties(grp):
+            for r in getattr(grp, "dummy_routes", []) or []:
+                if id(r) not in _seen:
+                    _seen.add(id(r))
+                    routed.append(r)
+            for sub in getattr(grp, "stacks", []) or []:
+                _dummy_ties(sub)
+        for grp in getattr(layout, "cellgroups", []) or []:
+            _dummy_ties(grp)
         #- and the ROUTES, which are not in children. Walking children
         #- alone found 32 rects in the whole parent -- the li tabs and
         #- nothing else -- so a stack cell came out with its devices and

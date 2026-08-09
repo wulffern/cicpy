@@ -1394,6 +1394,13 @@ class LayoutCell(Cell):
         for inst in self.ckt.orderInstancesByGroup():
 
             name = inst.name
+            #- fill devices belong to the LAYOUT generator
+            #- (fillDummyTransistors); a schematic carries them only
+            #- so LVS can match the physical cell. Placing them from
+            #- the netlist would double every fill.
+            if name.startswith("xfill_"):
+                self.log.info(f"place: skipping schematic fill {name}")
+                continue
             group = inst.groupName
             if(group != prevgroup or prevgroup == ""):
                 startGroup = True

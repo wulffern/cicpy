@@ -635,30 +635,55 @@ def stack_of(instance_name):
     return m.group(1) if m else ""
 
 
-def stack_membership(layout):
-    """{instance name: stack name}, from the design's own CellGroups.
+def subcell_membership(layout):
+    """{instance name: subcell name}, from the design's own CellGroups.
 
-    A stack is a StackGroup. Identified by TYPE, not by shape: a
-    StackGroup's children include RouteBundles, which carry `.instances`
-    too, so "a group with instances and no sub-groups" walks past the
-    real stack onto a bundle -- and bundles have no tap_instances, so
-    every tap then falls into a pseudo-stack of its own.
+    A SUBCELL is whatever the design wants to publish as a cell of its
+    own. Two ways to be one, checked in this order:
+
+      1. any CellGroup with ``subcell = True`` set on it. This is the
+         general case and it is the design's decision: a differential
+         pair spread over two columns, a whole pmos side, a matched
+         quad -- none of which is a stack.
+      2. failing that, a StackGroup. A column of devices is the
+         decomposition that needs no thought, so it is the default.
+
+    A stack is identified by TYPE, not by shape: a StackGroup's children
+    include RouteBundles, which carry `.instances` too, so "a group with
+    instances and no sub-groups" walks past the real stack onto a bundle
+    -- and bundles have no tap_instances, so every tap then falls into a
+    pseudo-subcell of its own.
 
     Falls back to the leading non-digit run of the instance name, which
     is ciccreator's placement-group rule, when a design has no groups --
     a .cic reloaded from disk has none.
+
+    ONE definition, shared with pins_by_stack and the router. They used
+    to disagree -- this walked the CellGroups, that used the instance
+    name prefix -- and asking the router for a subcell by name then
+    matched nothing and reported 0 routed, 0 blocked, which reads
+    exactly like success.
     """
     from cicpy.core.cellgroup import CellGroup, StackGroup
     member = {}
 
+    def _claim(grp, gname):
+        for inst in (list(getattr(grp, "instances", []) or [])
+                     + list(getattr(grp, "tap_instances", []) or [])):
+            nm = getattr(inst, "instanceName", "") or ""
+            if nm and gname:
+                member[nm] = gname
+        for c in getattr(grp, "children", []) or []:
+            if isinstance(c, (StackGroup, CellGroup)):
+                _claim(c, gname)
+
     def _walk(grp):
+        #- marked by the design: it is a subcell whatever it is made of
+        if getattr(grp, "subcell", False):
+            _claim(grp, getattr(grp, "name", ""))
+            return
         if isinstance(grp, StackGroup):
-            gname = getattr(grp, "name", "")
-            for inst in (list(getattr(grp, "instances", []))
-                         + list(getattr(grp, "tap_instances", []))):
-                nm = getattr(inst, "instanceName", "") or ""
-                if nm and gname:
-                    member[nm] = gname
+            _claim(grp, getattr(grp, "name", ""))
             return  #- below a stack is routing, not placement
         for c in getattr(grp, "children", []) or []:
             if isinstance(c, (StackGroup, CellGroup)):
@@ -669,20 +694,29 @@ def stack_membership(layout):
     return member
 
 
-def stack_groups(layout):
-    """{stack name: the StackGroup itself}.
+#- the old name, kept because it reads correctly wherever the subcell
+#- IS a stack, which is still the common case
+stack_membership = subcell_membership
+
+
+def subcell_groups(layout):
+    """{subcell name: the CellGroup itself}.
 
     The group, not just its instance names, because
     CellGroup.addConnectivityRoute scopes itself -- it builds its own
     instanceRegex and takes a different path through getNodeAccessRects
     than passing includeInstances by hand does. The hand written routes
-    that worked in this design all went through the group.
+    that worked all went through the group.
+
+    Same rule as subcell_membership: a group the design marked, else a
+    StackGroup. Keep the two in step or the router will be handed a
+    name it cannot find a group for.
     """
     from cicpy.core.cellgroup import CellGroup, StackGroup
     out = {}
 
     def _walk(grp):
-        if isinstance(grp, StackGroup):
+        if getattr(grp, "subcell", False) or isinstance(grp, StackGroup):
             nm = getattr(grp, "name", "")
             if nm:
                 out[nm] = grp
@@ -694,6 +728,9 @@ def stack_groups(layout):
     for grp in getattr(layout, "cellgroups", []) or []:
         _walk(grp)
     return out
+
+
+stack_groups = subcell_groups
 
 
 def pins_by_stack(layout, layer=None):
@@ -1199,7 +1236,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     return routed, blocked
 
 
-def plan_stack_cells(layout, parent_name=None):
+def plan_subcells(layout, parent_name=None):
     """What subcells the stacks would become, without making any.
 
     Returns [{name, stack, instances, ports, internal}] where `ports`
@@ -1263,11 +1300,34 @@ def plan_stack_cells(layout, parent_name=None):
     for st in counts:
         for net in counts[st]:
             spread[net] += 1
+
+    #- A NET THAT IS A PORT OF THE PARENT IS A PORT OF THE STACK, even
+    #- when every device pin on it happens to sit in one stack.
+    #-
+    #- "Appears in more than one stack" is the right test for an
+    #- internal node and the wrong one for a boundary. Measured: an
+    #- input pair's gate net had all six of its pins inside one stack,
+    #- so it was classed internal and the generated cell did not expose
+    #- it -- a stack that swallows the parent's input, with no way to
+    #- drive it once the parent instantiates the cell rather than
+    #- containing it.
+    parent_ports = set()
+    for attr in ("allPortNames", "ports"):
+        try:
+            parent_ports.update(getattr(layout, attr, None) or ())
+        except TypeError:
+            pass
+    ckt = getattr(layout, "ckt", None)
+    for nm in (getattr(ckt, "nodes", None) or ()):
+        parent_ports.add(nm)
+
     out = []
     for st in sorted(insts):
         nets = counts.get(st, {})
-        ports = sorted(n for n in nets if spread[n] > 1)
-        internal = sorted(n for n in nets if spread[n] == 1)
+        ports = sorted(n for n in nets
+                       if spread[n] > 1 or n in parent_ports)
+        internal = sorted(n for n in nets
+                          if spread[n] == 1 and n not in parent_ports)
         out.append({
             "name": f"{parent_name or layout.name}_{st}".upper(),
             "stack": st,
@@ -1276,6 +1336,9 @@ def plan_stack_cells(layout, parent_name=None):
             "internal": internal,
         })
     return out
+
+
+plan_stack_cells = plan_subcells
 
 
 def stack_subckt(layout, entry):

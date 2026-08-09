@@ -38,17 +38,27 @@ import subprocess
 
 
 class XschemSymbol(Cell):
-    def __init__(self,libname,cell,printer,symbolName):
+    def __init__(self,libname,cell,printer,symbolName,skip=""):
         super().__init__()
         self.cell = cell
         self.libname = libname
         self.symbolName = symbolName
 
+        #- `skip` is a symbol file this lookup must not use. A cell
+        #- being PRINTED must not find its own previously generated
+        #- .sym: printSymbol replays what it finds, so the symbol would
+        #- be frozen at whatever port list it had the first time.
+        #- Measured -- a stack cell that gained a port kept a four pin
+        #- symbol while its schematic wrote five iopins, and xschem
+        #- takes the subckt port list from the SYMBOL, so the new port
+        #- appeared in *.PININFO and was missing from .subckt.
         self.symbol_from_lib = False
         symbol_to_use = ""
         if(symbolName != ""):
             for s in printer.lib_symbols:
                 if(symbol_to_use):
+                    continue
+                if(skip and os.path.abspath(s) == os.path.abspath(skip)):
                     continue
                 base = os.path.basename(s)
                 if(base == symbolName + ".sym"):
@@ -279,7 +289,9 @@ class XschemPrinter(DesignPrinter):
         self.iy1 = 0
         self.label_count = 0
 
-        sym = XschemSymbol(self.libpath,cell,self,cell.symbol)
+        #- not its own generated symbol; see XschemSymbol's `skip`
+        sym = XschemSymbol(self.libpath,cell,self,cell.symbol,
+                           skip=self.libpath + os.path.sep + cell.name + ".sym")
         self.symbols[cell.name] = sym
 
         if("noSchematic" in cell.meta):

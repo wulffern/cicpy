@@ -27,7 +27,7 @@
 
 import importlib
 import click
-import os, sys
+import os, re, sys
 import cicpy as cic
 import json
 import cicspi
@@ -275,6 +275,44 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
 
 
+@cli.command("sch2subcells")
+@click.pass_context
+@click.argument("lib")
+@click.argument("cell")
+@click.option("--libdir",default="../design/",help="Default directory of designs")
+@click.option("--techlib",default="sky130A",help="Technology library")
+@click.option("--xspace",default="0",help="Group X space")
+@click.option("--yspace",default="0",help="Group Y space")
+@click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
+def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak):
+    """Generate a cell per subcell: .mag, .cic, .sch and .sym.
+
+    Step one of two. Place the cell exactly as sch2mag would, then write
+    out each SUBCELL as a cell of its own and stop -- the parent's own
+    .mag is not written and not touched.
+
+    The point is that a subcell becomes a thing on disk that can be
+    verified by itself, before anything is built on top of it. Run this,
+    check each one with drc and lvs, and only then build the parent.
+
+    A subcell is any CellGroup the design marks with ``subcell = True``,
+    and failing that every stack -- a column of devices being the
+    decomposition that needs no thought. Nothing here is confined to
+    stacks: mark a differential pair spread over two columns, or a
+    whole side, and it is published the same way.
+
+    Which cells get written is taken from the plan, BY NAME. The
+    schematics used to come from a second `transpile --xschem` with a
+    negative lookahead over the cell name, which the Makefile had to
+    describe as "not optional" because getting it wrong overwrote the
+    hand-drawn parent schematic with a generated one.
+    """
+    os.system(f"make xsch LIB={lib} CELL={cell}")
+    spi = "xsch/" + cell + ".spice"
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,
+             subcells_only=True)
+
+
 @cli.command("spi2mag")
 @click.pass_context
 @click.argument("spi")
@@ -293,7 +331,8 @@ def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectiv
 
 
 
-def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
+def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,
+             subcells_only=False):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -350,6 +389,10 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     #- Add cuts after the layout has been routed
     design.addCuts()
 
+    if subcells_only:
+        _write_subcells(design,lcell,libdir,lib,rules)
+        return
+
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.print(design)
     #for m in design.maglib.values():
@@ -364,6 +407,64 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     with open(cicfile,"w") as fo:
         fo.write(json.dumps(obj,indent=4))
         #fo.write(json.dumps(design.maglib["JNWTR_RPPO2"]._lay.toJson(),indent=4))
+
+
+def _keep_only(names):
+    """An exclude regex that keeps exactly `names` and nothing else.
+
+    DesignPrinter filters by excluding, so "print only these" has to be
+    said backwards. Built from the real names rather than a prefix: a
+    prefix pattern also matches the parent, and the difference between
+    the two is a generated schematic written over a hand-drawn one.
+    """
+    if not names:
+        return ".*"
+    alts = "|".join(re.escape(n) for n in sorted(names))
+    return f"^(?!(?:{alts})$).*"
+
+
+def _write_subcells(design,lcell,libdir,lib,rules):
+    """Write a cell per subcell and nothing else."""
+    from cicpy.core.mazerouter import plan_subcells, write_stack_cells
+
+    plan = plan_subcells(lcell)
+    if not plan:
+        log.warning(f"{lcell.name}: no subcells found; nothing to write")
+        return
+
+    #- cicpy makes these itself rather than relying on the design's
+    #- afterPaint to have called write_stack_cells. Idempotent: a cell
+    #- already registered is left alone.
+    write_stack_cells(lcell,design=design,plan=plan,log=log)
+
+    names = [e["name"] for e in plan]
+    keep = _keep_only(names)
+    log.info(f"{lcell.name}: writing {len(names)} subcells")
+
+    obj = cic.MagicPrinter(libdir + lib,rules)
+    obj.exclude = keep
+    obj.print(design)
+
+    obj = cic.XschemPrinter(libdir + lib,rules)
+    obj.exclude = keep
+    obj.print(design)
+
+    for entry in plan:
+        name = entry["name"]
+        cellobj = design.cells.get(name)
+        if cellobj is None:
+            continue
+        cicfile = libdir + lib + os.path.sep + name + ".cic"
+        one = cic.Design()
+        one.cells = {name: cellobj}
+        if hasattr(one,"cellnames"):
+            one.cellnames = [name]
+        try:
+            with open(cicfile,"w") as fo:
+                fo.write(json.dumps(one.toJson(),indent=4))
+        except Exception as ex:
+            log.warning(f"{name}: could not write {cicfile}: {ex}")
+        log.info(f"  {name}: {' '.join(entry['ports']) or '(no ports)'}")
 
 
 def _ensure_default_pycell(dirname, cell):

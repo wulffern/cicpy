@@ -2017,7 +2017,7 @@ class LayoutCell(Cell):
         that ever called addStack, which is not this method's business.
         """
         try:
-            from .mazerouter import run_stack_pycells
+            from .subcell import run_stack_pycells
         except Exception:
             return
         try:
@@ -2231,6 +2231,8 @@ class LayoutCell(Cell):
         w = rules.get(layer, "width")
         from .cut import Cut
         from .rect import VerticalRectangleFromTo
+        if not hasattr(self, "_drop_rects"):
+            self._drop_rects = []
         for r in rects:
             if align == "left":
                 x = r.x1 + w / 2
@@ -2249,27 +2251,78 @@ class LayoutCell(Cell):
             #- rules forbid. Cuts go through getCutsForRects: two
             #- cuts along the target's long side for reliability,
             #- auto-shrunk where a narrow tab only fits one.
-            ends = ((r, r.centerY()),
-                    (rail, rail.centerY()))
+            self._drop_rects.append(drop)
+            ends = ((r, r.centerY(), False),
+                    (rail, rail.centerY(), True))
             if not pin_cut:
                 ends = ends[1:]
-            for target, yc in ends:
+            for target, yc, at_rail in ends:
                 if layer == target.layer:
                     continue
                 cs = Cut.getCutsForRects(layer, [target.getCopy()],
                                          cuts, 1, True)
                 if cs:
                     ct = cs[0]
-                    #- the cut slides inside the target while the
-                    #- wire keeps its alignment: an aligned drop with
-                    #- a two-cut pad otherwise overhangs the pin edge
-                    #- into the neighbouring lane (li.3, measured).
-                    #- The wide pad still covers the wire.
                     half = ct.width() / 2
-                    lo, hi = target.x1 + half, target.x2 - half
-                    xc = x if lo > hi else min(max(x, lo), hi)
+                    if at_rail:
+                        #- on the rail the cut starts under the wire
+                        #- and slides along the bar away from foreign
+                        #- drops crossing the trunk -- their vertical
+                        #- and this cut's pad share a layer.
+                        xc = self._avoidForeignDrops(ct, x, yc, name,
+                                                     (layer,
+                                                      target.layer))
+                    elif align == "left":
+                        #- the cut follows the align: a left-aligned
+                        #- wire with a centered two-cut pad overhangs
+                        #- the pin edge into the neighbouring lane
+                        #- (li.3, measured). Flush against the edge
+                        #- the wide pad still covers the wire.
+                        xc = target.x1 + half
+                    elif align == "right":
+                        xc = target.x2 - half
+                    else:
+                        lo, hi = target.x1 + half, target.x2 - half
+                        xc = x if lo > hi else min(max(x, lo), hi)
                     ct.moveCenter(int(xc), int(yc))
                     routering.add(ct)
+
+    def _avoidForeignDrops(self, ct, x:float, yc:float, net:str,
+                           layers):
+        """Slide a rail cut along the bar until its pads clear every
+        other net's drop vertical crossing the trunk at that height.
+
+        The window is bounded by pad-covers-wire: the wire must stay
+        inside the cut's pad or the slide opens the net it serves."""
+        rules = Rules.getInstance()
+        half = ct.width() / 2
+        w = rules.get(layers[0], "width")
+        slack = max(0, half - w / 2)
+        hh = ct.height() / 2
+        obstacles = []
+        for o in getattr(self, "_drop_rects", []):
+            if getattr(o, "net", None) == net or o.layer not in layers:
+                continue
+            if o.y1 > yc + hh or o.y2 < yc - hh:
+                continue
+            obstacles.append((o, rules.get(o.layer, "space")))
+
+        def clear(xc):
+            for o, sp in obstacles:
+                if xc + half + sp > o.x1 and xc - half - sp < o.x2:
+                    return False
+            return True
+
+        if clear(x) or not obstacles:
+            return x
+        step = 200
+        d = step
+        while d <= slack:
+            for xc in (x - d, x + d):
+                if clear(xc):
+                    return xc
+            d += step
+        return x
 
     def trimChannelRoute(self, name:str, ends:str="lr"):
         cr = self.named_rects.get(f"rail_{name}")

@@ -294,17 +294,30 @@ class Cut(Cell):
                         return (i is not None
                                 and i.width() <= r.width()
                                 and i.height() <= r.height())
+                    #- A lone 1x1 via is a reliability liability: walk
+                    #- the shrink chain through every two-cut shape
+                    #- (2x1, 1x2) first and fall through to a single
+                    #- cut only when nothing larger fits -- and to an
+                    #- overhanging one only when even the 1x1 doesn't.
                     if not _fits(inst):
-                        alt = Cut.getInstance(routeLayer, r.layer, vcuts, cuts)
-                        if _fits(alt):
-                            inst = alt
-                        else:
-                            one = Cut.getInstance(routeLayer, r.layer, 1, 1)
-                            if one is not None and (
-                                    _fits(one)
-                                    or one.width() * one.height()
-                                    < inst.width() * inst.height()):
-                                inst = one
+                        chosen = None
+                        for (hc, vc) in ((vcuts, cuts), (2, 1), (1, 2),
+                                         (1, 1)):
+                            alt = Cut.getInstance(routeLayer, r.layer,
+                                                  hc, vc)
+                            if _fits(alt):
+                                chosen = alt
+                                break
+                            if alt is not None and (
+                                    chosen is None
+                                    or alt.width() * alt.height()
+                                    < chosen.width() * chosen.height()):
+                                chosen = alt
+                        if chosen is not None and (
+                                _fits(chosen)
+                                or chosen.width() * chosen.height()
+                                < inst.width() * inst.height()):
+                            inst = chosen
 
                     # Position the cut
                     if leftAlignCut:

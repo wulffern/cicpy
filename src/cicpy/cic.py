@@ -449,7 +449,7 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     #- The .cic still carries them, so the parent remains a complete
     #- description and the route tools can be pointed at either.
     try:
-        from cicpy.core.mazerouter import plan_subcells
+        from cicpy.core.subcell import plan_subcells
         subnames = [e["name"] for e in plan_subcells(lcell)]
     except Exception:
         subnames = []
@@ -501,7 +501,7 @@ def _hierarchify(design,lcell,log):
     originals means proving for each that every rect went along, which
     is a verification burden this step does not need yet.
     """
-    from cicpy.core.mazerouter import plan_subcells
+    from cicpy.core.subcell import plan_subcells
     from cicpy.core.instance import Instance
 
     plan = plan_subcells(lcell)
@@ -613,7 +613,7 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
     would make iterating on one a different experiment from the real
     thing.
     """
-    from cicpy.core.mazerouter import plan_subcells, write_stack_cells
+    from cicpy.core.subcell import plan_subcells, write_stack_cells
 
     plan = plan_subcells(lcell)
     if not plan:
@@ -649,12 +649,6 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
     keep = _keep_only(names)
     log.info(f"{lcell.name}: writing {len(names)} subcell"
              f"{'s' if len(names) != 1 else ''}")
-
-    #- publish under the product name: the build ran with CELL's
-    #- hooks and netlist, but the artifact IS the cell -- a top
-    #- assembled as <CELL>_HIER need not keep the scaffold's name
-    if outcell:
-        lcell.name = outcell
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.exclude = keep

@@ -148,7 +148,7 @@ class SidecarPycell:
                         f"{len(blocked)} blocked")
 
     def afterPaint(self, layout):
-        from cicpy.core.mazerouter import write_stack_cells
+        from cicpy.core.subcell import write_stack_cells
         write_stack_cells(layout, log=layout.log)
 
 

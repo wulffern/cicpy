@@ -2097,6 +2097,37 @@ class LayoutCell(Cell):
             self.named_rects[f"rail_r_{name}"] = rr.getPointer("right")
             self.add(rr)
 
+    def addChannelRoute(self, layer:str, name:str, channel:str, track:int=0,
+                        widthmult:int=1):
+        """A RouteRing variant lying ACROSS the cell on a channel track.
+
+        The bar spans the full width of the top-level cell at the
+        given track of a channel registered by addRoutingChannel --
+        on top of the nmos row, under the pmos row. It registers as
+        ``rail_<name>`` exactly like a ring side, so
+        addPowerConnection stretches pins to it, and it trims the
+        same way: call trimChannelRoute after the connections are in
+        and the bar pulls back to the outermost one.
+        """
+        self.log.info(f"addChannelRoute(layer={layer}, name={name}, "
+                      f"channel={channel}, track={track})")
+        y = self.channelTrackCoord(channel, track)
+        if y is None:
+            return None
+        mw = Rules.getInstance().get(layer, "width") * widthmult
+        from .routering import ChannelRoute
+        cr = ChannelRoute(layer, name, int(self.x1), int(self.x2),
+                          int(y), int(mw))
+        self.updatePort(name, cr.getDefault())
+        self.named_rects[f"rail_{name}"] = cr
+        self.add(cr)
+        return cr
+
+    def trimChannelRoute(self, name:str, ends:str="lr"):
+        cr = self.named_rects.get(f"rail_{name}")
+        if cr is not None and hasattr(cr, "trim"):
+            cr.trim(ends)
+
     def addRouteGroup(self, net: str) -> "RouteGroup":
         """Return a chainable ``RouteGroup`` builder for ``net``.
 

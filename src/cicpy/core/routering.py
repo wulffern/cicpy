@@ -140,3 +140,53 @@ class RouteRing(Cell):
         if "b" in whichEndToTrim:
             r.setBottom(bounds.y1())
 
+
+
+class ChannelRoute(RouteRing):
+    """A RouteRing variant with one side: a full-width horizontal bar
+    riding a routing-channel track.
+
+    A ring surrounds the cell; a channel route lies across it -- on
+    top of the nmos row, under the pmos row -- spanning the whole
+    top-level cell so that any column can drop onto it. It registers
+    like a ring (``rail_<net>``), so addPowerConnection stretches
+    pins to it the same way, and it trims the same way: trim() pulls
+    the bar back to the outermost connection actually made, so an
+    unused stretch of track is returned to the channel.
+    """
+
+    def __init__(self, layer:str = None, name:str = None, x1:int = None,
+                 x2:int = None, y:int = None, metalwidth:int = None):
+        Cell.__init__(self)
+        self.ignoreBoundaryRouting = False
+        if layer is None:
+            return
+        self.name = name
+        self.bar = Rect(layer, int(x1), int(y - metalwidth / 2),
+                        int(x2 - x1), int(metalwidth))
+        self.add(self.bar)
+        self.bottom = self.bar
+        self.top = self.bar
+        self.left = self.bar
+        self.right = self.bar
+        self.default_rectangle = self.bar
+
+    def trim(self, ends: str = "lr"):
+        """Pull the bar back to the outermost connection.
+
+        The connections are the children addPowerConnection (or any
+        caller) added to this object; the bar keeps one metalwidth of
+        enclosure past the outermost of them. With no connections the
+        bar is left alone -- an untouched rail is a statement, an
+        invisible one is a bug hunt.
+        """
+        conns = [c for c in self.children if c is not self.bar]
+        if not conns:
+            return
+        x1 = min(c.x1 for c in conns)
+        x2 = max(c.x2 for c in conns)
+        margin = self.bar.height()
+        if "l" in ends:
+            self.bar.x1 = max(self.bar.x1, x1 - margin)
+        if "r" in ends:
+            self.bar.x2 = min(self.bar.x2, x2 + margin)

@@ -739,6 +739,11 @@ def subcell_membership(layout):
 
     spec = subcell_spec(layout)
     if spec:
+        #- A DESIGN WITH A SIDECAR IS DECLARED, FULL STOP. The declared
+        #- entries are the subcells; the group walk does not add more
+        #- behind the file's back. What the regexes fail to claim is
+        #- reported by plan_subcells, with the instance names the
+        #- missing entry would be written from.
         for inst in layout.iterInstances():
             nm = getattr(inst, "instanceName", "") or ""
             if not nm or nm in member:
@@ -747,6 +752,7 @@ def subcell_membership(layout):
                 if entry["match"].search(nm):
                     member[nm] = entry["name"]
                     break
+        return member
 
     def _claim(grp, gname):
         for inst in (list(getattr(grp, "instances", []) or [])
@@ -837,6 +843,7 @@ def pins_by_stack(layout, layer=None):
                 #- router assigns lanes by it: a source net belongs on
                 #- the left edge of its pins, a drain net on the right.
                 rect.terminal = getattr(port, "childName", "") or ""
+                rect.instName = name
                 out[member.get(name) or stack_of(name)][net].append(rect)
     return out
 
@@ -1416,6 +1423,50 @@ def route_stack_level(layout, margin=None, log=None, only=None,
             tm = TrackMap(layout, block_pins=True, extent=extent).build()
             r = MazeRouter(tm, net)
             try:
+                #- No routeMirror fast path. It was tried for gate nets and
+                #- it DREW NOTHING while reporting success -- the
+                #- excludeNets narrowing starves it of the context its
+                #- decline logic feeds on, and a "routed" that draws
+                #- nothing is this flow's oldest lie. The lane fast path
+                #- below covers the all-gate net on the tab centre.
+                #- FAST PATH 2: a single-terminal net whose lane column
+                #- is clear does not need the search at all. The search
+                #- was only consulted for a shape, and on a crowded
+                #- column it returns a staircase and the net was blocked
+                #- for it -- while the lane, which never staircases, sat
+                #- unused because it only applied to search-shaped
+                #- verticals.
+                lane0 = _terminal_lane(rects, tm.pin_layer, "||")
+                if lane0 is not None:
+                    ys0 = ([int(rr.y1) for rr in rects]
+                           + [int(rr.y2) for rr in rects])
+                    try:
+                        pad0 = Rules.getInstance().get(tm.pin_layer,
+                                                       "space")
+                    except Exception:
+                        pad0 = 0
+                    ok = False
+                    try:
+                        ok = (tm.column_blockers(
+                                  net, lane0 - pad0, lane0 + pad0,
+                                  min(ys0), max(ys0)) == []
+                              and tm.column_metal(
+                                  net, tm.pin_layer,
+                                  lane0 - pad0, lane0 + pad0,
+                                  min(ys0), max(ys0)) == [])
+                    except Exception:
+                        ok = False
+                    if ok:
+                        grp = groups.get(stack)
+                        if grp is None:
+                            raise Blocked(
+                                f"no group object for stack {stack}")
+                        grp.addConnectivityRoute(
+                            tm.pin_layer, f"^{re.escape(net)}$", "||",
+                            f"trunkx={lane0}", 1)
+                        claimed.add((lane0, min(ys0), max(ys0)))
+                        routed.append((stack, net))
+                        continue
                 #- Search for the shape, then hand it to route.py. The
                 #- search proves a path exists and says which layer and
                 #- direction it wants; the drawing is not ours to do.
@@ -1666,19 +1717,16 @@ def plan_subcells(layout, parent_name=None):
     #- close the gap. Not an error: the fallback is what lets a design
     #- adopt the file one subcell at a time.
     if spec:
-        found = sorted(st for st in insts if st not in types)
-        if found:
+        claimed_insts = {nm for nm, st in member.items()}
+        loose = sorted(nm for inst in layout.iterInstances()
+                       for nm in [getattr(inst, "instanceName", "") or ""]
+                       if nm and nm not in claimed_insts)
+        if loose:
             log = logging.getLogger("MazeRouter")
             log.warning(
-                f"{layout.name}.yaml declares {len(spec)} subcells but the "
-                f"layout has {len(found)} more: {', '.join(found)}")
-            for st in found:
-                names = sorted(insts[st])
-                head = [n for n in names if not n.startswith(("xfill_",
-                                                              "xstack_"))]
-                log.warning(f"  undeclared {st}: instances "
-                            f"{', '.join(head[:6])}"
-                            + (" ..." if len(head) > 6 else ""))
+                f"{layout.name}.yaml claims no subcell for "
+                f"{len(loose)} instances: {', '.join(loose[:8])}"
+                + (" ..." if len(loose) > 8 else ""))
     out = []
     for st in sorted(insts):
         nets = counts.get(st, {})
@@ -1849,6 +1897,36 @@ def _run_stack_pycell(layout, entry, log, cell=None):
     except Exception as e:
         log.error(f"{name}: pycell failed to import: {e}")
         return False
+    #- The hooks, in the order of the standard pycell contract:
+    #-
+    #-   beforePlace(layout, entry)   adjust the subcell's own stack;
+    #-                                return value ignored
+    #-   beforeRoute(layout, entry)   route the subcell's internal
+    #-                                nets; return True to mean "this
+    #-                                subcell is ROUTED, the built-in
+    #-                                router must not touch it". A
+    #-                                stub that returns None leaves the
+    #-                                built-in router in charge.
+    #-   route(cell, layout, entry)   the legacy name; its existence
+    #-                                alone claims the subcell, because
+    #-                                the one design shipping it relies
+    #-                                on exactly that.
+    bp = getattr(mod, "beforePlace", None)
+    if bp is not None:
+        try:
+            bp(layout, entry)
+        except Exception as e:
+            log.error(f"{name}: pycell beforePlace() raised: {e}")
+    br = getattr(mod, "beforeRoute", None)
+    if br is not None:
+        try:
+            handled = bool(br(layout, entry))
+            if handled:
+                log.info(f"{name}: routed by its own pycell")
+            return handled
+        except Exception as e:
+            log.error(f"{name}: pycell beforeRoute() raised: {e}")
+            return False
     fn = getattr(mod, "route", None)
     if fn is None:
         return False

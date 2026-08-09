@@ -527,6 +527,51 @@ def _hierarchify(design,lcell,log):
         log.info(f"{lcell.name}: x{entry['stack']} = {entry['name']}")
 
 
+def _subcell_pycell_template(name, entry):
+    return f'''"""{name}: this subcell's own layout hooks.
+
+Generated once by `cicpy sch2subcells`, then yours: edit and commit.
+
+Both hooks run in the parent, between its afterPlace and beforeRoute,
+with `layout` the parent LayoutCell and `entry` this subcell's plan:
+    entry["instances"]  the instance names in this subcell
+    entry["ports"]      its boundary nets
+    entry["internal"]   nets wholly inside it
+    entry["type"]       stack | diffpair | mirror, from {name.split("_")[0]}.yaml
+"""
+
+
+def beforePlace(layout, entry):
+    """Adjust this subcell's placement before anything routes."""
+
+
+def beforeRoute(layout, entry):
+    """Route this subcell's internal nets.
+
+    Return True to claim the subcell as ROUTED -- the built-in stack
+    router will then leave it alone. Return None to let the built-in
+    router handle it, which is the right default.
+    """
+'''
+
+
+def _ensure_subcell_pycells(lcell, plan, log):
+    """A .py per subcell, generated when missing, never overwritten."""
+    import os
+    dirname = getattr(lcell, "dirname", "") or ""
+    made = []
+    for entry in plan:
+        path = os.path.join(dirname, entry["name"] + ".py")
+        if os.path.exists(path):
+            continue
+        with open(path, "w") as fo:
+            fo.write(_subcell_pycell_template(entry["name"], entry))
+        made.append(entry["name"])
+    if made:
+        log.info(f"pycell stubs written (edit and commit them): "
+                 f"{', '.join(made)}")
+
+
 def _write_subcells(design,lcell,libdir,lib,rules,only=()):
     """Write a cell per subcell and nothing else.
 
@@ -565,6 +610,8 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
         if names_list is not None and nm in names_list:
             names_list.remove(nm)
     write_stack_cells(lcell,design=design,plan=plan,log=log)
+
+    _ensure_subcell_pycells(lcell, plan, log)
 
     names = [e["name"] for e in plan]
     keep = _keep_only(names)

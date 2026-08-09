@@ -333,14 +333,19 @@ def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,subcells):
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 @click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
-def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
+@click.option("--outcell", default="", help="Write the result under this cell name. "
+              "The build keeps CELL's hooks and netlist; only the published "
+              "name changes -- a hierarchical assembly built as <CELL>_HIER "
+              "publishes as the product cell.")
+def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,outcell):
     """Translate a SPICE file to Magic"""
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,
+             outcell=outcell)
 
 
 
 def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,
-             subcells_only=False,only_subcells=(),hier=False):
+             subcells_only=False,only_subcells=(),hier=False,outcell=""):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -403,6 +408,12 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
     if hier:
         _hierarchify(design,lcell,log)
+
+    #- publish under the product name: the build ran with CELL's
+    #- hooks and netlist, but the artifact IS the cell -- a top
+    #- assembled as <CELL>_HIER need not keep the scaffold's name
+    if outcell:
+        lcell.name = outcell
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     #- The parent step does not write subcells. Both commands used to
@@ -614,6 +625,12 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
     keep = _keep_only(names)
     log.info(f"{lcell.name}: writing {len(names)} subcell"
              f"{'s' if len(names) != 1 else ''}")
+
+    #- publish under the product name: the build ran with CELL's
+    #- hooks and netlist, but the artifact IS the cell -- a top
+    #- assembled as <CELL>_HIER need not keep the scaffold's name
+    if outcell:
+        lcell.name = outcell
 
     obj = cic.MagicPrinter(libdir + lib,rules)
     obj.exclude = keep

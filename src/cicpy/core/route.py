@@ -53,6 +53,20 @@ class Route(Cell):
 
         self.setBoundaryIgnoreRouting(False)
 
+        #- trunkx names the centreline of a vertical, absolutely. It was
+        #- parsed by OrthogonalLayerRoute alone, so on a plain "||" it
+        #- was accepted, logged, and never read: the router's lane
+        #- assignment wrote trunkx into the command and routeVertical
+        #- drew at the pin overlap's centre regardless. An option that
+        #- is taken everywhere and honoured somewhere is worse than one
+        #- that errors -- the log looks like consent.
+        self.hasAbsoluteTrunk = False
+        self.absoluteTrunk = 0
+        m = re.search(r"trunkx=(-?[0-9]+(?:\.[0-9]+)?)", self.options)
+        if m:
+            self.hasAbsoluteTrunk = True
+            self.absoluteTrunk = int(float(m.group(1)))
+
         if re.search(r"fillhcut", self.options):
             self.fillhcut = True
         if re.search(r"fillvcut", self.options):
@@ -637,6 +651,16 @@ class Route(Cell):
         width = rules.get(self.routeLayer, self.routeWidthRule)
 
         def connection_center(r1, r2):
+            #- an absolute trunk wins over the computed centre, same
+            #- contract as OrthogonalLayerRoute. UNCONDITIONALLY: by
+            #- the time this runs, r1 and r2 are the CUT PADS, already
+            #- centred on the pins' middles by _addCuts -- a "stay
+            #- within the overlap" guard therefore tests the pad it is
+            #- about to move, and always says no. The caller that set
+            #- trunkx computed it from the real pins; add_connection
+            #- moves the cuts onto it.
+            if self.hasAbsoluteTrunk:
+                return int(self.absoluteTrunk)
             overlap_left = max(r1.x1, r2.x1)
             overlap_right = min(r1.x2, r2.x2)
             if overlap_left <= overlap_right:

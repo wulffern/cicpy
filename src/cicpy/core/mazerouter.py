@@ -1369,6 +1369,35 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     ys_all = ([int(r.y1) for r in rects]
                               + [int(r.y2) for r in rects])
                     trunk = (lane, min(ys_all), max(ys_all))
+                    #- AND ON THE PIN LAYER, if the lane's own column is
+                    #- clear. The whole point of an edge lane is that it
+                    #- runs where nothing else lives -- the drain bars
+                    #- start well right of the source lane, the gate
+                    #- tabs right of the drain lane -- so the wire can
+                    #- stay on the metal its pins are already on: no
+                    #- via, no landing pad, no cut enclosure to spill
+                    #- onto a neighbour. The earlier whole-pin-span test
+                    #- said no here because the span holds the device's
+                    #- own rails; the LANE column does not.
+                    if layer != tm.pin_layer and tm.pin_layer:
+                        try:
+                            pad = Rules.getInstance().get(tm.pin_layer,
+                                                          "space")
+                        except Exception:
+                            pad = 0
+                        lo, hi = min(ys_all), max(ys_all)
+                        try:
+                            clear = (tm.column_blockers(
+                                         net, lane - pad, lane + pad,
+                                         lo, hi) == []
+                                     and tm.column_metal(
+                                         net, tm.pin_layer,
+                                         lane - pad, lane + pad,
+                                         lo, hi) == [])
+                        except Exception:
+                            clear = False
+                        if clear:
+                            layer = tm.pin_layer
                 if trunk is not None:
                     claimed.add(trunk)
                 grp = groups.get(stack)

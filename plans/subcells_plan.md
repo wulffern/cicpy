@@ -89,73 +89,49 @@ and looks like success.
 So a subcell can be generated and is DRC clean. What it cannot yet do
 is pass **LVS**, and that is the whole gate.
 
-## The one thing in the way
+## State, 2026-08-09: the first subcell passes LVS
 
-**A subcell must join every net it has two or more pins of** —
-boundary nets included. A net with pins outside becomes a port; a cell
-that leaves its internal pins apart presents the same net at several
-ports and hands the parent a problem it just invented.
+    LELOTEMP_OTAR_P_IN_A, boundary routed, standalone:
+    Final result: Circuits match uniquely.
 
-`route_stack_level(boundary=True)` does this. It is implemented and
-**off by default**. Measured per stack, one at a time:
+Instance geometry is ATTRIBUTED now (`_attributeInstanceBody`): the
+rect under a pin takes the pin's net, the net floods through same-layer
+touching metal, and what is left is `device_metal` -- blocked for every
+net, never tolerated. The flood is load-bearing: direct overlap alone
+left the pin's own conductor one row up as an obstacle, and every
+boundary net came back "no path, closest approach 0 away". Fill devices
+are emitted in the generated schematic the way magic extracts them --
+terminals floating, bulk on the supply, bulk position read off the
+siblings. Copied vias are real InstanceCuts, not flattened Rects.
 
-| stack | boundary nets routed | shorts |
+Measured, all 8 with `boundary=True`:
+
+| subcell | boundary nets | result |
 |---|---|---|
-| `r_deg` | 2 | **0** |
-| `p_in_a` | 4 | **0** |
-| `p_in_b` | 4 | **0** |
-| `p_sw` | 2 | 1 |
-| `p_bias` | 4 | 1 |
-| `n_load_a` | 2 | 1 |
-| `n_load_b` | 2 | 1 |
-| `n_mirr` | 3 | 1 |
+| `p_in_a` | 4/4 routed | **LVS: Circuits match uniquely** (20 met1.2) |
+| `p_in_b` | 3/4 | clean, 1 blocked |
+| `r_deg`, `p_sw` | partial | clean, 1 blocked each |
+| `p_bias`, `n_load_a/b`, `n_mirr` | most routed | **1 short each** |
 
-Three of eight are cell-ready today. **All five failures are the same
-cause**, and it is the cause behind nearly every routing failure in
-this flow:
+## The one thing in the way now: route.py cut placement
 
-> Geometry inside an instance cannot be resolved to a net.
-> `_collectPhysicalRects` can attribute only PORTS, through the node
-> graph, so a device's own internal rails arrive as `"?"`.
+Every remaining failure is the same mechanism. The search clears a
+1x1 via footprint at a grid point; route.py then places the cut ITS
+way -- 1x2 where min-area wants it, aligned to the pin -- and the
+enclosure lands where nothing checked:
 
-That forces a bad choice, and the router currently takes the permissive
-side: unattributed metal is *tolerated* on the pin layer, because
-treating it as foreign blocks a via off every pin by the pin's own
-metal. The cost is exactly what the five failures are — a run or a via
-pad landing on a device rail, which the connectivity flood then
-relabels, merging two nets that never touched a wire.
+- on the diagonal GATE pin ~2 um away (the 4 shorts; G sits above and
+  beside the wide D bar in this library)
+- within 0.14 um of neighbouring metal (the 20 met1.2 on p_in_a --
+  DRC only, LVS passes anyway)
 
-It has now been hit three separate ways:
-
-1. a run along the pin layer tying a device's D to its own S through a
-   side strip (fixed narrowly: `TrackMap.column_metal` +
-   `_pin_layer_if_clear`, cicpy bc5265e)
-2. a via pad on the same strip (**not fixed** — this is the 5 above)
-3. the connectivity flood mislabelling the strip, so the short report
-   names two signal nets and points at the router, when the geometry
-   belongs to neither
-
-### The fix worth making
-
-**Attribute instance geometry.** An `Instance` knows its cell and its
-port-to-net mapping, so a rect inside it that coincides with a port rect
-belongs to that net. Everything else inside the instance belongs to *no*
-net and is a hard obstacle — not "unknown, tolerate", which is what it
-is treated as now.
-
-That single change:
-
-- makes device rails real obstacles, so vias and runs stop landing on
-  them — the 5 shorts above
-- lets the flood stop inventing net labels for them, so short reports
-  name the real culprit
-- retires `TOLERATE_UNATTRIBUTED_ON`, `column_metal` and the pin-span
-  widening in `_pin_layer_if_clear`, all of which are workarounds for
-  not having it
-
-`trackmap.py` already names this as the proper fix and calls it "the
-same job as step 2b was for pins". It is the highest-value change left
-in the router.
+Fix belongs in route.py's cut placement (`_addCuts` /
+`Cut.getCutsForRects`): give it the same keep-out the search used --
+foreign pins to clear, own-net metal to either clear or MERGE with
+(a pad 0.1 from its own net's metal should extend to touch it, not
+leave a sliver). The blocked-not-shorted nets (one per subcell,
+mostly supplies) come after; blocked is the correct behaviour until
+the landing is legal.
 
 ## A subcell `.cic`, for the route checker
 

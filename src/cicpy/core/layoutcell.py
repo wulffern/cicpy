@@ -2199,9 +2199,27 @@ class LayoutCell(Cell):
         rail = routering.get(location)
         if rail is None:
             return
-        rects = self.getNodeAccessRects(name, self._pinLayer(),
-                                        includeInstances=includeInstances,
-                                        excludeInstances=excludeInstances)
+        #- ONE drop per instance, on the instance's PORT for the net:
+        #- the port is the published contract, where the access-rect
+        #- list also carries duplicate subports, one of which stood at
+        #- a stale position and dropped a via stack into a foreign bar
+        #- (measured: the whole powerdown family merged).
+        rects = []
+        import re as _re
+        for inst in self.iterInstances():
+            inm = getattr(inst, "instanceName", "")
+            if includeInstances and not _re.search(includeInstances, inm):
+                continue
+            if excludeInstances and _re.search(excludeInstances, inm):
+                continue
+            p = getattr(inst, "instancePorts", {}).get(name)
+            r = p.get() if p is not None and hasattr(p, "get") else None
+            if r is not None:
+                rects.append(r)
+        if not rects:
+            rects = self.getNodeAccessRects(name, self._pinLayer(),
+                                            includeInstances=includeInstances,
+                                            excludeInstances=excludeInstances)
         rules = Rules.getInstance()
         w = rules.get(layer, "width")
         from .cut import Cut

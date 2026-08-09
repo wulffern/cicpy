@@ -2116,7 +2116,7 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
             g = layout.nodeGraph.get(net)
             if g is None:
                 continue
-            inside, anchors = [], []
+            inside, anchors, bulks = [], [], []
             for port in getattr(g, "ports", []):
                 pinst = getattr(port, "parent", None)
                 nm = getattr(pinst, "instanceName", "") if pinst else ""
@@ -2124,6 +2124,8 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
                 if rect is None:
                     continue
                 (inside if nm in wanted else anchors).append(rect)
+                if nm in wanted and getattr(port, "childName", "") == "B":
+                    bulks.append(rect)
             if not inside:
                 continue
             #- A supply port sits on the BULK geometry at the row
@@ -2133,10 +2135,15 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
             #- a straight stretch through pure guard, and the pin
             #- layer over the stack stays free.
             if net in supplies:
+                #- a supply port is a BULK rect when the devices offer
+                #- one: the guard/tap column, which is what a parent
+                #- ring connects through. The strap is a source pin
+                #- and belongs to the device, not the boundary.
+                cands = bulks or inside
                 if re.search("VSS|GND", net):
-                    pr = min(inside, key=lambda r: r.y1)
+                    pr = min(cands, key=lambda r: r.y1)
                 else:
-                    pr = max(inside, key=lambda r: r.y2)
+                    pr = max(cands, key=lambda r: r.y2)
                 #- clipped to the pre-copy box: the bulk columns
                 #- straddle the cell edge, and a port poking past the
                 #- box inflates it, shifting the published origin by

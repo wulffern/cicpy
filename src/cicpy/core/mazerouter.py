@@ -863,7 +863,7 @@ def _terminal_lane(rects, layer, rtype):
     if len(terms) != 1:
         return None
     term = terms.pop()
-    if term not in ("S", "D"):
+    if term not in ("S", "D", "G"):
         return None
     try:
         w = int(Rules.getInstance().get(layer, "width"))
@@ -873,8 +873,18 @@ def _terminal_lane(rects, layer, rtype):
         #- the left edge every pin shares
         edge = max(int(r.x1) for r in rects)
         return edge + w // 2
-    edge = min(int(r.x2) for r in rects)
-    return edge - w // 2
+    if term == "D":
+        edge = min(int(r.x2) for r in rects)
+        return edge - w // 2
+    #- a gate net lives on tabs: no S/D edge convention, and a tab is
+    #- barely wider than the wire, so the lane is the tabs' common
+    #- centre -- which also keeps the M1 test asking about the one
+    #- column a gate wire can actually take
+    ox1 = max(int(r.x1) for r in rects)
+    ox2 = min(int(r.x2) for r in rects)
+    if ox2 - ox1 < w:
+        return None
+    return (ox1 + ox2) // 2
 
 
 def _pin_layer_if_clear(path, tm, router, pins, trunk, extent_rects=None):
@@ -1486,6 +1496,50 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             clear = False
                         if clear:
                             layer = tm.pin_layer
+                #- A STRAIGHT VERTICAL'S TRUNK LIES INSIDE EVERY PIN IT
+                #- LANDS ON. route.py drops each landing pad at the
+                #- trunk's x; a trunk outside a pin's span slides the
+                #- pad clean off the pin -- measured, a pad 11000 past
+                #- its own pin's edge, sitting on the neighbour's gate
+                #- tab instead. The common overlap of all the pins is
+                #- where a straight vertical may run; a net whose pins
+                #- share no column is not a straight vertical, whatever
+                #- the shape of the searched path.
+                if rtype == "||":
+                    ox1 = max(int(rr.x1) for rr in rects)
+                    ox2 = min(int(rr.x2) for rr in rects)
+                    m2 = re.search(r"trunkx=(-?[0-9.]+)", opts or "")
+                    tx = int(float(m2.group(1))) if m2 else None
+                    #- the WIRE must lie on every pin: half its width,
+                    #- not half a clearance -- the edge lanes sit half a
+                    #- width in from the pin edge by construction, and a
+                    #- clearance-sized margin blocked every one of them
+                    w2 = r.rule(tm.pin_layer, "width") // 2
+                    if ox2 - ox1 < 2 * w2:
+                        raise Blocked(
+                            f"{net}: pins share only {ox2 - ox1} of "
+                            f"column, a straight vertical cannot land")
+                    if tx is None or tx < ox1 + w2 or tx > ox2 - w2:
+                        raise Blocked(
+                            f"{net}: trunk {tx} lies outside the pins' "
+                            f"common overlap {ox1}..{ox2}")
+                    #- and if the route needs a VIA at each pin, the
+                    #- smallest cut must FIT the narrowest pin. A 3800
+                    #- pad on a 3200 gate tab overhangs 300 a side
+                    #- whatever the placement -- measured, six li
+                    #- spacing errors that no shifting can remove.
+                    if layer != tm.pin_layer:
+                        try:
+                            w_cut = r.via_extent(tm.pin_layer, layer)[0]
+                        except Exception:
+                            w_cut = 0
+                        narrow = min(int(rr.x2 - rr.x1) for rr in rects)
+                        if w_cut and narrow < w_cut:
+                            raise Blocked(
+                                f"{net}: narrowest pin is {narrow} and "
+                                f"the smallest {tm.pin_layer}-{layer} "
+                                f"pad is {w_cut}; it overhangs whatever "
+                                f"the placement")
                 if trunk is not None:
                     claimed.add(trunk)
                 grp = groups.get(stack)
@@ -1946,21 +2000,38 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         log.info(f"{name}: {added} routed rects and {vias} vias "
                  f"of {len(routed)} inside")
 
-        #- the boundary nets, as ports, from the pins that carry them
+        #- The boundary nets, as ports -- and WHICH pin becomes the
+        #- port is decided by the rest of the net. Every pin of the net
+        #- OUTSIDE this subcell is an anchor; their centroid is the
+        #- centre of the net's graph; the inside pin NEAREST that
+        #- centre is the port. Before this the first pin found won,
+        #- which put ports wherever iteration order left them -- the
+        #- port is the one thing the parent routes to, and it should
+        #- face the traffic. A net with no outside pins (the parent's
+        #- own IO living wholly in one subcell) keeps the first pin.
         pins = {}
         for net in entry["ports"]:
             g = layout.nodeGraph.get(net)
             if g is None:
                 continue
+            inside, anchors = [], []
             for port in getattr(g, "ports", []):
                 pinst = getattr(port, "parent", None)
                 nm = getattr(pinst, "instanceName", "") if pinst else ""
-                if nm not in wanted:
-                    continue
                 rect = port.get() if hasattr(port, "get") else None
-                if rect is not None:
-                    pins.setdefault(net, rect)
-                    break
+                if rect is None:
+                    continue
+                (inside if nm in wanted else anchors).append(rect)
+            if not inside:
+                continue
+            if anchors:
+                cx = sum(r.centerX() for r in anchors) / len(anchors)
+                cy = sum(r.centerY() for r in anchors) / len(anchors)
+                pins[net] = min(inside,
+                                key=lambda r: (abs(r.centerX() - cx)
+                                               + abs(r.centerY() - cy)))
+            else:
+                pins[net] = inside[0]
         for net, rect in pins.items():
             try:
                 cell.addPort(net, rect)

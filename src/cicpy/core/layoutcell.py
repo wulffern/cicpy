@@ -789,6 +789,26 @@ class LayoutCell(Cell):
         belongs to no terminal reachable from outside, so no via may
         land on it and no run may cross it, for any net.
         """
+        #- an instance that IS part of a net -- a via cut placed by a
+        #- route -- attributes its whole body to that net: it has no
+        #- ports for the flood to seed from, and marking a route's own
+        #- via enclosures as obstacles blocks the route from itself
+        owner = getattr(inst, "net", "") or ""
+        if not owner:
+            p = getattr(inst, "parent", None)
+            seen_p = set()
+            while p is not None and id(p) not in seen_p:
+                seen_p.add(id(p))
+                if hasattr(p, "isRoute") and p.isRoute():
+                    owner = getattr(p, "net", "") or ""
+                    break
+                p = getattr(p, "parent", None)
+        if owner:
+            for rr in out[start:]:
+                if not getattr(rr, "net", "") and not getattr(rr, "isPin", False):
+                    rr.setNet(owner)
+            return
+
         pins = []
         for pi in getattr(inst, "children", []) or []:
             if pi is None:

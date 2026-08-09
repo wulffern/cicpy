@@ -116,6 +116,40 @@ the design):
   channel bar away from other nets' drop verticals, within the
   window where its pad still covers the wire.
 
+### Dummies are supply devices
+
+A fill transistor shorts to its stack's supply -- PMOS dummies to
+VDD, NMOS dummies to VSS -- in three places that must agree:
+
+- the **hand schematic** carries one fill instance per device class
+  with every pin on the supply (lowercase `xfill_*` names);
+- the **generated subcell netlists** emit each fill with all
+  terminals on the stack's supply;
+- the **layout** straps the fill's D/G/S and ties the strap into the
+  adjacent tap row.
+
+The floorplan consequence: fills go at the **bottom** of a column,
+below every pin span. A supply-tied bar inside a rail's span blocks
+the lane -- measured, a drain net degraded to an M2 rail whose via
+pads then blocked the gate-tab lane.
+
+### Trunks come from pins, never from coordinates
+
+`trunkx` is the resolved form the tools emit; a design never writes
+it. Stack pycells state their rails with the pin-relative options:
+
+- `trunkright` -- the pins' common overlap, right edge: the
+  rightmost trunk that still lies on every pin (a short bar narrows
+  it for everyone, which is the point);
+- `trunkleft` -- the same from the left;
+- `trunktab` -- centred on the rightmost narrow (<=4 um) rect, the
+  gate-tab lane; rightmost because duplicate subports plant false
+  tabs to the left.
+
+They resolve against the route's collected rects at draw time, so
+the same pycell survives a resize untouched -- verified when the OTA
+went from 6 to 4 input devices and every hand rail followed.
+
 ### Conventions that are load-bearing
 
 - **Schematic instance names are lowercase.** The netlist keeps the

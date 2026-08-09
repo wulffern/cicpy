@@ -2123,6 +2123,63 @@ class LayoutCell(Cell):
         self.add(cr)
         return cr
 
+    def addRouteConnection(self, name:str, includeInstances:str="",
+                           location:str="t", layer:str="M2",
+                           excludeInstances:str="", align:str="center",
+                           cuts:int=1):
+        """Drop a net's pins onto its rail -- ChannelRoute or ring.
+
+        The signal sibling of addPowerConnection: where that stretches
+        the pin's own rect on the pin layer (right for a supply pin
+        facing its ring across guard), this drops a routing-width
+        vertical on ``layer`` from each selected pin to the rail, with
+        a via stack at the pin and one at the rail. ``align`` picks
+        where on the pin the drop stands -- left, center, right -- 
+        which is the dial that separates nets whose pins share a
+        column.
+        """
+        rr_key = None
+        for k in (f"rail_{name}", f"power_{name}"):
+            if k in self.named_rects:
+                rr_key = k
+                break
+        if rr_key is None:
+            self.log.error(f"addRouteConnection: no rail for {name}")
+            return
+        routering = self.named_rects[rr_key]
+        rail = routering.get(location)
+        if rail is None:
+            return
+        rects = self.getNodeAccessRects(name, self._pinLayer(),
+                                        includeInstances=includeInstances,
+                                        excludeInstances=excludeInstances)
+        rules = Rules.getInstance()
+        w = rules.get(layer, "width")
+        from .cut import Cut
+        from .rect import VerticalRectangleFromTo
+        for r in rects:
+            if align == "left":
+                x = r.x1 + w / 2
+            elif align == "right":
+                x = r.x2 - w / 2
+            else:
+                x = r.centerX()
+            drop = VerticalRectangleFromTo(layer, int(x - w / 2),
+                                           int(r.centerY()),
+                                           int(rail.centerY()), int(w))
+            drop.net = name
+            routering.add(drop)
+            for a, b, yc in ((layer, r.layer, r.centerY()),
+                             (layer, rail.layer, rail.centerY())):
+                if a == b:
+                    continue
+                ct = Cut.getInstance(a, b, 1, cuts)
+                if ct is None:
+                    ct = Cut.getInstance(b, a, 1, cuts)
+                if ct is not None:
+                    ct.moveCenter(int(x), int(yc))
+                    routering.add(ct)
+
     def trimChannelRoute(self, name:str, ends:str="lr"):
         cr = self.named_rects.get(f"rail_{name}")
         if cr is not None and hasattr(cr, "trim"):
@@ -2330,7 +2387,7 @@ class LayoutCell(Cell):
             elif(cl == "InstanceCut"):
                 from .instancecut import InstanceCut
                 c = InstanceCut()
-            elif(cl in ("Cell", "Route", "RouteRing", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+            elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
                 c = LayoutCell()
             else:
                 self.log.warning(f"Unkown class {cl}")

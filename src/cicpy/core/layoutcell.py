@@ -2336,7 +2336,7 @@ class LayoutCell(Cell):
             try:
                 from .route import Route
                 empty = list()
-                #log.info(f"addConnectivityRoute: empty={empty}, rects={rects}")
+#log.info(f"addConnectivityRoute: empty={empty}, rects={rects}")
                 r = Route(node, layer, empty, rects, options, routeType)
                 self._annotateRoute(r, "addConnectivityRoute", {
                     "layer": layer,

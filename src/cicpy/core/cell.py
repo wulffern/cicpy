@@ -249,6 +249,11 @@ class Cell(Rect):
         """
         if(child.isRoute() or child.isCut()):
             return True
+        #- a route rect COPIED into a published subcell is routing too;
+        #- as a plain Rect it inflated the box and shifted the
+        #- published origin by the guard overhang
+        if(getattr(child, "is_routing", False)):
+            return True
         for base in (child.__class__,) + child.__class__.__mro__:
             if(base.__name__ == "RouteRing"):
                 return True

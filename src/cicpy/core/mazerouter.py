@@ -2003,6 +2003,10 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- cut from is kept on the cell as `placed_at`, which is where
         #- a hierarchical parent puts its instance.
         cell.boundaryIgnoreRouting = True
+        #- the bbox check reads ignoreBoundaryRouting (set through
+        #- setBoundaryIgnoreRouting); assigning the attribute above
+        #- shadowed the method and never reached the check
+        cell.setBoundaryIgnoreRouting(True)
         wanted = set(entry["instances"])
         for inst in layout.iterInstances():
             if (getattr(inst, "instanceName", "") or "") in wanted:
@@ -2020,7 +2024,14 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- still needs its geometry, and this cell is published
         #- alongside it rather than replacing it.
         cell.updateBoundingRect()
-        sx1, sy1, sx2, sy2 = cell.x1, cell.y1, cell.x2, cell.y2
+        #- ...inside its own bounds PLUS the guard overhang. The ring a
+        #- cell carries past its box is still its own geometry, and a
+        #- route landing on it (a supply hop to the ring stub) was
+        #- silently dropped by the tight test: drawn in the parent,
+        #- cuts and all, and absent from the published cell. 4800 is
+        #- the tiling's shared-guard margin.
+        _g = 4800
+        sx1, sy1, sx2, sy2 = cell.x1 - _g, cell.y1 - _g, cell.x2 + _g, cell.y2 + _g
         #- The parent's ROUTING, and only that. Not
         #- _collectPhysicalRects: that flattens instance content too, so
         #- copying it duplicates every device's own geometry, which the
@@ -2083,7 +2094,9 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
                 cell.add(c2)
                 vias += 1
                 continue
-            cell.add(r.getCopy())
+            rr = r.getCopy()
+            rr.is_routing = True
+            cell.add(rr)
             added += 1
         log.info(f"{name}: {added} routed rects and {vias} vias "
                  f"of {len(routed)} inside")
@@ -2098,6 +2111,7 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- face the traffic. A net with no outside pins (the parent's
         #- own IO living wholly in one subcell) keeps the first pin.
         pins = {}
+        supplies = supply_nets(layout)
         for net in entry["ports"]:
             g = layout.nodeGraph.get(net)
             if g is None:
@@ -2111,6 +2125,29 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
                     continue
                 (inside if nm in wanted else anchors).append(rect)
             if not inside:
+                continue
+            #- A supply port sits on the BULK geometry at the row
+            #- boundary -- ground on the lowest rect, power on the
+            #- highest -- which is the guard column, continuous
+            #- through the tap row. A parent ring then connects with
+            #- a straight stretch through pure guard, and the pin
+            #- layer over the stack stays free.
+            if net in supplies:
+                if re.search("VSS|GND", net):
+                    pr = min(inside, key=lambda r: r.y1)
+                else:
+                    pr = max(inside, key=lambda r: r.y2)
+                #- clipped to the pre-copy box: the bulk columns
+                #- straddle the cell edge, and a port poking past the
+                #- box inflates it, shifting the published origin by
+                #- the overhang -- every parent-tuned track then lands
+                #- 4800 off its pin (measured).
+                pr = pr.getCopy()
+                pr.x1 = max(pr.x1, sx1 + _g)
+                pr.x2 = min(pr.x2, sx2 - _g)
+                pr.y1 = max(pr.y1, sy1 + _g)
+                pr.y2 = min(pr.y2, sy2 - _g)
+                pins[net] = pr
                 continue
             if anchors:
                 cx = sum(r.centerX() for r in anchors) / len(anchors)

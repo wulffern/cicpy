@@ -2265,6 +2265,10 @@ class LayoutCell(Cell):
         cr = self.named_rects.get(f"rail_{name}")
         if cr is not None and hasattr(cr, "trim"):
             cr.trim(ends)
+            #- the port took a copy of the untrimmed bar at creation;
+            #- refresh it or the cell advertises a full-width pin the
+            #- metal no longer backs
+            self.updatePort(name, cr.getDefault())
 
     def addRouteGroup(self, net: str) -> "RouteGroup":
         """Return a chainable ``RouteGroup`` builder for ``net``.

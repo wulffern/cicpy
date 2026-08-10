@@ -1,13 +1,11 @@
-"""The route plan: replayable only against the placement it saw.
+"""Wires in the sidecar: replayable only against the placement they saw.
 
-The plan caches the maze router's conclusions; the one thing that
-must never happen is a stale plan replaying against a moved
-placement. These tests pin the contract: roundtrip, fingerprint
-invalidation, the off switch, and that an `only` run keeps the other
-stacks' entries.
+The one thing that must never happen is a stale wires block replaying
+its resolved coordinates against a moved stack. These tests pin the
+contract: the fingerprint, the loud stale rejection, the off switch,
+blocked entries, and the paste-ready formatting.
 """
 import os
-import tempfile
 import unittest
 
 
@@ -19,79 +17,82 @@ class FakeInstance:
         self.y1 = y
 
 
-class FakeLayout:
-    def __init__(self, dirname, name, instances):
-        self.dirname = dirname
-        self.name = name
-        self._instances = [FakeInstance(*i) for i in instances]
+STACK = [FakeInstance("xa", "NCH", 0, 0), FakeInstance("xb", "NCH", 0, 800)]
 
-    def iterInstances(self):
-        return iter(self._instances)
-
-
-ENTRY = {"stack": "p_in", "net": "VD1", "kind": "route",
-         "layer": "M1", "rtype": "||", "opts": "trunkx=1000",
-         "cuts": 1, "claims": [[1000, 0, 5000]]}
+WIRES = [("VD1", "M1", "||", "trunkx=1000"),
+         ("VSU", "blocked", "no column")]
 
 
 class RoutePlan(unittest.TestCase):
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.dirname = self.tmp.name + os.path.sep
         os.environ.pop("CICPY_NO_ROUTEPLAN", None)
 
     def tearDown(self):
-        self.tmp.cleanup()
         os.environ.pop("CICPY_NO_ROUTEPLAN", None)
 
-    def _layout(self, instances=(("xa", "NCH", 0, 0),)):
-        return FakeLayout(self.dirname, "TOP", list(instances))
+    def _entry(self, key):
+        return {"name": "p_in", "wires": list(WIRES), "wires_key": key}
 
-    def test_roundtrip(self):
-        from cicpy.core.routeplan import save_plan, load_plan
-        lay = self._layout()
-        save_plan(lay, [dict(ENTRY)], {"p_in"})
-        plan = load_plan(lay)
-        self.assertIsNotNone(plan)
-        self.assertEqual(plan[("p_in", "VD1")]["opts"], "trunkx=1000")
+    def test_key_is_stable_and_position_sensitive(self):
+        from cicpy.core.routeplan import stack_key
+        k1 = stack_key(STACK)
+        self.assertEqual(k1, stack_key(list(reversed(STACK))))
+        moved = [FakeInstance("xa", "NCH", 400, 0), STACK[1]]
+        self.assertNotEqual(k1, stack_key(moved))
+        grown = STACK + [FakeInstance("xc", "NCH", 0, 1600)]
+        self.assertNotEqual(k1, stack_key(grown))
 
-    def test_moved_placement_invalidates(self):
-        from cicpy.core.routeplan import save_plan, load_plan
-        save_plan(self._layout(), [dict(ENTRY)], {"p_in"})
-        moved = self._layout([("xa", "NCH", 400, 0)])
-        self.assertIsNone(load_plan(moved))
+    def test_matching_key_replays(self):
+        from cicpy.core.routeplan import stack_key, wires_lookup
+        key = stack_key(STACK)
+        lut = wires_lookup(self._entry(key), key)
+        self.assertIsNotNone(lut)
+        self.assertEqual(lut["VD1"][3], "trunkx=1000")
+        self.assertEqual(lut["VSU"][1], "blocked")
 
-    def test_new_instance_invalidates(self):
-        from cicpy.core.routeplan import save_plan, load_plan
-        save_plan(self._layout(), [dict(ENTRY)], {"p_in"})
-        grown = self._layout([("xa", "NCH", 0, 0), ("xb", "NCH", 0, 800)])
-        self.assertIsNone(load_plan(grown))
+    def test_stale_key_is_rejected(self):
+        from cicpy.core.routeplan import stack_key, wires_lookup
+        key = stack_key(STACK)
+        self.assertIsNone(wires_lookup(self._entry("deadbeef0000"), key))
 
     def test_off_switch(self):
-        from cicpy.core.routeplan import save_plan, load_plan
-        lay = self._layout()
-        save_plan(lay, [dict(ENTRY)], {"p_in"})
+        from cicpy.core.routeplan import stack_key, wires_lookup
+        key = stack_key(STACK)
         os.environ["CICPY_NO_ROUTEPLAN"] = "1"
-        self.assertIsNone(load_plan(lay))
+        self.assertIsNone(wires_lookup(self._entry(key), key))
 
-    def test_only_run_keeps_other_stacks(self):
-        from cicpy.core.routeplan import save_plan, load_plan
-        lay = self._layout()
-        other = dict(ENTRY, stack="p_sw", net="VCP")
-        save_plan(lay, [dict(ENTRY), other], {"p_in", "p_sw"})
-        plan = load_plan(lay)
-        #- an `only` run over p_in alone rewrites p_in and must keep
-        #- p_sw's stored entry
-        save_plan(lay, [dict(ENTRY, opts="trunkx=2000")], {"p_in"},
-                  previous=plan)
-        plan2 = load_plan(lay)
-        self.assertEqual(plan2[("p_in", "VD1")]["opts"], "trunkx=2000")
-        self.assertIn(("p_sw", "VCP"), plan2)
+    def test_no_declaration_no_replay(self):
+        from cicpy.core.routeplan import wires_lookup
+        self.assertIsNone(wires_lookup({"name": "p_in"}, "abc"))
+        self.assertIsNone(wires_lookup(None, "abc"))
 
-    def test_no_file_no_plan(self):
-        from cicpy.core.routeplan import load_plan
-        self.assertIsNone(load_plan(self._layout()))
+    def test_block_formats_as_pasteable_python(self):
+        from cicpy.core.routeplan import format_wires_block
+        block = format_wires_block("p_in", WIRES, "abc123")
+        self.assertIn("wires = [", block)
+        self.assertIn("('VD1', 'M1', '||', 'trunkx=1000'),", block)
+        self.assertIn('wires_key = "abc123"', block)
+        #- the body must be legal python when indented under a class
+        src = "class p_in:\n" + "\n".join(
+            l for l in block.splitlines() if not l.startswith("#"))
+        ns = {}
+        exec(src, ns)
+        self.assertEqual(len(ns["p_in"].wires), 2)
+
+    def test_replay_claims_from_trunkx_and_pins(self):
+        from cicpy.core.routeplan import replay_claims
+
+        class R:
+            def __init__(s, x1, y1, x2, y2):
+                s.x1, s.y1, s.x2, s.y2 = x1, y1, x2, y2
+
+        pins = [R(900, 0, 1100, 400), R(900, 4000, 1100, 4400)]
+        claims = replay_claims(pins, "M1", "M1", "trunkx=1000")
+        self.assertEqual(claims, [(1000, 0, 4400)])
+        #- a wire off the pin layer claims a landing per pin too
+        claims = replay_claims(pins, "M2", "M1", "")
+        self.assertEqual(len(claims), 2)
 
 
 if __name__ == "__main__":

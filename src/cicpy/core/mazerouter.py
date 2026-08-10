@@ -1189,16 +1189,20 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         probe = TrackMap(layout)
         margin = 2 * max(probe.hpitch, probe.vpitch)
     routed, blocked = [], []
-    #- the maze router DECIDES; the decision is worth keeping. A valid
-    #- plan (placement-fingerprinted, see routeplan.py) replays each
-    #- net's resolved route command and skips the track maps and the
-    #- search -- which are the whole cost of this function.
-    from .routeplan import load_plan, save_plan
-    plan = load_plan(layout)
-    captured = []
-    visited_stacks = set()
-    if plan:
-        log.info(f"route plan: {len(plan)} entries eligible for replay")
+    #- the maze router DECIDES; the decision belongs in the DESIGN.
+    #- A subcell class in the sidecar declares `wires` (see
+    #- routeplan.py) and those nets replay -- no track map, no search,
+    #- which are the whole cost of this function. What still searches
+    #- has its conclusions written out as a paste-ready block.
+    from .routeplan import (stack_key, wires_lookup, replay_claims,
+                            write_suggestions)
+    spec_subcells = {e.get("name", ""): e
+                     for e in (getattr(layout, "_sidecar_spec", None)
+                               or {}).get("subcells", [])}
+    inst_by_name = {getattr(i, "instanceName", ""): i
+                    for i in layout.iterInstances()}
+    captured_by_stack = {}
+    keys_by_stack = {}
     #- before ANY search: the straps have to exist to be avoided
     draw_supplies_first(layout, log)
     by_stack = pins_by_stack(layout)
@@ -1220,10 +1224,6 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     for stack in sorted(by_stack):
         if wanted is not None and stack not in wanted:
             continue
-        #- every stack CONSIDERED this run has its plan entries
-        #- rewritten from this run's outcomes; an `only` run keeps the
-        #- other stacks' stored entries (save_plan merges)
-        visited_stacks.add(stack)
         #- WHICH NETS a stack routes depends on what the stack IS.
         #-
         #- As a region of a flat parent it routes only its INTERNAL
@@ -1270,9 +1270,17 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         subs = {n: rs for n, rs in by_stack[stack].items()
                 if len(rs) >= 2 and (n in internal or boundary)}
         if pycell_did:
-            #- its pycell has already spoken for the internal nets;
-            #- the boundary nets are still ours
-            subs = {n: rs for n, rs in subs.items() if n not in internal}
+            #- the hook's `return True` means ROUTED -- all of it, as
+            #- documented. This used to keep the boundary nets "ours"
+            #- and drew a second conductor over the hook's own rails;
+            #- through a MiM column whose A and B pin rects coincide,
+            #- that second trunk's pin cuts shorted the plates
+            #- (measured on LELOTEMP_CCMP). A hook that wants the
+            #- built-in router's help on boundary nets returns None
+            #- and routes only what it must.
+            log.info(f"{stack}: claimed by its pycell; boundary nets "
+                     f"included, not searching")
+            continue
         if not subs:
             continue
         insts_in_stack = sorted({n for n, st in member.items()
@@ -1313,30 +1321,38 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         #- the constrained net picks first.
         supplies = supply_nets(layout)
         order = sorted(subs, key=lambda n: (n not in supplies, n))
+        #- the sidecar's declared wires for THIS stack, fingerprint
+        #- gated against the stack's own placement
+        skey = stack_key(inst_by_name.get(n) for n in insts_in_stack)
+        keys_by_stack[stack] = skey
+        declared = wires_lookup(spec_subcells.get(stack), skey)
+        pin_layer_guess = None
         for net in order:
             rects = subs[net]
-            #- REPLAY: the plan already decided this net. Draw the
-            #- recorded command (route.py redraws it under today's
-            #- rules), restore its claims for any net that still has
-            #- to search, and skip the track map and the search.
-            entry = plan.get((stack, net)) if plan else None
-            if entry is not None:
-                if entry.get("kind") == "blocked":
-                    reason = entry.get("reason", "blocked by plan")
+            #- REPLAY: the sidecar already states this net's wire.
+            #- Draw it (route.py redraws under today's rules), restore
+            #- its claims for any net that still has to search, and
+            #- skip the track map and the search.
+            w = declared.get(net) if declared else None
+            if w is not None:
+                if str(w[1]) == "blocked":
+                    reason = str(w[2]) if len(w) > 2 else "blocked"
                     blocked.append((stack, net, reason))
-                    captured.append(entry)
-                    log.warning(f"{stack}/{net}: {reason} (planned)")
+                    log.warning(f"{stack}/{net}: {reason} (declared)")
                     continue
                 grp = groups.get(stack)
-                if grp is not None:
-                    grp.addConnectivityRoute(
-                        entry["layer"], f"^{re.escape(net)}$",
-                        entry["rtype"], entry.get("opts", ""),
-                        int(entry.get("cuts", 1)))
-                    for c in entry.get("claims", []) or []:
-                        claimed.add(tuple(int(v) for v in c))
+                if grp is not None and len(w) >= 4:
+                    _, wlayer, wtype, wopts = w[:4]
+                    grp.addConnectivityRoute(wlayer,
+                                             f"^{re.escape(net)}$",
+                                             wtype, wopts, 1)
+                    if pin_layer_guess is None:
+                        from .trackmap import TrackMap as _TM
+                        pin_layer_guess = _TM(layout).pin_layer
+                    for c in replay_claims(rects, wlayer,
+                                           pin_layer_guess, wopts):
+                        claimed.add(c)
                     routed.append((stack, net))
-                    captured.append(entry)
                     continue
             tm = TrackMap(layout, block_pins=True, extent=extent).build()
             r = MazeRouter(tm, net)
@@ -1384,12 +1400,8 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             f"trunkx={lane0}", 1)
                         claimed.add((lane0, min(ys0), max(ys0)))
                         routed.append((stack, net))
-                        captured.append({
-                            "stack": stack, "net": net, "kind": "route",
-                            "layer": tm.pin_layer, "rtype": "||",
-                            "opts": f"trunkx={lane0}", "cuts": 1,
-                            "claims": [[int(lane0), int(min(ys0)),
-                                        int(max(ys0))]]})
+                        captured_by_stack.setdefault(stack, []).append(
+                            (net, tm.pin_layer, "||", f"trunkx={lane0}"))
                         continue
                 #- Search for the shape, then hand it to route.py. The
                 #- search proves a path exists and says which layer and
@@ -1515,10 +1527,8 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                 f"the smallest {tm.pin_layer}-{layer} "
                                 f"pad is {w_cut}; it overhangs whatever "
                                 f"the placement")
-                new_claims = []
                 if trunk is not None:
                     claimed.add(trunk)
-                    new_claims.append([int(v) for v in trunk])
                 grp = groups.get(stack)
                 if grp is None:
                     raise Blocked(f"no group object for stack {stack}")
@@ -1535,23 +1545,19 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 if layer != tm.pin_layer:
                     pad_w = int(r.via_cost)
                     for pr in rects:
-                        c = (int((pr.x1 + pr.x2) // 2),
-                             int(pr.y1) - pad_w,
-                             int(pr.y2) + pad_w,
-                             int((pr.x2 - pr.x1) // 2 + pad_w // 2))
-                        claimed.add(c)
-                        new_claims.append(list(c))
+                        claimed.add((int((pr.x1 + pr.x2) // 2),
+                                     int(pr.y1) - pad_w,
+                                     int(pr.y2) + pad_w,
+                                     int((pr.x2 - pr.x1) // 2 + pad_w // 2)))
                 routed.append((stack, net))
-                captured.append({
-                    "stack": stack, "net": net, "kind": "route",
-                    "layer": layer, "rtype": rtype, "opts": opts or "",
-                    "cuts": 1, "claims": new_claims})
+                captured_by_stack.setdefault(stack, []).append(
+                    (net, layer, rtype, opts or ""))
             except Blocked as e:
                 blocked.append((stack, net, str(e)))
-                captured.append({"stack": stack, "net": net,
-                                 "kind": "blocked", "reason": str(e)})
+                captured_by_stack.setdefault(stack, []).append(
+                    (net, "blocked", str(e)))
                 log.warning(f"{stack}/{net}: {e}")
-    save_plan(layout, captured, visited_stacks, previous=plan)
+    write_suggestions(layout, captured_by_stack, keys_by_stack)
     return routed, blocked
 
 

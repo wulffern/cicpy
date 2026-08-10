@@ -1,105 +1,144 @@
-"""The route plan: the maze router's conclusions, replayable.
+"""Wires in the sidecar: the maze router's conclusions, hand-owned.
 
 The stack-level router spends its time DECIDING -- track maps and an
-A* search per net -- and then hands the drawing to route.py as one
-`addConnectivityRoute` command per net. The decision is worth keeping:
-this module persists, per (stack, net) and in routing order, the
-resolved command and the claims it made, in `<CELL>.routes.yaml`
-beside the design. The next build REPLAYS the commands and skips the
-search entirely; route.py redraws them under whatever the technology
-says today (measured: the search and its track maps were 23.9 s of a
-24.1 s build).
+A* search per net -- and hands the drawing to route.py as one
+`addConnectivityRoute` command per net (measured: the deciding was
+23.9 s of a 24.1 s build). The decision belongs in the design, where
+it can be read and edited: a subcell class in the `<CELL>.py` sidecar
+declares it as
 
-A plan is only as good as the placement it was computed against, so
-it carries a fingerprint over every instance's name, cell and
-position. Any placement change -- a reorder, a resize, a new fill --
-invalidates the whole plan and the next build searches again and
-rewrites it. Blocked nets are recorded too: replay reproduces the
-same outcome, it does not quietly retry what the search proved
-impossible.
+    class p_bias(Stack):
+        ...
+        wires = [
+            ("VD1", "M1", "||", "trunkx=233200"),
+            ("VBP", "M2", "-|--", ""),
+            ("VSU", "blocked", "pins share only -9600 of column..."),
+        ]
+        wires_key = "1a2b3c4d5e6f"
 
-Delete the file (or set CICPY_NO_ROUTEPLAN=1) to force a fresh
-search.
+Each 4-tuple is (net, layer, routeType, options) -- ordinary
+addConnectivityRoute arguments, edited like any other route -- and a
+("net", "blocked", reason) triple records a net the search proved
+unroutable, so replay reproduces the outcome instead of quietly
+retrying it. route_stack_level replays declared nets and searches
+only what is undeclared.
+
+The options are RESOLVED (a trunkx is a coordinate), so the block is
+only as good as the placement it was computed against: `wires_key`
+fingerprints the stack's own instances, and on any mismatch the
+whole block is ignored -- loudly -- and the router searches afresh.
+Every searched stack's conclusions are written to
+`<CELL>.routes.py` beside the design as a paste-ready block: run the
+build once, read that file, put the blocks into the sidecar.
+
+CICPY_NO_ROUTEPLAN=1 ignores every wires declaration.
 """
 import hashlib
 import logging
 import os
+import re
 
 log = logging.getLogger("RoutePlan")
 
-FORMAT = 1
+
+def stack_key(instances):
+    """The fingerprint of a stack's own placement: every member's
+    name, cell and position."""
+    rows = sorted((getattr(i, "instanceName", ""),
+                   getattr(i, "cell", ""), int(i.x1), int(i.y1))
+                  for i in instances if i is not None)
+    return hashlib.sha1(repr(rows).encode()).hexdigest()[:12]
 
 
-def plan_path(layout):
-    dirname = getattr(layout, "dirname", "") or ""
-    name = getattr(layout, "name", "") or ""
-    if not dirname or not name:
-        return None
-    return os.path.join(dirname, name + ".routes.yaml")
+def wires_lookup(entry, key):
+    """{net: wire tuple} of a subcell's declared wires, or None.
 
-
-def fingerprint(layout):
-    """Placement identity: every instance's name, cell and position."""
-    rows = []
-    for i in layout.iterInstances():
-        rows.append((getattr(i, "instanceName", ""),
-                     getattr(i, "cell", ""),
-                     int(i.x1), int(i.y1)))
-    blob = repr(sorted(rows)).encode()
-    return hashlib.sha1(blob).hexdigest()
-
-
-def load_plan(layout):
-    """The stored plan as {(stack, net): entry} in order, or None.
-
-    None when there is no file, the fingerprint does not match the
-    placement, or replay is disabled.
+    None when nothing is declared, replay is disabled, or the
+    declared wires_key does not match the placement fingerprint --
+    the last one warns, because silently replaying stale coordinates
+    is the one thing this must never do.
     """
-    if os.environ.get("CICPY_NO_ROUTEPLAN"):
+    wires = entry.get("wires") if entry else None
+    if not wires or os.environ.get("CICPY_NO_ROUTEPLAN"):
         return None
-    path = plan_path(layout)
-    if path is None or not os.path.exists(path):
-        return None
-    import yaml
-    try:
-        with open(path) as f:
-            doc = yaml.safe_load(f) or {}
-    except Exception as e:
-        log.warning(f"{path}: unreadable route plan: {e}")
-        return None
-    if doc.get("format") != FORMAT:
-        log.info(f"{path}: route plan format {doc.get('format')} "
-                 f"!= {FORMAT}; searching fresh")
-        return None
-    if doc.get("fingerprint") != fingerprint(layout):
-        log.info(f"{path}: placement changed since the plan was "
-                 f"computed; searching fresh")
+    declared = entry.get("wires_key", "")
+    if declared != key:
+        log.warning(f"{entry.get('name', '?')}: wires_key {declared!r} "
+                    f"does not match the placement ({key}); the wires "
+                    f"block is stale -- searching afresh")
         return None
     out = {}
-    for e in doc.get("routes", []) or []:
-        out[(e.get("stack", ""), e.get("net", ""))] = e
+    for w in wires:
+        if len(w) >= 2:
+            out[str(w[0])] = tuple(w)
     return out
 
 
-def save_plan(layout, entries, visited_stacks, previous=None):
-    """Write the plan: this run's entries, plus the previous plan's
-    entries for stacks this run did not visit (an `only` run must not
-    clobber the rest)."""
-    path = plan_path(layout)
-    if path is None or os.environ.get("CICPY_NO_ROUTEPLAN"):
+def replay_claims(rects, layer, pin_layer, opts):
+    """The claims a replayed wire makes, recomputed from its pins.
+
+    Only mixed stacks need them -- a net still searching must avoid
+    the lanes and landings a replayed neighbour has spoken for -- and
+    they are recomputable: the trunk from the resolved trunkx over
+    the pins' span, a landing per pin when the wire vias off the pin
+    layer.
+    """
+    claims = []
+    ys = ([int(r.y1) for r in rects] + [int(r.y2) for r in rects])
+    m = re.search(r"trunkx=(-?[0-9.]+)", opts or "")
+    if m and ys:
+        claims.append((int(float(m.group(1))), min(ys), max(ys)))
+    if layer and pin_layer and layer != pin_layer:
+        pad_w = 0
+        try:
+            from .cut import Cut
+            ct = (Cut.getInstance(pin_layer, layer, 1, 1)
+                  or Cut.getInstance(layer, pin_layer, 1, 1))
+            if ct is not None:
+                pad_w = int(max(ct.width(), ct.height()))
+        except Exception:
+            pass
+        for pr in rects:
+            claims.append((int((pr.x1 + pr.x2) // 2),
+                           int(pr.y1) - pad_w, int(pr.y2) + pad_w,
+                           int((pr.x2 - pr.x1) // 2 + pad_w // 2)))
+    return claims
+
+
+def format_wires_block(stack, entries, key):
+    """One subcell's conclusions as the paste-ready declaration."""
+    lines = [f"# class {stack}:",
+             "    wires = ["]
+    for e in entries:
+        lines.append("        " + repr(tuple(e)) + ",")
+    lines.append("    ]")
+    lines.append(f'    wires_key = "{key}"')
+    return "\n".join(lines)
+
+
+def write_suggestions(layout, captured_by_stack, keys_by_stack):
+    """The searched stacks' conclusions, as paste-ready blocks in
+    `<CELL>.routes.py` beside the design."""
+    if not captured_by_stack:
         return
-    keep = []
-    if previous:
-        keep = [e for (stack, _n), e in previous.items()
-                if stack not in visited_stacks]
-    import yaml
-    doc = {"format": FORMAT,
-           "fingerprint": fingerprint(layout),
-           "routes": keep + entries}
+    dirname = getattr(layout, "dirname", "") or ""
+    name = getattr(layout, "name", "") or ""
+    if not dirname or not name:
+        return
+    path = os.path.join(dirname, name + ".routes.py")
+    blocks = [f"#- ROUTER-GENERATED wires for {name}. Paste each block\n"
+              f"#- into its subcell class in {name}.py; the build then\n"
+              f"#- replays them instead of searching. This file is\n"
+              f"#- scratch output, rewritten by every searched build."]
+    for stack in sorted(captured_by_stack):
+        blocks.append(format_wires_block(
+            stack, captured_by_stack[stack], keys_by_stack.get(stack, "")))
     try:
         with open(path, "w") as f:
-            yaml.safe_dump(doc, f, sort_keys=False)
+            f.write("\n\n".join(blocks) + "\n")
     except Exception as e:
-        log.warning(f"{path}: could not write route plan: {e}")
+        log.warning(f"{path}: could not write wire suggestions: {e}")
         return
-    log.info(f"route plan: {len(entries)} entries written to {path}")
+    log.info(f"route conclusions for {len(captured_by_stack)} "
+             f"stack(s) written to {path}; paste the blocks into "
+             f"{name}.py to replay them")

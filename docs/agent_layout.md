@@ -107,22 +107,39 @@ hooks win when both exist, and stubs are no longer generated. A
 `routeInternal()` — implementing that method on the class is where a
 real diffpair/mirror router will land.
 
-### The route plan
+### Wires: the router's conclusions live in the sidecar
 
-The maze router decides; the decision is kept. The flat build writes
-`<CELL>.routes.yaml` beside the design -- per (stack, net), in
-routing order, the resolved `addConnectivityRoute` command the
-search arrived at, plus the claims it made. The next build REPLAYS
-those commands and skips the track maps and the search entirely
-(measured: 74 s to 0.7 s on LELOTEMP_BIAS_IBP, 15 s to 0.5 s on
-LELOTEMP_OTAR), while route.py redraws them under whatever the
-technology says today. The plan carries a placement fingerprint:
-any instance added, moved or renamed invalidates it and the next
-build searches fresh and rewrites it. Blocked nets are recorded and
-replayed as blocked. Delete the file or set CICPY_NO_ROUTEPLAN=1 to
-force a fresh search; promote any entry into the sidecar's
-beforeRoute hook verbatim (same layer/routeType/options triple) to
-make it a permanent, hand-owned statement.
+The maze router decides; the decision belongs in the design. A
+subcell class declares its stack-level routes as
+
+```python
+class p_bias(Stack):
+    ...
+    wires = [
+        ("VO", "M1", "||", "trunkx=304100"),
+        ("VBP", "blocked", "path is not a shape route.py can draw"),
+    ]
+    wires_key = "6485b44f0f02"
+```
+
+each 4-tuple ordinary `addConnectivityRoute` arguments -- edit them
+like any other route -- and a `("net", "blocked", reason)` triple a
+net the search proved unroutable, replayed as blocked rather than
+quietly retried. Declared nets REPLAY: no track map, no A* search,
+which are the whole cost of the flat build (measured: 74 s to 0.5 s
+on LELOTEMP_BIAS_IBP, 15 s to 0.5 s on LELOTEMP_OTAR, outputs byte
+identical). route.py still redraws under whatever the technology
+says today.
+
+The options are RESOLVED -- a trunkx is a coordinate -- so
+`wires_key` fingerprints the stack's own instances, and any
+placement change makes the block stale: the router says so, ignores
+it, searches afresh, and writes every searched stack's conclusions
+to `<CELL>.routes.py` beside the design as a paste-ready block. The
+loop is: build once, read `<CELL>.routes.py`, paste the blocks into
+the sidecar, build again. Undeclared nets always search, so a wires
+block may cover a stack partially. CICPY_NO_ROUTEPLAN=1 ignores
+every declaration.
 
 ### The flow
 

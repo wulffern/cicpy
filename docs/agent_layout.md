@@ -107,6 +107,23 @@ hooks win when both exist, and stubs are no longer generated. A
 `routeInternal()` — implementing that method on the class is where a
 real diffpair/mirror router will land.
 
+### The route plan
+
+The maze router decides; the decision is kept. The flat build writes
+`<CELL>.routes.yaml` beside the design -- per (stack, net), in
+routing order, the resolved `addConnectivityRoute` command the
+search arrived at, plus the claims it made. The next build REPLAYS
+those commands and skips the track maps and the search entirely
+(measured: 74 s to 0.7 s on LELOTEMP_BIAS_IBP, 15 s to 0.5 s on
+LELOTEMP_OTAR), while route.py redraws them under whatever the
+technology says today. The plan carries a placement fingerprint:
+any instance added, moved or renamed invalidates it and the next
+build searches fresh and rewrites it. Blocked nets are recorded and
+replayed as blocked. Delete the file or set CICPY_NO_ROUTEPLAN=1 to
+force a fresh search; promote any entry into the sidecar's
+beforeRoute hook verbatim (same layer/routeType/options triple) to
+make it a permanent, hand-owned statement.
+
 ### The flow
 
 ```bash

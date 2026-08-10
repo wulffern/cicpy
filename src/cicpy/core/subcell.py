@@ -781,7 +781,8 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
                 #- ring connects through. The strap is a source pin
                 #- and belongs to the device, not the boundary.
                 cands = bulks or inside
-                if re.search("VSS|GND", net):
+                from .mazerouter import supply_polarity
+                if supply_polarity(net) == "ground":
                     pr = min(cands, key=lambda r: r.y1)
                 else:
                     pr = max(cands, key=lambda r: r.y2)

@@ -55,6 +55,25 @@ def _load_cells(cicfile):
     return [c for c in design.get("cells", []) if isinstance(c, dict)]
 
 
+def _strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _run_cic(*args, includes=None):
+    """Run a `cicpy` subcommand and return its de-colored output.
+
+    THE one shell-out: command build, --I include forwarding, ANSI
+    stripping and the empty-output fallback used to be copy-pasted
+    per tool.
+    """
+    cmd = ["cicpy", *args]
+    for inc in (includes or []):
+        cmd += ["--I", inc]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    out = _strip_ansi(proc.stdout + proc.stderr)
+    return out.strip() or "(no output)"
+
+
 def _group_of(name):
     #- the ONE prefix rule (ciccreator's), shared with the router. The
     #- private regex here used r"(x\D+)", and \D matches '<': a bus
@@ -358,17 +377,17 @@ def _parse_connectivity(log_text):
     for l in log_text.split("\n"):
         m = re.search(r"WARNING: (?:ROUTE )?SHORT (component=\S+ nets=\S+.*)", l)
         if m and "ROUTE SHORT" not in l:
-            shorts.append(re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
+            shorts.append(_strip_ansi(m.group(1)))
         #- both kinds of open. Matching only split_components dropped
         #- every net whose pins reach nothing at all -- the commonest
         #- kind, and the one that reads as "almost done" when counted
         #- wrong: 13 opens were reported as 4
         m = re.search(r"WARNING: OPEN (net=\S+ (?:split_components|unmatched_anchors)=[^\x1b]+)", l)
         if m:
-            opens.append(re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
+            opens.append(_strip_ansi(m.group(1)))
         m = re.search(r"WARNING: {2}(BRIDGE [^\x1b]+)", l)
         if m and shorts:
-            shorts.append("  " + re.sub(r"\x1b\[[0-9;]*m", "", m.group(1)))
+            shorts.append("  " + _strip_ansi(m.group(1)))
     return shorts, opens
 
 
@@ -504,18 +523,14 @@ def tracks(cicfile: str, techfile: str, cell: str, layer: str = "",
               still usable at the other.
         includes: Other .cic files the design references.
     """
-    cmd = ["cicpy", "tracks", cicfile, techfile, cell]
+    args = ["tracks", cicfile, techfile, cell]
     if layer:
-        cmd += ["--layer", layer]
+        args += ["--layer", layer]
     if band:
-        cmd += ["--band", band]
+        args += ["--band", band]
     if free:
-        cmd += ["--free", free]
-    for inc in (includes or []):
-        cmd += ["--I", inc]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
-    return out.strip() or "(no output)"
+        args += ["--free", free]
+    return _run_cic(*args, includes=includes)
 
 
 @mcp.tool()
@@ -542,13 +557,8 @@ def blockers(cicfile: str, techfile: str, cell: str, net: str, box: str,
         box: "X1:X2:Y1:Y2", the column to test.
         includes: Other .cic files the design references.
     """
-    cmd = ["cicpy", "blockers", cicfile, techfile, cell,
-           "--net", net, "--box", box]
-    for inc in (includes or []):
-        cmd += ["--I", inc]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
-    return out.strip() or "(no output)"
+    return _run_cic("blockers", cicfile, techfile, cell,
+                    "--net", net, "--box", box, includes=includes)
 
 
 @mcp.tool()
@@ -575,13 +585,9 @@ def findroute(cicfile: str, techfile: str, cell: str, net: str,
         stop: "X,Y,LAYER".
         includes: Other .cic files the design references.
     """
-    cmd = ["cicpy", "findroute", cicfile, techfile, cell,
-           "--net", net, "--start", start, "--stop", stop]
-    for inc in (includes or []):
-        cmd += ["--I", inc]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    out = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout + proc.stderr)
-    return out.strip() or "(no output)"
+    return _run_cic("findroute", cicfile, techfile, cell,
+                    "--net", net, "--start", start, "--stop", stop,
+                    includes=includes)
 
 
 #- What each route option means. The names are checked against the

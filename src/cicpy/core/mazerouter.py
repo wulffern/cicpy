@@ -655,6 +655,24 @@ class MazeRouter:
 #- subproblems are routable when scoped to their own stack -- including
 #- a five-net series column that whole-cell routing could only get 3 of.
 
+def supply_polarity(net):
+    """'ground' | 'power' | None, by NAME -- in exactly one place.
+
+    WHICH nets are supplies is netlist-derived (supply_nets: the pin
+    every sibling ties to a rail). Which END of a column a supply
+    belongs to -- ground low, power high -- is not in the netlist,
+    so the naming convention decides, and every consumer asks here
+    rather than growing its own regex (write_stack_cells and Port
+    each had one, and they disagreed on GND).
+    """
+    n = (net or "").upper()
+    if re.search(r"VSS|GND", n):
+        return "ground"
+    if re.search(r"VDD|VCC|PWR", n):
+        return "power"
+    return None
+
+
 def stack_of(instance_name):
     """The stack an instance belongs to.
 

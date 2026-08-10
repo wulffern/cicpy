@@ -1013,34 +1013,10 @@ class OrthogonalLayerRoute(Route):
             "debug_internal": getattr(self, "debug_internal", False),
         }
 
-    def _rects_touch_or_overlap(self, rect1, rect2):
-        if rect1 is None or rect2 is None:
-            return False
-        if rect1.x2 < rect2.x1 or rect2.x2 < rect1.x1:
-            return False
-        if rect1.y2 < rect2.y1 or rect2.y2 < rect1.y1:
-            return False
-        return True
-
-    def _layers_directly_connect(self, layer1, layer2):
-        if layer1 == layer2:
-            return True
-        rules = Rules.getInstance()
-        if rules is None:
-            return False
-        layer_obj_1 = rules.getLayer(layer1)
-        layer_obj_2 = rules.getLayer(layer2)
-        if layer_obj_1 is None or layer_obj_2 is None:
-            return False
-        if getattr(layer_obj_1, "next", "") == layer2:
-            return True
-        if getattr(layer_obj_1, "previous", "") == layer2:
-            return True
-        if getattr(layer_obj_2, "next", "") == layer1:
-            return True
-        if getattr(layer_obj_2, "previous", "") == layer1:
-            return True
-        return False
+    #- _rects_touch_or_overlap / _layers_directly_connect lived here
+    #- until 2026-08-10: never called, and a stale fork of the real
+    #- connectivity predicates on LayoutCell (which normalise layer
+    #- aliases and handle cut GDS aliasing; these compared raw names).
 
     def _collapse_access_rects(self):
         collapsed = []

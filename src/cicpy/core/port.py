@@ -57,10 +57,8 @@ class Port(Rect):
 
         self.sigclass = "signal"
 
-        if(re.search("VSS",self.name)):
-            self.sigclass = "ground"
-        elif(re.search("VDD",self.name)):
-            self.sigclass = "power"
+        from .mazerouter import supply_polarity
+        self.sigclass = supply_polarity(self.name) or "signal"
 
         if(rect):
             self.set(rect)

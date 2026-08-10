@@ -19,54 +19,72 @@ are expensive to rediscover.
 
 Everything below this section still works and is still the reference
 for the primitives, but since 2026-08 the way to lay out a large
-analog cell is **hierarchical and declarative**: one YAML sidecar
-beside the design holds the whole truth, the cell is built as
-published subcells plus an assembled top, and there is **no per-cell
-python at all**. `LELOTEMP_OTAR` in lelo_temp_sky130a is the worked
-example — eight subcells and the top, all DRC clean and LVS
-"Circuits match uniquely", from one `LELOTEMP_OTAR.yaml`.
+analog cell is **hierarchical and declarative**: one python sidecar
+beside the design holds the whole truth — subcells as classes, the
+floorplan, the supplies, the assembled top, and any per-subcell
+routing hooks, all in `<CELL>.py`. `LELOTEMP_OTAR` in
+lelo_temp_sky130a is the worked example — eight subcells and the
+top, all DRC clean and LVS "Circuits match uniquely", from one
+`LELOTEMP_OTAR.py`. (The sidecar was YAML for a week; it is python
+now because the escape-hatch hooks belong beside the declarations
+they serve, regexes lose their quoting rules, and a typo'd subcell
+name is a NameError at import instead of a silent no-match.)
 
-### One file, four stanzas
+### One file, four declarations
 
-`design/<LIB>/<CELL>.yaml`:
+`design/<LIB>/<CELL>.py`:
 
-```yaml
-place: {groupbreak: 6, channel: 6}     # flat-build placement knobs
+```python
+from cicpy.sidecar import Stack, Mirror, Hier
 
-subcells:                              # what publishes as a cell
-  - name: p_bias
-    match: '^(xba\d+|xstack_p_bias_(top|bot)|xfill_p_bias_\d+)$'
-    type: stack                        # stack | diffpair | mirror
-    group: pmos
-    channel: bias                      # register a named vertical channel
-    order: ['xba1', 'xba8', 'xba2', 'xba6', 'xba7', 'xba3']
-  - name: r_deg
-    match: '^(xd2<\d+>|...)$'
-    type: stack
-    fill: false                        # no dummy fill for resistors
+place = {"groupbreak": 6, "channel": 6}   # flat-build placement knobs
 
-rows:                                  # the floorplan, bottom row first
-  - [n_load_a, n_load_b, n_mirr, r_deg]
-  - [p_in_a, p_in_b, p_bias, p_sw]
+class p_bias(Stack):                      # class name = subcell name;
+    match = r'^(xba\d+|xstack_p_bias_(top|bot)|xfill_p_bias_\d+)$'
+    group = "pmos"                        # base = stack|diffpair|mirror
+    channel = "bias"                      # register a named vertical channel
+    order = ['xba1', 'xba8', 'xba2', 'xba6', 'xba7', 'xba3']
 
-supplies:                              # rings + strap connections
-  - {net: VDD_1V8, ring: t, strap: top, guard_exclude: '^xbs6$'}
-  - {net: VSS,     ring: b, strap: bottom, strap_exclude: '^xd2<[1-9]'}
+    def beforeRoute(layout, entry):       # optional hooks, WITHOUT self:
+        ...                               # route what the recipe cannot
+        return None                       # True = subcell fully routed
 
-hier:                                  # the assembled top
-  channel: 8                           # um between the rows
-  routes:                              # one ChannelRoute per crossing net
-    - {net: VCP, track: 6,  drops: [[n_mirr, M2, left], [p_bias, M2, right]]}
-    - {net: VS,  track: 14, layer: M4, drops: [[r_deg, M4, left]]}
+class r_deg(Stack):
+    match = r'^(xd2<\d+>|...)$'
+    fill = False                          # no dummy fill for resistors
+
+rows = [                                  # the floorplan, bottom row first;
+    [n_load_a, n_load_b, n_mirr, r_deg],  # the classes themselves, so a
+    [p_in_a, p_in_b, p_bias, p_sw],       # typo is a NameError
+]
+
+supplies = [                              # rings + strap connections
+    {"net": "VDD_1V8", "ring": "t", "strap": "top", "guard_exclude": "^xbs6$"},
+    {"net": "VSS", "ring": "b", "strap": "bottom", "strap_exclude": "^xd2<[1-9]"},
+]
+
+class hier(Hier):                         # the assembled top
+    channel = 8                           # um between the rows
+    routes = [                            # one ChannelRoute per crossing net
+        {"net": "VCP", "track": 6, "drops": [[n_mirr, "M2", "left"],
+                                             [p_bias, "M2", "right"]]},
+        {"net": "VS", "track": 14, "layer": "M4",
+         "drops": [[r_deg, "M4", "left"]]},
+    ]
 ```
 
-The recipes that execute this live in cicpy
-(`core/sidecarcell.py`: `SidecarPycell` for the flat build,
-`AssemblyPycell` for the top; publication in `core/subcell.py`). A
-`<CELL>.py` beside the yaml still wins if one exists — the escape
-hatch for a cell the recipe cannot say — and per-STACK pycells
-(`<SUBCELLNAME>.py`, e.g. a hand-routed switch ladder) run between
-afterPlace and beforeRoute exactly as before.
+`cicpy/sidecar.py` compiles the module into a spec dict; the recipes
+that execute it live in `core/sidecarcell.py` (`SidecarPycell` for
+the flat build, `AssemblyPycell` for the top; publication in
+`core/subcell.py`). Detection is by content: a `<CELL>.py` defining
+`Subcell` classes is the sidecar; a module with module-level hooks
+and `data` is a classic pycell, unchanged — the escape hatch for a
+cell the recipe cannot say. Per-subcell hooks (`beforePlace`,
+`beforeRoute`, legacy `route`) live on the classes and run between
+afterPlace and beforeRoute; a separate `<SUBCELLNAME>.py` beside the
+design still works when a subcell's routing outgrows the sidecar
+file, but the class hooks win when both exist, and stubs are no
+longer generated.
 
 ### The flow
 

@@ -19,57 +19,47 @@ from .mazerouter import (MazeRouter, stack_of, pins_by_stack,
 
 
 def subcell_spec(layout):
-    """The design's subcell declarations, from its sidecar YAML.
+    """The design's subcell declarations, from its sidecar module.
 
-    ``<CELL>.yaml`` beside the pycell -- the cell's one declarative
-    sidecar, of which ``subcells:`` is the first key and not the last:
-
-        subcells:
-          - name: p_in
-            match: '^(xbl4|xbl5|xbl[12]<\\d+>)$'
-            type: diffpair          # stack | diffpair | mirror
-
-    SINGLE quotes around the regex. In YAML double quotes, \\d is an
-    escape sequence and the whole file fails to parse -- loudly, with
-    the line number, but still: single quotes pass a regex through
-    untouched.
+    ``<CELL>.py`` beside the design -- the cell's one declarative
+    sidecar (see cicpy/sidecar.py): a Subcell subclass per subcell,
+    its name the class name, its membership the `match` regex, its
+    kind the base class (Stack | DiffPair | Mirror).
 
     Declarative on purpose. A subcell is a statement about the DESIGN
     -- which devices form a unit, and what kind of unit -- and a
-    statement belongs in data, where it can be read without running
-    anything, rather than in whichever pycell hook happens to build the
-    groups. The type is the router's hint: a diffpair wants its halves
-    routed symmetrically, a mirror wants gates bussed, a stack wants
-    the series links. Only the stack router exists today, and the
-    others say so instead of routing wrongly.
+    statement belongs in a declaration that can be read without
+    running anything, rather than in whichever pycell hook happens to
+    build the groups. The type is the router's hint: a diffpair wants
+    its halves routed symmetrically, a mirror wants gates bussed, a
+    stack wants the series links. Only the stack router exists today,
+    and the others say so instead of routing wrongly.
 
-    Returns [{name, match (compiled), type}], or [] when no file.
+    The spec is read off the layout when SidecarPycell already loaded
+    it (one truth, compiled once), and from the module on disk
+    otherwise. Returns [{name, match (compiled), type}], or [].
     """
-    import os
-    import yaml
-    dirname = getattr(layout, "dirname", "") or ""
-    path = os.path.join(dirname, f"{layout.name}.yaml")
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path) as fi:
-            doc = yaml.safe_load(fi) or {}
-    except Exception as e:
-        logging.getLogger("MazeRouter").error(f"{path}: {e}")
+    log = logging.getLogger("MazeRouter")
+    spec = getattr(layout, "_sidecar_spec", None)
+    if spec is None:
+        from cicpy.sidecar import load_sidecar_spec
+        dirname = getattr(layout, "dirname", "") or ""
+        spec = load_sidecar_spec(dirname, layout.name)
+    if not spec:
         return []
     out = []
-    for entry in doc.get("subcells") or []:
+    for entry in spec.get("subcells") or []:
         name = str(entry.get("name", "") or "")
         match = str(entry.get("match", "") or "")
         if not name or not match:
-            logging.getLogger("MazeRouter").warning(
-                f"{path}: a subcell needs both name and match: {entry}")
+            log.warning(f"{layout.name} sidecar: a subcell needs both "
+                        f"name and match: {entry}")
             continue
         try:
             rx = re.compile(match)
         except re.error as e:
-            logging.getLogger("MazeRouter").error(
-                f"{path}: {name}: bad match regex: {e}")
+            log.error(f"{layout.name} sidecar: {name}: bad match "
+                      f"regex: {e}")
             continue
         out.append({"name": name, "match": rx,
                     "type": str(entry.get("type", "stack") or "stack")})
@@ -82,7 +72,7 @@ def subcell_membership(layout):
     A SUBCELL is whatever the design wants to publish as a cell of its
     own. Three ways to be one, checked in this order:
 
-      1. an entry in ``<CELL>.yaml`` whose ``match`` regex
+      1. an entry in the ``<CELL>.py`` sidecar whose ``match`` regex
          takes the instance name. First entry wins, so order the file
          from specific to general. See subcell_spec.
       2. any CellGroup with ``subcell = True`` set on it.
@@ -148,7 +138,7 @@ def subcell_membership(layout):
                 _walk(c)
 
     #- the groups fill in around the sidecar, never over it: _claim
-    #- respects an instance the YAML already took
+    #- respects an instance the sidecar already took
     for grp in getattr(layout, "cellgroups", []) or []:
         _walk(grp)
     return member
@@ -313,7 +303,7 @@ def plan_subcells(layout, parent_name=None):
     #- found
     spec = subcell_spec(layout)
     types = {e["name"]: e["type"] for e in spec}
-    #- A DESIGN THAT DECLARES, DECLARES EVERYTHING. Once a <CELL>.yaml
+    #- A DESIGN THAT DECLARES, DECLARES EVERYTHING. Once a sidecar
     #- exists the decomposition is a stated decision, and a subcell that
     #- appears anyway -- found by the group walk, not the file -- is the
     #- statement being incomplete. Say so, with the entry that would
@@ -327,7 +317,7 @@ def plan_subcells(layout, parent_name=None):
         if loose:
             log = logging.getLogger("MazeRouter")
             log.warning(
-                f"{layout.name}.yaml claims no subcell for "
+                f"{layout.name} sidecar claims no subcell for "
                 f"{len(loose)} instances: {', '.join(loose[:8])}"
                 + (" ..." if len(loose) > 8 else ""))
     out = []
@@ -472,13 +462,16 @@ def design_of(layout):
 
 
 def _run_stack_pycell(layout, entry, log, cell=None):
-    """Run <STACKCELL>.py if the design ships one.
+    """Run this subcell's own hooks, from the sidecar class or a file.
 
-    Divide and conquer, using the mechanism that already exists: a cell
-    can have a pycell beside it, so a stack cell can too. Same lookup as
-    cic.py's -- dirname + name + ".py" on sys.path -- so a stack's
-    routing lives in its own file rather than as another paragraph in
-    the parent's.
+    Two places a subcell's hooks can live, tried in this order:
+
+      1. its Subcell class in the <CELL>.py sidecar -- beforePlace /
+         beforeRoute / route written inline, without self, beside the
+         declaration they belong to. See cicpy/sidecar.py.
+      2. its own <STACKCELL>.py beside the design -- same lookup as
+         cic.py's, dirname + name + ".py" on sys.path. The escape
+         hatch for a subcell whose routing outgrows the sidecar file.
 
     The hook is `route(layout, entry)`: the parent the stack came from,
     and its plan entry. The parent is passed because the node graph
@@ -491,13 +484,20 @@ def _run_stack_pycell(layout, entry, log, cell=None):
     publication time, which is exactly the bug: by then route() has run
     and nothing the pycell adds will be drawn.
     """
-    import inspect as _inspect
     import importlib
     import os
     import sys
     #- the plan carries the name; the CELL does not exist yet when this
     #- runs, and that is the point
     name = entry["name"]
+    cls = (getattr(layout, "_sidecar_classes", None) or {}).get(
+        entry["stack"])
+    if cls is not None:
+        from cicpy.sidecar import hooks_of
+        hooks = hooks_of(cls)
+        if hooks:
+            return _invoke_stack_hooks(hooks, name, layout, entry,
+                                       log, cell)
     dirname = getattr(layout, "dirname", "") or ""
     path = os.path.join(dirname, name + ".py")
     if not os.path.exists(path):
@@ -510,27 +510,36 @@ def _run_stack_pycell(layout, entry, log, cell=None):
     except Exception as e:
         log.error(f"{name}: pycell failed to import: {e}")
         return False
-    #- The hooks, in the order of the standard pycell contract:
-    #-
-    #-   beforePlace(layout, entry)   adjust the subcell's own stack;
-    #-                                return value ignored
-    #-   beforeRoute(layout, entry)   route the subcell's internal
-    #-                                nets; return True to mean "this
-    #-                                subcell is ROUTED, the built-in
-    #-                                router must not touch it". A
-    #-                                stub that returns None leaves the
-    #-                                built-in router in charge.
-    #-   route(cell, layout, entry)   the legacy name; its existence
-    #-                                alone claims the subcell, because
-    #-                                the one design shipping it relies
-    #-                                on exactly that.
-    bp = getattr(mod, "beforePlace", None)
+    hooks = {h: getattr(mod, h) for h in
+             ("beforePlace", "beforeRoute", "route")
+             if getattr(mod, h, None) is not None}
+    return _invoke_stack_hooks(hooks, name, layout, entry, log, cell)
+
+
+def _invoke_stack_hooks(hooks, name, layout, entry, log, cell=None):
+    """Call a subcell's hooks by the standard pycell contract:
+
+      beforePlace(layout, entry)   adjust the subcell's own stack;
+                                   return value ignored
+      beforeRoute(layout, entry)   route the subcell's internal
+                                   nets; return True to mean "this
+                                   subcell is ROUTED, the built-in
+                                   router must not touch it". A
+                                   stub that returns None leaves the
+                                   built-in router in charge.
+      route(cell, layout, entry)   the legacy name; its existence
+                                   alone claims the subcell, because
+                                   the one design shipping it relies
+                                   on exactly that.
+    """
+    import inspect as _inspect
+    bp = hooks.get("beforePlace")
     if bp is not None:
         try:
             bp(layout, entry)
         except Exception as e:
             log.error(f"{name}: pycell beforePlace() raised: {e}")
-    br = getattr(mod, "beforeRoute", None)
+    br = hooks.get("beforeRoute")
     if br is not None:
         try:
             handled = bool(br(layout, entry))
@@ -540,7 +549,7 @@ def _run_stack_pycell(layout, entry, log, cell=None):
         except Exception as e:
             log.error(f"{name}: pycell beforeRoute() raised: {e}")
             return False
-    fn = getattr(mod, "route", None)
+    fn = hooks.get("route")
     if fn is None:
         return False
     try:

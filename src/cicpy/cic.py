@@ -389,32 +389,26 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     if(os.path.exists(lcell.dirname + lcell.name + ".py")):
         sys.path.append(lcell.dirname)
         pycell = importlib.import_module(lcell.name)
-        if(hasattr(pycell,"data")):
-            pycellData = pycell.data
-    else:
-        #- no pycell: the sidecar may declare the whole placement.
-        #- A .py wins when it exists -- a file is for the cell that
-        #- needs something the recipe cannot say.
-        yamlfile = lcell.dirname + lcell.name + ".yaml"
-        if os.path.exists(yamlfile):
-            import yaml as _yaml
+        #- detection is by CONTENT: a module declaring Subcell
+        #- classes is the declarative sidecar and the recipe executes
+        #- it; any other module is a classic pycell, hooks and data
+        #- as ever. See cicpy/sidecar.py.
+        from cicpy.sidecar import spec_from_module
+        _spec = spec_from_module(pycell)
+        if _spec is not None:
             from cicpy.core.sidecarcell import SidecarPycell, has_placement
-            with open(yamlfile) as _f:
-                _spec = _yaml.safe_load(_f) or {}
             if has_placement(_spec):
                 pycell = SidecarPycell(_spec)
-                pycellData = pycell.data
-        elif lcell.name.endswith("_HIER"):
-            #- the scaffold cell: assembled from the base cell's
-            #- sidecar when it carries a `hier:` stanza
-            yamlfile = lcell.dirname + lcell.name[:-5] + ".yaml"
-            if os.path.exists(yamlfile):
-                import yaml as _yaml
-                from cicpy.core.sidecarcell import AssemblyPycell
-                with open(yamlfile) as _f:
-                    _spec = _yaml.safe_load(_f) or {}
-                if "hier" in _spec:
-                    pycell = AssemblyPycell(_spec)
+        if(hasattr(pycell,"data")):
+            pycellData = pycell.data
+    elif lcell.name.endswith("_HIER"):
+        #- the scaffold cell: assembled from the base cell's sidecar
+        #- when it carries a `hier` declaration
+        from cicpy.sidecar import load_sidecar_spec
+        _spec = load_sidecar_spec(lcell.dirname, lcell.name[:-5])
+        if _spec and "hier" in _spec:
+            from cicpy.core.sidecarcell import AssemblyPycell
+            pycell = AssemblyPycell(_spec)
 
     lcell.strict_route = strict
     lcell.layout(pycell,pycellData)
@@ -569,7 +563,7 @@ with `layout` the parent LayoutCell and `entry` this subcell's plan:
     entry["instances"]  the instance names in this subcell
     entry["ports"]      its boundary nets
     entry["internal"]   nets wholly inside it
-    entry["type"]       stack | diffpair | mirror, from {name.split("_")[0]}.yaml
+    entry["type"]       stack | diffpair | mirror, from the sidecar
 """
 
 
@@ -643,7 +637,10 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
             names_list.remove(nm)
     write_stack_cells(lcell,design=design,plan=plan,log=log)
 
-    _ensure_subcell_pycells(lcell, plan, log)
+    #- a sidecar-driven cell keeps its hooks as class methods in the
+    #- one sidecar file; stubs on disk would only shadow them
+    if not getattr(lcell, "_sidecar_spec", None):
+        _ensure_subcell_pycells(lcell, plan, log)
 
     names = [e["name"] for e in plan]
     keep = _keep_only(names)
@@ -771,18 +768,14 @@ def _ensure_default_pycell(dirname, cell):
         return
 
     #- a sidecar that declares the placement IS the pycell: writing a
-    #- template over it would shadow the recipe with empty hooks
+    #- template over the scaffold name would shadow the recipe with
+    #- empty hooks. For <BASE>_HIER the sidecar is <BASE>.py.
     base = cell[:-5] if cell.endswith("_HIER") else cell
-    yamlfile = os.path.join(dirname, base + ".yaml")
-    if os.path.exists(yamlfile):
-        try:
-            import yaml as _yaml
-            with open(yamlfile) as _f:
-                _spec = _yaml.safe_load(_f) or {}
-            if "rows" in _spec or "hier" in _spec:
-                return
-        except Exception:
-            pass
+    if base != cell:
+        from cicpy.sidecar import load_sidecar_spec
+        spec = load_sidecar_spec(dirname, base)
+        if spec and ("rows" in spec or "hier" in spec):
+            return
 
     os.makedirs(dirname, exist_ok=True)
     with open(pycell_path, "w") as fo:

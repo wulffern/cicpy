@@ -1,19 +1,21 @@
 """Placement from the sidecar alone.
 
-The <CELL>.yaml sidecar already declares WHAT the subcells are; with
-`order` per subcell and `rows` for the floorplan it declares the whole
-placement, and this module is the recipe that executes it:
+The <CELL>.py sidecar (see cicpy/sidecar.py) declares WHAT the
+subcells are; with `order` per subcell and `rows` for the floorplan
+it declares the whole placement, and this module is the recipe that
+executes the compiled spec:
 
     stacks (in declared member order) -> taps and dummy fill ->
     rows abutted left to right, stacked bottom to top -> a routing
     channel between the rows and one per column -> supply rings and
     guard connections -> the stack-level router -> publish.
 
-A <CELL>.py pycell still wins when it exists: a file is for the cell
-that needs something the recipe cannot say. The sidecar is for the
-cell that does not.
+A classic <CELL>.py pycell -- module-level hooks and `data`, no
+Subcell classes -- still works exactly as before, for the cell that
+needs something the recipe cannot say.
 
-Schema (all placement keys optional; their presence enables this):
+Spec shape (all placement keys optional; their presence enables
+this; cicpy/sidecar.py compiles the module into exactly this dict):
 
     place:      {groupbreak: 6, channel: 6}          # channel in um
     subcells:
@@ -50,6 +52,11 @@ class SidecarPycell:
     # -- hooks -------------------------------------------------------
 
     def beforePlace(self, layout):
+        #- publication (subcell_spec) and the per-stack hook dispatch
+        #- (_run_stack_pycell) read the spec off the layout: one
+        #- truth, already compiled from the sidecar module
+        layout._sidecar_spec = self.spec
+        layout._sidecar_classes = self.spec.get("classes", {})
         p = self.spec.get("place", {})
         layout.noPowerRoute = True
         layout.place_xspace = [p.get("xspace", 0)]
@@ -167,8 +174,8 @@ class AssemblyPycell:
     crossing net from the `hier: routes:` table -- a ChannelRoute
     per net with addRouteConnection drops -- plus the supply rings
     with addPowerConnection. The scaffold cell <CELL>_HIER finds
-    this when <CELL>.yaml carries a `hier:` stanza and no
-    <CELL>_HIER.py exists.
+    this when the <CELL>.py sidecar carries a `hier` declaration and
+    no <CELL>_HIER.py exists.
     """
 
     def __init__(self, spec):

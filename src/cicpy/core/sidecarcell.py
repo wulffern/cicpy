@@ -35,6 +35,8 @@ this; cicpy/sidecar.py compiles the module into exactly this dict):
 import re
 import logging
 
+from .layoutcell import LayoutCell
+
 log = logging.getLogger("SidecarPycell")
 
 
@@ -162,72 +164,111 @@ class SidecarPycell:
         write_stack_cells(layout, log=layout.log)
 
 
-class AssemblyPycell:
-    """The hierarchical top from the same sidecar.
+class HierLayoutCell(LayoutCell):
+    """The hierarchical top from the same sidecar, as a real cell.
 
-    Places the published subcells at their published offsets (rows
-    reused from the flat declaration), opens the assembly channel,
-    registers the channels by the declared names, and routes every
-    crossing net from the `hier: routes:` table -- a ChannelRoute
-    per net with addRouteConnection drops -- plus the supply rings
-    with addPowerConnection. The scaffold cell <CELL>_HIER finds
-    this when the <CELL>.py sidecar carries a `hier` declaration and
-    no <CELL>_HIER.py exists.
+    place() IS the assembly: the published subcells are tiled row by
+    row straight from the sidecar spec, each row keeping its published
+    relative x-offsets -- the published coordinates are the
+    arrangement DRC has already accepted, and the guard rings
+    overhang, so re-spacing columns from bounding boxes would tear the
+    overlap-tiling apart. No framework pre-placement, no post-hoc
+    moveTo correction. route() lays every crossing net from the
+    `hier: routes:` table -- a ChannelRoute per net with
+    addRouteConnection drops -- plus the supply rings, then hands over
+    to the ordinary router.
+
+    The scaffold cell <CELL>_HIER is built as this class (via
+    Design.registerLayoutCellClass) when the <CELL>.py sidecar
+    carries a `hier` declaration and no <CELL>_HIER.py exists; a
+    design points the sidecar at its own subclass with
+    `hier_cell = MyHierCell`.
     """
 
-    def __init__(self, spec):
-        self.spec = spec
+    def __init__(self, spec=None):
+        super().__init__()
+        self.spec = spec or {}
+        self.noPowerRoute = True
 
-    def beforePlace(self, layout):
-        layout.noPowerRoute = True
-        layout.place_xspace = [0]
-        layout.place_yspace = [0]
-        layout.place_groupbreak = [len(self.spec.get("rows", [[]])[0])]
+    def place(self):
+        spec = self.spec
+        hier = spec.get("hier", {})
+        channel = hier.get("channel", 8) * self.um
+        rows = [["x" + n for n in row] for row in spec.get("rows", [])]
 
-    def afterPlace(self, layout):
-        hier = self.spec.get("hier", {})
-        channel = hier.get("channel", 8) * layout.um
-        rows = [["x" + n for n in row] for row in self.spec.get("rows", [])]
+        insts = {}
+        for cktInst in self.ckt.orderInstancesByGroup():
+            insts[cktInst.name] = cktInst
 
-        #- Within a row the cells keep their PUBLISHED relative
-        #- offsets: they overlap-tile, and the published coordinates
-        #- are the arrangement DRC has already accepted. The painted
-        #- reference needs xcell = -origin, the ports already land.
+        #- THE FLOORPLAN FIRST, from the published boxes alone. Within
+        #- a row the cells keep their PUBLISHED relative offsets. A
+        #- published cell's stored box is its FIXED_BBOX in the
+        #- parent's coordinates (the drawn geometry is normalised to
+        #- the origin at load), so the box origin carries both the
+        #- offset within the row and, negated, the painted reference:
+        #- the .mag on disk is still parent-absolute, and the use
+        #- record needs xcell = -origin to land it. The ports live on
+        #- the normalised geometry and land by placement alone.
+        slots = {}
         y = 0
         row_tops = []
         for row in rows:
             anchor_x, tallest = None, 0
             for nm in row:
-                inst = layout.getInstanceFromInstanceName(nm)
-                if inst is None:
+                cktInst = insts.get(nm)
+                if cktInst is None:
+                    self.log.warning(f"place: {nm} declared in rows "
+                                     f"but not in the netlist; skipped")
                     continue
-                sub = inst.layoutcell
+                sub = self.parent.getLayoutCell(cktInst.subcktName)
+                if sub is None:
+                    raise ValueError(f"place: no published cell "
+                                     f"{cktInst.subcktName} for {nm}")
                 if anchor_x is None:
                     anchor_x = int(sub.x1)
-                inst.moveTo(int(sub.x1) - anchor_x, y)
-                inst.xcell = -int(sub.x1)
-                inst.ycell = -int(sub.y1)
-                tallest = max(tallest, int(inst.height()))
+                slots[nm] = (int(sub.x1) - anchor_x, y,
+                             -int(sub.x1), -int(sub.y1))
+                tallest = max(tallest, int(sub.y2 - sub.y1))
             row_tops.append(y + tallest)
             y += tallest + channel
-        layout.updateBoundingRect()
 
-        if len(rows) >= 2:
-            top_inst = layout.getInstanceFromInstanceName(rows[1][0])
-            layout.addRoutingChannel("mid", row_tops[0], int(top_inst.y1))
-        for e in self.spec.get("subcells", []):
-            inst = layout.getInstanceFromInstanceName("x" + e["name"])
+        #- then place in NETLIST order -- everything downstream that
+        #- iterates instances (drops, painting) sees that order, and
+        #- the build stays deterministic against the flat one
+        for cktInst in self.ckt.orderInstancesByGroup():
+            s = slots.get(cktInst.name)
+            if s is None:
+                #- a netlist instance the rows do not claim still has
+                #- to exist for LVS; stack the strays above, loudly
+                self.log.warning(f"place: {cktInst.name} not in any "
+                                 f"row; placed above the floorplan")
+                inst = self.addInstance(cktInst, 0, y)
+                y += int(inst.height()) + channel
+                continue
+            x, ry, xcell, ycell = s
+            inst = self.addInstance(cktInst, x, ry)
+            inst.xcell = xcell
+            inst.ycell = ycell
+
+        self.updateBoundingRect()
+
+        #- the channel between the rows, and one per column, by name
+        if len(rows) >= 2 and rows[1] and rows[1][0] in slots:
+            self.addRoutingChannel("mid", row_tops[0],
+                                   slots[rows[1][0]][1])
+        for e in spec.get("subcells", []):
+            inst = self.getInstanceFromInstanceName("x" + e["name"])
             if inst is not None and e.get("channel"):
-                layout.addRoutingChannel(e["channel"], int(inst.x1),
-                                         int(inst.x2), horizontal=False)
+                self.addRoutingChannel(e["channel"], int(inst.x1),
+                                       int(inst.x2), horizontal=False)
 
-    def beforeRoute(self, layout):
+    def route(self):
         hier = self.spec.get("hier", {})
         for r in hier.get("routes", []):
             net = r["net"]
-            layout.addChannelRoute(r.get("bar_layer", "M3"), net,
-                                   r.get("channel", "mid"),
-                                   r.get("track", 0))
+            self.addChannelRoute(r.get("bar_layer", "M3"), net,
+                                 r.get("channel", "mid"),
+                                 r.get("track", 0))
             #- drops are DISCOVERED: every subcell instance exposing
             #- the net gets one, with the route's defaults; the
             #- `drops:` list only overrides -- layer, align, cuts,
@@ -246,22 +287,23 @@ class AssemblyPycell:
                     if len(d) > 2: o["align"] = d[2]
                     if "nopin" in d[3:]: o["pin_cut"] = False
                     overrides[d[0]] = o
-            for inst in layout.iterInstances():
+            for inst in self.iterInstances():
                 nm = getattr(inst, "instanceName", "")
                 if net not in getattr(inst, "instancePorts", {}):
                     continue
                 o = dict(defaults)
                 o.update(overrides.get(nm.lstrip("x"), {}))
-                layout.addRouteConnection(net, f"^{re.escape(nm)}$", "t",
-                                          o["layer"], align=o["align"],
-                                          cuts=o["cuts"],
-                                          pin_cut=o["pin_cut"])
-            layout.trimChannelRoute(net)
+                self.addRouteConnection(net, f"^{re.escape(nm)}$", "t",
+                                        o["layer"], align=o["align"],
+                                        cuts=o["cuts"],
+                                        pin_cut=o["pin_cut"])
+            self.trimChannelRoute(net)
         for sup in self.spec.get("supplies", []):
             side = sup.get("ring")
             if not side:
                 continue
-            layout.addRouteRing("M1", sup["net"], side,
-                                widthmult=3, spacemult=2)
-            layout.addPowerConnection(sup["net"], "",
-                                      "top" if "t" in side else "bottom")
+            self.addRouteRing("M1", sup["net"], side,
+                              widthmult=3, spacemult=2)
+            self.addPowerConnection(sup["net"], "",
+                                    "top" if "t" in side else "bottom")
+        super().route()

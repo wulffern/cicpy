@@ -69,7 +69,7 @@ import os
 import sys
 
 from cicpy.core.cellgroup import StackGroup
-from cicpy.core.sidecarcell import SidecarPycell
+from cicpy.core.sidecarcell import SidecarPycell, HierLayoutCell
 
 log = logging.getLogger("Sidecar")
 
@@ -77,7 +77,7 @@ _counter = itertools.count()
 
 #- the declarative keys a subcell class may carry. Only keys the
 #- class actually states reach the spec: presence matters downstream
-#- (AssemblyPycell registers a channel only for a subcell that names
+#- (HierLayoutCell registers a channel only for a subcell that names
 #- one).
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill")
 _HOOK_NAMES = ("beforePlace", "beforeRoute")
@@ -162,6 +162,10 @@ class SidecarCell(SidecarPycell):
     supplies = []
     channel = 8
     routes = None
+    #- the LayoutCell class the hier build instantiates for the
+    #- assembled top; a design subclasses HierLayoutCell and points
+    #- here when the recipe's place()/route() cannot say it
+    hier_cell = HierLayoutCell
 
     def __init__(self):
         super().__init__(type(self).compile())
@@ -192,7 +196,8 @@ class SidecarCell(SidecarPycell):
             spec["supplies"] = cls.supplies
         if cls.routes is not None:
             spec["hier"] = {"channel": cls.channel,
-                            "routes": _normalize_routes(cls.routes)}
+                            "routes": _normalize_routes(cls.routes),
+                            "cell": cls.hier_cell}
         return spec
 
 
@@ -203,7 +208,7 @@ def _name(x):
 
 def _normalize_routes(routes):
     """The top's routes with class refs turned to names: drops accept
-    the classes for the NameError guarantee, AssemblyPycell keys its
+    the classes for the NameError guarantee, HierLayoutCell keys its
     overrides by instance name."""
     out = []
     for r in routes:

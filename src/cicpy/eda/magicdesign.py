@@ -72,9 +72,10 @@ class MagicDesign(cic.Design):
             self.log.warning(f"Could not find {cellname} in {str(sp.keys())}")
             return
 
-        #- Make top cell
+        #- Make top cell -- through the factory seam, so a registered
+        #- cell name gets its own LayoutCell subclass
         ckt = sp[cellname]
-        cell = cic.LayoutCell()
+        cell = self.newLayoutCell(cellname)
         cell.name = cellname
         cell.ckt = ckt
         cell.subckt = ckt

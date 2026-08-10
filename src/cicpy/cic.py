@@ -361,6 +361,22 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     except Exception as ex:
         log.warning(f"Could not register primitive providers: {ex}")
 
+    #- the scaffold cell <CELL>_HIER is a HierLayoutCell (or the
+    #- design's own subclass, declared as hier_cell on the sidecar)
+    #- when the base cell's sidecar carries a `hier` declaration and
+    #- no <CELL>_HIER.py shadows it. Registered BEFORE the read: the
+    #- framework instantiates the top cell there, and the class IS the
+    #- assembly -- place() tiles the published subcells natively.
+    dirname = libdir + lib + os.path.sep
+    if (cell.endswith("_HIER")
+            and not os.path.exists(os.path.join(dirname, cell + ".py"))):
+        from cicpy.sidecar import load_sidecar_spec
+        _spec = load_sidecar_spec(dirname, cell[:-5])
+        if _spec and "hier" in _spec:
+            from cicpy.core.sidecarcell import HierLayoutCell
+            _cls = _spec["hier"].get("cell") or HierLayoutCell
+            design.registerLayoutCellClass(cell, lambda: _cls(_spec))
+
     log.info(f"Reading {spi}")
     lcell = design.readFromSpice(spi,cell)
 
@@ -400,14 +416,6 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
             pycell = _side
         if(hasattr(pycell,"data")):
             pycellData = pycell.data
-    elif lcell.name.endswith("_HIER"):
-        #- the scaffold cell: assembled from the base cell's sidecar
-        #- when it carries a `hier` declaration
-        from cicpy.sidecar import load_sidecar_spec
-        _spec = load_sidecar_spec(lcell.dirname, lcell.name[:-5])
-        if _spec and "hier" in _spec:
-            from cicpy.core.sidecarcell import AssemblyPycell
-            pycell = AssemblyPycell(_spec)
 
     lcell.strict_route = strict
     lcell.layout(pycell,pycellData)

@@ -47,6 +47,22 @@ class Design():
         self.log = logging.getLogger("DesignPrinter")
         self.prefix = ""
         self.primitiveProviders = []
+        self.layoutcell_factories = dict()
+
+    def registerLayoutCellClass(self, name, factory):
+        """For this cell name, instantiate this instead of LayoutCell.
+
+        `factory` is any zero-argument callable returning the cell --
+        the class itself, or a closure carrying constructor arguments.
+        The framework builds the top cell wherever a netlist is read
+        (see MagicDesign.readFromSpice), so a cell that needs its own
+        LayoutCell subclass -- a HierLayoutCell assembling published
+        subcells, say -- registers here before the read.
+        """
+        self.layoutcell_factories[name] = factory
+
+    def newLayoutCell(self, name):
+        return self.layoutcell_factories.get(name, LayoutCell)()
 
 
     def addCuts(self):

@@ -87,7 +87,9 @@ class LELOTEMP_OTAR(SidecarCell):
 
 `SidecarCell.compile()` turns the class into the spec dict; the
 recipes that execute it live in `core/sidecarcell.py`
-(`SidecarPycell` for the flat build, `AssemblyPycell` for the top;
+(`SidecarPycell` for the flat build, `HierLayoutCell` -- a real
+`LayoutCell` whose `place()`/`route()` assemble the published
+subcells natively, declared per design via `hier_cell` -- for the top;
 publication in `core/subcell.py`). Detection is by content: a
 `<CELL>.py` defining a `SidecarCell` subclass is the sidecar; a
 module with module-level hooks and `data` is a classic pycell,

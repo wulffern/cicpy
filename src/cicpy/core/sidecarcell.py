@@ -109,13 +109,24 @@ class SidecarPycell:
         for st in stacks.values():
             st.addTaps()
 
-        #- rows: abut left to right (bottoms aligned), rows bottom up
+        #- rows: abut left to right (bottoms aligned), rows bottom up.
+        #- A subcell's `xspace` (um) opens a gap on ITS LEFT: the seam
+        #- rule between two cells is a property of the pair, and abut
+        #- is only right when their edge geometry says so (a pnp
+        #- array's guard against an nmos stack is not such a pair --
+        #- magic refuses the li abutment, measured).
+        xspace = {e["name"]: e.get("xspace", 0)
+                  for e in spec.get("subcells", [])}
         rows = spec.get("rows", [])
         row_stacks = [[stacks[n] for n in row if n in stacks]
                       for row in rows]
-        for row in row_stacks:
-            for a, b in zip(row[1:], row[:-1]):
+        row_names = [[n for n in row if n in stacks] for row in rows]
+        for row, names in zip(row_stacks, row_names):
+            for (a, b), nm in zip(zip(row[1:], row[:-1]), names[1:]):
                 a.abutRight(b)
+                gap = xspace.get(nm, 0)
+                if gap:
+                    a.translate(int(gap * layout.um), 0)
         for g in groups.values():
             g.updateBoundingRect()
         for below, above in zip(row_stacks[:-1], row_stacks[1:]):
@@ -204,11 +215,11 @@ class HierLayoutCell(LayoutCell):
         #- a row the cells keep their PUBLISHED relative offsets. A
         #- published cell's stored box is its FIXED_BBOX in the
         #- parent's coordinates (the drawn geometry is normalised to
-        #- the origin at load), so the box origin carries both the
-        #- offset within the row and, negated, the painted reference:
-        #- the .mag on disk is still parent-absolute, and the use
-        #- record needs xcell = -origin to land it. The ports live on
-        #- the normalised geometry and land by placement alone.
+        #- the origin at load), so the box origin carries the offset
+        #- within the row; addInstance itself carries the load origin
+        #- into the painted reference (xcell = -libshift). The ports
+        #- live on the normalised geometry and land by placement
+        #- alone.
         slots = {}
         y = 0
         row_tops = []
@@ -226,8 +237,7 @@ class HierLayoutCell(LayoutCell):
                                      f"{cktInst.subcktName} for {nm}")
                 if anchor_x is None:
                     anchor_x = int(sub.x1)
-                slots[nm] = (int(sub.x1) - anchor_x, y,
-                             -int(sub.x1), -int(sub.y1))
+                slots[nm] = (int(sub.x1) - anchor_x, y)
                 tallest = max(tallest, int(sub.y2 - sub.y1))
             row_tops.append(y + tallest)
             y += tallest + channel
@@ -245,10 +255,8 @@ class HierLayoutCell(LayoutCell):
                 inst = self.addInstance(cktInst, 0, y)
                 y += int(inst.height()) + channel
                 continue
-            x, ry, xcell, ycell = s
-            inst = self.addInstance(cktInst, x, ry)
-            inst.xcell = xcell
-            inst.ycell = ycell
+            x, ry = s
+            self.addInstance(cktInst, x, ry)
 
         self.updateBoundingRect()
 
@@ -293,6 +301,13 @@ class HierLayoutCell(LayoutCell):
                     continue
                 o = dict(defaults)
                 o.update(overrides.get(nm.lstrip("x"), {}))
+                #- {"inst": ..., "skip": True} suppresses a DISCOVERED
+                #- drop: for the column whose pin the net reaches some
+                #- other way (a seam hop), where the drop's vertical
+                #- would run the length of the column and clip every
+                #- other net's pin stack on the way (measured)
+                if o.get("skip"):
+                    continue
                 self.addRouteConnection(net, f"^{re.escape(nm)}$", "t",
                                         o["layer"], align=o["align"],
                                         cuts=o["cuts"],

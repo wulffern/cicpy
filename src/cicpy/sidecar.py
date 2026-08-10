@@ -79,7 +79,7 @@ _counter = itertools.count()
 #- class actually states reach the spec: presence matters downstream
 #- (HierLayoutCell registers a channel only for a subcell that names
 #- one).
-_SUBCELL_KEYS = ("match", "group", "channel", "order", "fill")
+_SUBCELL_KEYS = ("match", "group", "channel", "order", "fill", "xspace")
 _HOOK_NAMES = ("beforePlace", "beforeRoute")
 
 

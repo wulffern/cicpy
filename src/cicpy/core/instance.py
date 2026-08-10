@@ -104,7 +104,9 @@ class Instance(Cell):
 
 
         if(len(inst.nodes) != len(ckt.nodes)):
-            log.error("different number of nodes for " + inst.name + "(" + len(inst.nodes) + ") and" + inst.subcktName + "(" + len(ckt.nodes) + ")" )
+            log.error(f"different number of nodes for {inst.name} "
+                      f"({len(inst.nodes)}) and {inst.subcktName} "
+                      f"({len(ckt.nodes)})")
             return
 
 
@@ -234,12 +236,17 @@ class Instance(Cell):
             rect.mirrorX(0)
             rect.translate(self.xcell, self.ycell)
         else:
-            #- R0 carries xcell/ycell too: a stack subcell is published in
-            #- the parent's absolute coordinates, and xcell = -origin is
-            #- what cancels it. getCellPoint already honors this; without
-            #- the same here the painted reference and the occupied rects
-            #- disagree by exactly the subcell origin.
-            rect.translate(self.xcell, self.ycell)
+            #- R0: xcell is the load-origin correction, and whether the
+            #- children need it depends on where the cell came from. A
+            #- maglib cell was normalised at load -- it records
+            #- `libshift` -- so instance position alone maps its
+            #- children, and only getCellPoint (the painted use record)
+            #- applies xcell. A cell REBUILT FROM JSON keeps its stored
+            #- publish-frame children and still needs the correction
+            #- here (measured: the maze-router fixture's pins moved by
+            #- exactly the publish origin).
+            if getattr(self.layoutcell, "libshift", None) is None:
+                rect.translate(self.xcell, self.ycell)
         rect.translate(self.x1, self.y1)
         return rect
 

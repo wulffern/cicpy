@@ -144,6 +144,13 @@ class LayoutCell(Cell):
         i.schematicCell = getattr(cktInst, "subcktName", "") or layoutCell.name
         i.layoutcell = layoutCell
         i.libpath = layoutCell.libpath
+        #- the .mag on disk still starts at the cell's load origin;
+        #- the model was normalised to (0,0) at load, and the painted
+        #- reference needs the negated origin to land the disk
+        #- geometry on the model (magicdesign.MagicFile.loadLayoutCell)
+        sx, sy = getattr(layoutCell, "libshift", (0, 0))
+        i.xcell = -int(sx)
+        i.ycell = -int(sy)
         i.setSubcktInstance(cktInst)
 
         self.add(i)
@@ -2108,9 +2115,12 @@ class LayoutCell(Cell):
                         widthmult:int=1, key:str=None):
         """A RouteRing variant lying ACROSS the cell on a channel track.
 
-        The bar spans the full width of the top-level cell at the
-        given track of a channel registered by addRoutingChannel --
-        on top of the nmos row, under the pmos row. It registers as
+        The bar spans the full extent of the top-level cell at the
+        given track of a channel registered by addRoutingChannel,
+        and takes the channel's own direction: a horizontal channel
+        (between rows) gets the classic horizontal bar, a vertical
+        channel (a column) gets a vertical one, with the drops of
+        addRouteConnection turning to match. It registers as
         ``rail_<name>`` exactly like a ring side, so
         addPowerConnection stretches pins to it, and it trims the
         same way: call trimChannelRoute after the connections are in
@@ -2118,13 +2128,19 @@ class LayoutCell(Cell):
         """
         self.log.info(f"addChannelRoute(layer={layer}, name={name}, "
                       f"channel={channel}, track={track})")
-        y = self.channelTrackCoord(channel, track)
-        if y is None:
+        coord = self.channelTrackCoord(channel, track)
+        if coord is None:
             return None
+        ch = self.routingChannel(channel)
+        horizontal = True if ch is None else bool(ch[2])
         mw = Rules.getInstance().get(layer, "width") * widthmult
         from .routering import ChannelRoute
-        cr = ChannelRoute(layer, name, int(self.x1), int(self.x2),
-                          int(y), int(mw))
+        if horizontal:
+            cr = ChannelRoute(layer, name, int(self.x1), int(self.x2),
+                              int(coord), int(mw))
+        else:
+            cr = ChannelRoute(layer, name, int(self.y1), int(self.y2),
+                              int(coord), int(mw), horizontal=False)
         #- keyed: one net may own several bars -- a segment per track,
         #- bridged where the traffic wants -- and each is addressed by
         #- its key. The unkeyed call keeps the ring-compatible name.
@@ -2230,9 +2246,51 @@ class LayoutCell(Cell):
         rules = Rules.getInstance()
         w = rules.get(layer, "width")
         from .cut import Cut
-        from .rect import VerticalRectangleFromTo
+        from .rect import VerticalRectangleFromTo, HorizontalRectangleFromTo
         if not hasattr(self, "_drop_rects"):
             self._drop_rects = []
+        #- the drop turns with the rail: a horizontal bar takes
+        #- vertical drops (align picks the x on the pin), a vertical
+        #- bar takes horizontal ones (align top/bottom/center picks
+        #- the y)
+        if rail.height() > rail.width():
+            for r in rects:
+                if align == "top":
+                    y = r.y2 - w / 2
+                elif align == "bottom":
+                    y = r.y1 + w / 2
+                else:
+                    y = r.centerY()
+                drop = HorizontalRectangleFromTo(layer, int(r.centerX()),
+                                                 int(rail.centerX()),
+                                                 int(y - w / 2), int(w))
+                drop.net = name
+                routering.add(drop)
+                self._drop_rects.append(drop)
+                ends = ((r, r.centerX(), False),
+                        (rail, rail.centerX(), True))
+                if not pin_cut:
+                    ends = ends[1:]
+                for target, xc, at_rail in ends:
+                    if layer == target.layer:
+                        continue
+                    cs = Cut.getCutsForRects(layer, [target.getCopy()],
+                                             cuts, 1, True)
+                    if cs:
+                        ct = cs[0]
+                        half = ct.height() / 2
+                        if at_rail:
+                            yc = y
+                        elif align == "top":
+                            yc = target.y2 - half
+                        elif align == "bottom":
+                            yc = target.y1 + half
+                        else:
+                            lo, hi = target.y1 + half, target.y2 - half
+                            yc = y if lo > hi else min(max(y, lo), hi)
+                        ct.moveCenter(int(xc), int(yc))
+                        routering.add(ct)
+            return
         for r in rects:
             if align == "left":
                 x = r.x1 + w / 2

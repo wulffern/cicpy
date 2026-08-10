@@ -143,27 +143,37 @@ class RouteRing(Cell):
 
 
 class ChannelRoute(RouteRing):
-    """A RouteRing variant with one side: a full-width horizontal bar
-    riding a routing-channel track.
+    """A RouteRing variant with one side: a bar riding a routing
+    channel track.
 
-    A ring surrounds the cell; a channel route lies across it -- on
-    top of the nmos row, under the pmos row -- spanning the whole
-    top-level cell so that any column can drop onto it. It registers
-    like a ring (``rail_<net>``), so addPowerConnection stretches
-    pins to it the same way, and it trims the same way: trim() pulls
-    the bar back to the outermost connection actually made, so an
-    unused stretch of track is returned to the channel.
+    A ring surrounds the cell; a channel route lies across it,
+    spanning the whole top-level cell so that anything along it can
+    drop on. ``horizontal=True`` (the default) is the classic bar in
+    the gap between rows: ``lo..hi`` is the x-range, ``coord`` the
+    track's y. ``horizontal=False`` lays the bar ALONG a vertical
+    channel -- a column gap -- with ``lo..hi`` the y-range and
+    ``coord`` the track's x. It registers like a ring
+    (``rail_<net>``), so addPowerConnection stretches pins to it the
+    same way, and it trims the same way: trim() pulls the bar back
+    to the outermost connection actually made, so an unused stretch
+    of track is returned to the channel.
     """
 
-    def __init__(self, layer:str = None, name:str = None, x1:int = None,
-                 x2:int = None, y:int = None, metalwidth:int = None):
+    def __init__(self, layer:str = None, name:str = None, lo:int = None,
+                 hi:int = None, coord:int = None, metalwidth:int = None,
+                 horizontal:bool = True):
         Cell.__init__(self)
         self.ignoreBoundaryRouting = False
+        self.horizontal = horizontal
         if layer is None:
             return
         self.name = name
-        self.bar = Rect(layer, int(x1), int(y - metalwidth / 2),
-                        int(x2 - x1), int(metalwidth))
+        if horizontal:
+            self.bar = Rect(layer, int(lo), int(coord - metalwidth / 2),
+                            int(hi - lo), int(metalwidth))
+        else:
+            self.bar = Rect(layer, int(coord - metalwidth / 2), int(lo),
+                            int(metalwidth), int(hi - lo))
         self.add(self.bar)
         self.bottom = self.bar
         self.top = self.bar
@@ -178,15 +188,28 @@ class ChannelRoute(RouteRing):
         caller) added to this object; the bar keeps one metalwidth of
         enclosure past the outermost of them. With no connections the
         bar is left alone -- an untouched rail is a statement, an
-        invisible one is a bug hunt.
+        invisible one is a bug hunt. ``ends`` letters address the low
+        end as ``l``/``b`` and the high end as ``r``/``t``, whatever
+        the bar's direction.
         """
         conns = [c for c in self.children if c is not self.bar]
         if not conns:
             return
-        x1 = min(c.x1 for c in conns)
-        x2 = max(c.x2 for c in conns)
-        margin = self.bar.height()
-        if "l" in ends:
-            self.bar.x1 = max(self.bar.x1, x1 - margin)
-        if "r" in ends:
-            self.bar.x2 = min(self.bar.x2, x2 + margin)
+        horizontal = getattr(self, "horizontal",
+                             self.bar.width() >= self.bar.height())
+        if horizontal:
+            lo = min(c.x1 for c in conns)
+            hi = max(c.x2 for c in conns)
+            margin = self.bar.height()
+            if "l" in ends or "b" in ends:
+                self.bar.x1 = max(self.bar.x1, lo - margin)
+            if "r" in ends or "t" in ends:
+                self.bar.x2 = min(self.bar.x2, hi + margin)
+        else:
+            lo = min(c.y1 for c in conns)
+            hi = max(c.y2 for c in conns)
+            margin = self.bar.width()
+            if "l" in ends or "b" in ends:
+                self.bar.y1 = max(self.bar.y1, lo - margin)
+            if "r" in ends or "t" in ends:
+                self.bar.y2 = min(self.bar.y2, hi + margin)

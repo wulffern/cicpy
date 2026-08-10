@@ -13,9 +13,12 @@ CIC = os.path.join(IP, "lelo_temp_sky130a", "design",
 LIB = os.path.join(IP, "rey_atr_sky130a", "design", "REY_ATR_SKY130A.cic")
 TECH = os.path.join(IP, "tech_sky130A", "cic", "sky130.tech")
 
-#- VDS's pin, and a spot in the mid channel with nothing in it
-VDS_PIN = (270000, 104000)
-CLEAR = (270000, 245000)
+#- VDS's pin, and a spot in the mid channel with nothing in it.
+#- Recalibrated 2026-08-10: the publish frame shifts whenever flat
+#- content changes (here: the VIA4 tech-rule fix re-published OTAR),
+#- and these are fixture coordinates, not invariants.
+VDS_PIN = (267200, 92000)
+CLEAR = (267200, 350000)
 
 
 def _have_fixture():

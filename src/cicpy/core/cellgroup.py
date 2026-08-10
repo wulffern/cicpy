@@ -1284,8 +1284,20 @@ class StackGroup(CellGroup):
         return None
 
     def routeDummyDevices(self):
-        fills = [i for i in self.instances
-                 if (getattr(i, "instanceName", "") or "").startswith("xfill_")]
+        return self.routeSupplyDevices()
+
+    def routeSupplyDevices(self, instances=None):
+        """Strap devices whose every terminal rides the supply.
+
+        The fills by default; pass ``instances`` for netlist-real
+        supply devices -- a decap column, say -- that want exactly
+        the dummy treatment: an M1 strap across each device tying
+        D/G/S into one node, and one finger into the adjacent tap
+        row to put that node on the supply the taps carry.
+        """
+        fills = instances if instances is not None else [
+            i for i in self.instances
+            if (getattr(i, "instanceName", "") or "").startswith("xfill_")]
         for inst in fills:
             self.routeDummyTerminals(inst)
         #- Dummies are SUPPLY devices, not floating ones: a PMOS dummy
@@ -1343,7 +1355,19 @@ class StackGroup(CellGroup):
     def _get_or_create_dummy(self, base, dname, x, y):
         dummy = self.layout.getInstanceFromInstanceName(dname)
         if dummy is None:
-            dummy = self.layout.addPhysicalInstance(base.cell, dname, int(x), int(y))
+            #- a fill clones the column's device, but always the PLAIN
+            #- one: when the column's members are diode variants (the
+            #- addInstance D substitution), cloning the variant emits
+            #- fills of a layout-only cell with no subckt, and the
+            #- generated schematic loses them (measured: 11 fills gone
+            #- from a startup column, LVS device-count mismatch)
+            cellname = base.cell
+            if cellname.endswith("D"):
+                parent = getattr(self.layout, "parent", None)
+                plain = cellname[:-1]
+                if parent is not None and parent.getLayoutCell(plain) is not None:
+                    cellname = plain
+            dummy = self.layout.addPhysicalInstance(cellname, dname, int(x), int(y))
         else:
             dummy.moveTo(int(x), int(y))
             dummy.updateBoundingRect()

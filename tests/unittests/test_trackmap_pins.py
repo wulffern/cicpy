@@ -44,9 +44,17 @@ class TrackMapPins(unittest.TestCase):
         cls.pins = TrackMap(cls.cell, block_pins=True).build()
 
     def test_pins_off_by_default(self):
-        """The default must not change: block_pins is opt-in."""
-        n = sum(len(t.pins) for l in self.plain.tracks
-                for t in self.plain.tracks[l])
+        """The default must not change: block_pins is opt-in.
+
+        Count NET pin marks only: device-metal blocks share the
+        container and are always on -- they used to fall outside the
+        tracks entirely while instance occupied-rects carried a stale
+        frame, which is what let this assert count everything."""
+        from cicpy.core.trackmap import DEVICE_METAL
+        n = sum(len(spans)
+                for l in self.plain.tracks
+                for t in self.plain.tracks[l]
+                for net, spans in t.pins.items() if net != DEVICE_METAL)
         self.assertEqual(n, 0)
 
     def test_pins_are_found(self):

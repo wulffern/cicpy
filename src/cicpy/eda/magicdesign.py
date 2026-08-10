@@ -32,6 +32,11 @@ class MagicFile():
             #- cell already drawn at the origin.
             self._lay.updateBoundingRect()
             ox, oy = int(self._lay.x1), int(self._lay.y1)
+            #- the shift is DATA: the .mag on disk still starts at
+            #- (ox, oy), so the painted use record must carry
+            #- xcell = -ox to land the disk geometry where the model
+            #- says it is. addInstance reads this off the cell.
+            self._lay.libshift = (ox, oy)
             if ox or oy:
                 self._lay.translate(-ox, -oy)
                 self._lay.updateBoundingRect()

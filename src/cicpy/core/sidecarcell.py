@@ -312,7 +312,12 @@ class HierLayoutCell(LayoutCell):
                                         o["layer"], align=o["align"],
                                         cuts=o["cuts"],
                                         pin_cut=o["pin_cut"])
-            self.trimChannelRoute(net)
+            #- a route may keep an end at the cell edge as its PIN for
+            #- the level above: "trim" names the ends to pull back
+            #- (default both; "l"/"b" low end, "r"/"t" high end, "" none)
+            trim_ends = r.get("trim", "lr")
+            if trim_ends:
+                self.trimChannelRoute(net, ends=trim_ends)
         for sup in self.spec.get("supplies", []):
             side = sup.get("ring")
             if not side:

@@ -38,10 +38,6 @@ import logging
 log = logging.getLogger("SidecarPycell")
 
 
-def has_placement(spec):
-    return bool(spec) and "rows" in spec and "subcells" in spec
-
-
 class SidecarPycell:
     """A pycell built from the sidecar. Quacks like the module."""
 
@@ -52,11 +48,9 @@ class SidecarPycell:
     # -- hooks -------------------------------------------------------
 
     def beforePlace(self, layout):
-        #- publication (subcell_spec) and the per-stack hook dispatch
-        #- (_run_stack_pycell) read the spec off the layout: one
-        #- truth, already compiled from the sidecar module
+        #- publication (subcell_spec) reads the spec off the layout:
+        #- one truth, already compiled from the sidecar class
         layout._sidecar_spec = self.spec
-        layout._sidecar_classes = self.spec.get("classes", {})
         p = self.spec.get("place", {})
         layout.noPowerRoute = True
         layout.place_xspace = [p.get("xspace", 0)]
@@ -89,8 +83,11 @@ class SidecarPycell:
             if not members:
                 log.warning(f"{e['name']}: no instances matched; skipped")
                 continue
+            #- the DECLARED class is the group that gets built, so
+            #- its hooks run with self = the placed group
             st = groups[gname].addStack(e["name"], members,
-                                        preserveOrder=True)
+                                        preserveOrder=True,
+                                        cls=e.get("cls"))
             stacks[e["name"]] = st
             if e.get("fill", True):
                 fills.add(gname)

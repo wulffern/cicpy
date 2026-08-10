@@ -1,71 +1,118 @@
-"""The declarative python sidecar: <CELL>.py IS the cell.
+"""The declarative sidecar: <CELL>.py IS the cell.
 
-The sidecar used to be YAML. The same declarations are now python
-classes, for the reasons a hand-edited file wants to be python: real
-syntax errors at import instead of silent no-matches, regexes without
-quoting rules, and the imperative escape hatch -- a hook that routes
-what the recipe cannot say -- living as a method beside the
-declaration it belongs to instead of in a ninth file.
+One class per cell, subclassing SidecarCell; one nested class per
+subcell, subclassing the REAL placement groups (Stack is a
+StackGroup), so a hook's `self` is the group that was actually built
+-- group-scoped routing, live pins, the same object the recipe
+placed. The floorplan, supplies and the assembled top are class
+declarations on the cell itself, because the assembled top IS the
+cell:
 
-A sidecar module looks like this:
+    from cicpy.sidecar import SidecarCell, Stack, Mirror
 
-    from cicpy.sidecar import Stack, Mirror, Hier
+    class LELOTEMP_OTAR(SidecarCell):
 
-    place = {"groupbreak": 6, "channel": 6}
+        place = {"groupbreak": 6, "channel": 6}   # flat-build knobs
 
-    class p_bias(Stack):
-        match = r'^(xba\\d+|xstack_p_bias_(top|bot))$'
-        group = "pmos"
-        channel = "bias"
-        order = ['xba1', 'xba8', 'xba2']
+        class p_bias(Stack):
+            match = r'^(xba\\d+|xstack_p_bias_(top|bot))$'
+            group = "pmos"
+            channel = "bias"                # named vertical channel
+            order = ['xba1', 'xba8', 'xba2']
 
-        def beforeRoute(layout, entry):      # no self: hooks are
-            ...                              # plain functions
-            return None
+            def beforeRoute(self, entry):   # self IS the built group
+                self.addConnectivityRoute(...)      # group-scoped
+                self.layout.addConnectivityRoute(...)  # parent-scoped
+                return None                 # True = fully routed here
 
-    rows = [[n_load_a, n_load_b], [p_in_a, p_bias]]   # the classes
-    supplies = [{"net": "VDD_1V8", "ring": "t", "strap": "top"}]
+        class n_mirr(Mirror):
+            match = r'...'
 
-    class hier(Hier):
-        channel = 8
-        routes = [{"net": "VCP", "track": 6,
-                   "drops": [["n_mirr", "M2", "left"]]}]
+        rows = [[n_load_a, n_load_b], [p_in_a, p_bias]]  # the classes
+        supplies = [{"net": "VDD_1V8", "ring": "t", "strap": "top"}]
 
-The class name is the subcell name. `rows` references the classes
-themselves, so a typo is a NameError at import time, not an empty
-match at publish time. Hooks are written WITHOUT self -- they are
-collected from the class dict as plain functions and called exactly
-like a per-subcell pycell's: beforePlace(layout, entry),
-beforeRoute(layout, entry) returning True to claim the subcell as
-routed, or the legacy route(layout, entry) whose existence alone
-claims it.
+        channel = 8            # um between the rows in the top
+        routes = [             # the top's ChannelRoutes; presence of
+            {"net": "VCP", "track": 6,          # `routes` enables the
+             "drops": [[n_mirr, "M2", "left"]]},  # hier build
+        ]
 
-spec_from_module compiles the module into the same spec dict the YAML
-used to load into, so `SidecarPycell` and `AssemblyPycell`
-(core/sidecarcell.py) execute it unchanged. Detection is by content:
-a module defining Subcell subclasses is a sidecar; a module defining
-`data` or module-level hooks is a classic pycell, as ever.
+The class name is the subcell name. `rows` and drop entries
+reference the classes themselves, so a typo is a NameError at import
+time, not an empty match at publish time.
+
+Hooks are real methods -- (self, entry), where entry is the
+subcell's plan (instances, ports, internal, type) -- and the
+contract is checked by inheritance: the API they call is the group's
+own, so a rename in cellgroup.py breaks the design file loudly.
+beforePlace adjusts the stack before anything routes; beforeRoute
+routes the subcell's internal nets and returns True to claim the
+subcell as ROUTED (the built-in router leaves it alone), None to let
+the built-in router take what it will. There is no class-level
+`route` hook: LayoutCell.route() is a real method a class hook would
+shadow. The file-based <SUBCELLNAME>.py escape hatch keeps the old
+no-self contract, legacy `route` included.
+
+The recipe itself is inherited: SidecarCell subclasses SidecarPycell
+(core/sidecarcell.py), so a cell that needs more than declarations
+overrides beforePlace/afterPlace/beforeRoute/afterPaint and calls
+super() -- the escape hatch is ordinary inheritance.
+
+`compile()` turns the class into the spec dict the recipes consume;
+detection in cic.py is by content: a module defining a SidecarCell
+subclass is a sidecar, a module with module-level hooks and `data`
+is a classic pycell, as ever.
 """
 import itertools
 import logging
 import os
 import sys
 
+from cicpy.core.cellgroup import StackGroup
+from cicpy.core.sidecarcell import SidecarPycell
+
 log = logging.getLogger("Sidecar")
 
 _counter = itertools.count()
 
-#- the declarative keys a subcell class may carry, in spec order.
-#- Only keys the class actually states reach the spec: presence
-#- matters downstream (AssemblyPycell registers a channel only for a
-#- subcell that names one).
+#- the declarative keys a subcell class may carry. Only keys the
+#- class actually states reach the spec: presence matters downstream
+#- (AssemblyPycell registers a channel only for a subcell that names
+#- one).
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill")
-_HOOK_NAMES = ("beforePlace", "beforeRoute", "route")
-_HIER_KEYS = ("channel", "routes")
+_HOOK_NAMES = ("beforePlace", "beforeRoute")
+
+
+def _user_bases(cls):
+    """The design-authored classes of cls's MRO, base first.
+
+    Everything defined under cicpy is framework; everything else is
+    the design's, including an intermediate base a design writes for
+    shared defaults.
+    """
+    return [b for b in reversed(cls.__mro__)
+            if not (b.__module__ or "").startswith("cicpy.")
+            and b is not object]
+
+
+def _attrs(cls, keys):
+    out = {}
+    for base in _user_bases(cls):
+        for k in keys:
+            if k in vars(base):
+                out[k] = vars(base)[k]
+    return out
+
+
+def hooks_of(cls):
+    """{hook name: plain function} the DESIGN declared on a subcell
+    class. From the user classes' dicts, not getattr: the group base
+    classes are framework and their methods are not hooks."""
+    return _attrs(cls, _HOOK_NAMES)
 
 
 class Subcell:
-    """Base of a declared subcell. Subclass Stack/DiffPair/Mirror."""
+    """Marker mixin of a declared subcell: Stack/DiffPair/Mirror."""
     type = "stack"
 
     def __init_subclass__(cls, **kw):
@@ -75,96 +122,78 @@ class Subcell:
         cls._sidecar_index = next(_counter)
 
 
-class Stack(Subcell):
+class Stack(Subcell, StackGroup):
+    """A declared subcell that IS the StackGroup the recipe builds."""
     type = "stack"
 
+    def __init__(self, layout, name=None):
+        StackGroup.__init__(self, layout, name or type(self).__name__)
+        self.kind = self.type
 
-class DiffPair(Subcell):
+
+class DiffPair(Stack):
     type = "diffpair"
 
+    def routeInternal(self):
+        return (f"no {self.kind} router yet; ship a beforeRoute hook "
+                f"on {type(self).__name__} or retype it")
 
-class Mirror(Subcell):
+
+class Mirror(Stack):
     type = "mirror"
 
-
-class Hier:
-    """Base of the `hier` class: the assembled top's declarations."""
-
-
-_FRAMEWORK = (Subcell, Stack, DiffPair, Mirror, Hier)
+    def routeInternal(self):
+        return (f"no {self.kind} router yet; ship a beforeRoute hook "
+                f"on {type(self).__name__} or retype it")
 
 
-def _attrs(cls, keys):
-    """The declared attributes of cls, walking user bases only.
+class SidecarCell(SidecarPycell):
+    """Base of a declared cell. Subclass, declare, done.
 
-    vars() over the reversed MRO, stopping at the framework classes,
-    so an intermediate base a design writes for shared defaults works
-    the obvious way.
+    Class declarations: `place` (flat-build knobs), nested Subcell
+    classes, `rows` (the floorplan, bottom row first, referencing the
+    classes), `supplies`, and for the assembled top `channel` (um
+    between the rows) and `routes` (one ChannelRoute per crossing
+    net). The recipe methods are inherited from SidecarPycell;
+    override and call super() when the declarations cannot say it.
     """
-    out = {}
-    for base in reversed(cls.__mro__):
-        if base is object or base in _FRAMEWORK:
-            continue
-        for k in keys:
-            if k in vars(base):
-                out[k] = vars(base)[k]
-    return out
+    place = {}
+    rows = []
+    supplies = []
+    channel = 8
+    routes = None
 
+    def __init__(self):
+        super().__init__(type(self).compile())
 
-def hooks_of(cls):
-    """{hook name: plain function} declared on a subcell class.
+    @classmethod
+    def compile(cls):
+        """The class as the spec dict the recipes consume."""
+        cells = [v for base in _user_bases(cls)
+                 for v in vars(base).values()
+                 if isinstance(v, type) and issubclass(v, Subcell)]
+        cells.sort(key=lambda c: c._sidecar_index)
 
-    From the class DICT, not getattr: hooks are written without self,
-    and the raw function is what a pycell hook already is.
-    """
-    return _attrs(cls, _HOOK_NAMES)
-
-
-def spec_from_module(mod):
-    """Compile a sidecar module into the spec dict, or None.
-
-    None when the module declares no Subcell subclass of its own --
-    which is what makes detection safe: a classic pycell that happens
-    to import this module is still a classic pycell.
-    """
-    cells = [v for v in vars(mod).values()
-             if isinstance(v, type) and issubclass(v, Subcell)
-             and v not in _FRAMEWORK
-             and getattr(v, "__module__", None) == mod.__name__]
-    if not cells:
-        return None
-    cells.sort(key=lambda c: c._sidecar_index)
-
-    spec = {}
-    place = getattr(mod, "place", None)
-    if isinstance(place, dict):
-        spec["place"] = place
-
-    subcells = []
-    for cls in cells:
-        entry = {"name": cls.__name__, "type": cls.type}
-        entry.update(_attrs(cls, _SUBCELL_KEYS))
-        if "match" not in entry:
-            log.warning(f"{mod.__name__}.{cls.__name__}: no match "
-                        f"regex; the subcell claims no instances")
-        subcells.append(entry)
-    spec["subcells"] = subcells
-    spec["classes"] = {cls.__name__: cls for cls in cells}
-
-    rows = getattr(mod, "rows", None)
-    if rows:
-        spec["rows"] = [[n if isinstance(n, str) else n.__name__
-                         for n in row] for row in rows]
-    supplies = getattr(mod, "supplies", None)
-    if supplies:
-        spec["supplies"] = supplies
-
-    hier = getattr(mod, "hier", None)
-    if isinstance(hier, dict):
-        spec["hier"] = _normalize_hier(hier)
-    elif isinstance(hier, type) and issubclass(hier, Hier):
-        spec["hier"] = _normalize_hier(_attrs(hier, _HIER_KEYS))
-    return spec
+        spec = {}
+        if cls.place:
+            spec["place"] = cls.place
+        subcells = []
+        for c in cells:
+            entry = {"name": c.__name__, "type": c.type, "cls": c}
+            entry.update(_attrs(c, _SUBCELL_KEYS))
+            if "match" not in entry:
+                log.warning(f"{cls.__name__}.{c.__name__}: no match "
+                            f"regex; the subcell claims no instances")
+            subcells.append(entry)
+        spec["subcells"] = subcells
+        if cls.rows:
+            spec["rows"] = [[_name(n) for n in row] for row in cls.rows]
+        if cls.supplies:
+            spec["supplies"] = cls.supplies
+        if cls.routes is not None:
+            spec["hier"] = {"channel": cls.channel,
+                            "routes": _normalize_routes(cls.routes)}
+        return spec
 
 
 def _name(x):
@@ -172,16 +201,12 @@ def _name(x):
     return x if isinstance(x, str) else x.__name__
 
 
-def _normalize_hier(h):
-    """A copy of the hier declaration with class refs turned to names.
-
-    `rows` takes the classes so a typo is a NameError; the drops in
-    `hier.routes` deserve the same, but AssemblyPycell keys its
-    overrides by instance NAME, so the classes are resolved here.
-    """
-    h = dict(h)
-    routes = []
-    for r in h.get("routes") or []:
+def _normalize_routes(routes):
+    """The top's routes with class refs turned to names: drops accept
+    the classes for the NameError guarantee, AssemblyPycell keys its
+    overrides by instance name."""
+    out = []
+    for r in routes:
         r = dict(r)
         drops = []
         for d in r.get("drops") or []:
@@ -193,19 +218,43 @@ def _normalize_hier(h):
             drops.append(d)
         if "drops" in r:
             r["drops"] = drops
-        routes.append(r)
-    if "routes" in h:
-        h["routes"] = routes
-    return h
+        out.append(r)
+    return out
 
 
-def load_sidecar_spec(dirname, name):
-    """The spec of <dirname>/<name>.py, or None.
+def sidecar_from_module(mod):
+    """The module's SidecarCell, instantiated -- or None.
 
-    None when there is no file, the import fails (loudly, in the
-    log), or the module is a classic pycell rather than a sidecar.
-    Import goes through sys.modules like every pycell import does, so
-    the module cic.py already loaded is reused, not re-executed.
+    None when the module defines no SidecarCell subclass of its own,
+    which is what makes detection safe: a classic pycell that happens
+    to import this module is still a classic pycell. When several are
+    defined, the one named like the module wins.
+    """
+    cands = [v for v in vars(mod).values()
+             if isinstance(v, type) and issubclass(v, SidecarCell)
+             and v is not SidecarCell
+             and getattr(v, "__module__", None) == mod.__name__]
+    if not cands:
+        return None
+    for c in cands:
+        if c.__name__ == mod.__name__:
+            return c()
+    if len(cands) > 1:
+        log.warning(f"{mod.__name__}: {len(cands)} SidecarCell "
+                    f"classes and none named like the module; "
+                    f"taking {cands[0].__name__}")
+    return cands[0]()
+
+
+def import_beside(dirname, name, reload=False):
+    """Import <dirname>/<name>.py the pycell way, or None.
+
+    THE one lookup -- dirname + name + ".py", dirname on sys.path,
+    import through sys.modules -- shared by the sidecar loader, the
+    per-stack pycell runner and cic.py's own pycell import, which
+    each used to carry their own copy with drifted guards. `reload`
+    re-executes the module (the per-stack runner wants edits picked
+    up between runs); everything else reuses what is loaded.
     """
     import importlib
     dirname = dirname or ""
@@ -215,7 +264,26 @@ def load_sidecar_spec(dirname, name):
         sys.path.append(dirname)
     try:
         mod = importlib.import_module(name)
+        if reload:
+            mod = importlib.reload(mod)
     except Exception as e:
-        log.error(f"{name}.py: sidecar import failed: {e}")
+        log.error(f"{name}.py: import failed: {e}")
         return None
-    return spec_from_module(mod)
+    return mod
+
+
+def load_sidecar_spec(dirname, name):
+    """The compiled spec of <dirname>/<name>.py, or None.
+
+    None when there is no file, the import fails (loudly, in the
+    log), or the module is a classic pycell rather than a sidecar.
+    """
+    mod = import_beside(dirname, name)
+    if mod is None:
+        return None
+    for v in vars(mod).values():
+        if (isinstance(v, type) and issubclass(v, SidecarCell)
+                and v is not SidecarCell
+                and getattr(v, "__module__", None) == mod.__name__):
+            return v.compile()
+    return None

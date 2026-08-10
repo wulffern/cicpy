@@ -674,8 +674,8 @@ def pins_by_stack(layout, layer=None):
         from cicpy.core.trackmap import TrackMap
         layer = TrackMap(layout).pin_layer
     out = defaultdict(lambda: defaultdict(list))
-    from .subcell import stack_membership
-    member = stack_membership(layout)
+    from .subcell import subcell_membership
+    member = subcell_membership(layout)
     for net in getattr(layout, "nodeGraphList", []):
         g = layout.nodeGraph.get(net)
         if g is None:
@@ -1132,18 +1132,16 @@ def draw_supplies_first(layout, log=None):
     return drawn
 
 
-def _internal_nets(layout, stack):
-    """Nets wholly inside `stack` -- one source, shared with the plan.
-
-    Not recomputed here on purpose: the stack cell's port list and the
-    set of nets the stack level routes have to be the same set, or the
-    layout closes a net the generated subckt still calls a port.
+def _internal_nets_by_stack(layout):
+    """{stack: nets wholly inside it} -- one source, shared with the
+    plan. Not recomputed independently on purpose: the stack cell's
+    port list and the set of nets the stack level routes have to be
+    the same set, or the layout closes a net the generated subckt
+    still calls a port. Built ONCE per routing pass; the plan walk is
+    not cheap and used to run once per stack.
     """
-    from .subcell import plan_stack_cells
-    for entry in plan_stack_cells(layout):
-        if entry["stack"] == stack:
-            return set(entry["internal"])
-    return set()
+    from .subcell import plan_subcells
+    return {e["stack"]: set(e["internal"]) for e in plan_subcells(layout)}
 
 
 def route_stack_level(layout, margin=None, log=None, only=None,
@@ -1176,8 +1174,11 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     #- before ANY search: the straps have to exist to be avoided
     draw_supplies_first(layout, log)
     by_stack = pins_by_stack(layout)
-    from .subcell import stack_groups, subcell_spec
-    groups = stack_groups(layout)
+    from .subcell import subcell_groups, subcell_membership
+    groups = subcell_groups(layout)
+    #- one plan walk and one membership walk for the whole pass
+    internal_by_stack = _internal_nets_by_stack(layout)
+    member = subcell_membership(layout)
     #- `only` names the stacks to route. One at a time is the sane way
     #- to bring this up: a stack that is not clean is then the only
     #- thing that can have made the layout dirty, and the next one
@@ -1185,7 +1186,6 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     wanted = None
     if only:
         wanted = {only} if isinstance(only, str) else set(only)
-    types = {e["name"]: e["type"] for e in subcell_spec(layout)}
     #- a stack whose own pycell already wired it is finished. Routing it
     #- again lays a second set of wires over the first.
     by_pycell = getattr(layout, "_stacks_routed_by_pycell", None) or set()
@@ -1212,23 +1212,29 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         #- every source and drain pin over the stack's whole height,
         #- and the net routes as a plain vertical. The restriction was
         #- costing closure for nothing.
-        internal = _internal_nets(layout, stack)
+        internal = internal_by_stack.get(stack, set())
         pycell_did = stack in by_pycell
         if pycell_did and not boundary:
             log.info(f"{stack}: routed by its own pycell, not searching")
             continue
-        #- the TYPE picks the router, and only the stack router exists.
-        #- A declared diffpair or mirror wants symmetry or gate bussing
-        #- that a series-link search knows nothing about; running it
-        #- anyway routes wrongly with a confident log. Decline and say
-        #- why -- a pycell routes any type, and takes precedence anyway.
-        sc_type = types.get(stack, "stack")
-        if sc_type != "stack" and not pycell_did:
-            blocked.append((stack, "", f"no {sc_type} router yet; "
-                            f"ship a {stack} pycell or retype it"))
-            log.warning(f"{stack}: declared type={sc_type}, and only the "
-                        f"stack router exists; not routing")
-            continue
+        #- the GROUP picks the router: routeInternal() is the built
+        #- group's own say (StackGroup accepts the built-in series
+        #- router; a declared DiffPair or Mirror declines, because
+        #- symmetry and gate bussing are not a series-link search,
+        #- and running it anyway routes wrongly with a confident
+        #- log). A hook that already routed the subcell takes
+        #- precedence over both.
+        if not pycell_did:
+            grp = groups.get(stack)
+            verdict = grp.routeInternal() if grp is not None else None
+            if verdict is True:
+                #- the group routed its internal nets itself; the
+                #- boundary nets below are still ours
+                pycell_did = True
+            elif verdict:
+                blocked.append((stack, "", str(verdict)))
+                log.warning(f"{stack}: {verdict}; not routing")
+                continue
         subs = {n: rs for n, rs in by_stack[stack].items()
                 if len(rs) >= 2 and (n in internal or boundary)}
         if pycell_did:
@@ -1237,8 +1243,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
             subs = {n: rs for n, rs in subs.items() if n not in internal}
         if not subs:
             continue
-        from .subcell import stack_membership
-        insts_in_stack = sorted({n for n, st in stack_membership(layout).items()
+        insts_in_stack = sorted({n for n, st in member.items()
                                  if st == stack})
         allr = [r for v in by_stack[stack].values() for r in v]
         extent = (min(r.x1 for r in allr) - margin,

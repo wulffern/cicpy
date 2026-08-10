@@ -56,8 +56,12 @@ def _load_cells(cicfile):
 
 
 def _group_of(name):
-    m = re.match(r"(x\D+)", name or "")
-    return m.group(1) if m else ""
+    #- the ONE prefix rule (ciccreator's), shared with the router. The
+    #- private regex here used r"(x\D+)", and \D matches '<': a bus
+    #- instance xa<0> grouped as "xa<" and every bit became its own
+    #- group in cell_info.
+    from cicpy.core.mazerouter import stack_of
+    return stack_of(name or "")
 
 
 @mcp.tool()

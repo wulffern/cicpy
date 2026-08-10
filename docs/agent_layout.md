@@ -20,52 +20,64 @@ are expensive to rediscover.
 Everything below this section still works and is still the reference
 for the primitives, but since 2026-08 the way to lay out a large
 analog cell is **hierarchical and declarative**: one python sidecar
-beside the design holds the whole truth — subcells as classes, the
-floorplan, the supplies, the assembled top, and any per-subcell
-routing hooks, all in `<CELL>.py`. `LELOTEMP_OTAR` in
+beside the design holds the whole truth — one class per cell, one
+nested class per subcell, all in `<CELL>.py`. `LELOTEMP_OTAR` in
 lelo_temp_sky130a is the worked example — eight subcells and the
 top, all DRC clean and LVS "Circuits match uniquely", from one
-`LELOTEMP_OTAR.py`. (The sidecar was YAML for a week; it is python
-now because the escape-hatch hooks belong beside the declarations
-they serve, regexes lose their quoting rules, and a typo'd subcell
-name is a NameError at import instead of a silent no-match.)
+`LELOTEMP_OTAR.py`.
 
-### One file, four declarations
+The classes are REAL: `Stack` subclasses the core `StackGroup`, and
+the recipe builds the declared class itself, so a hook's `self` is
+the group that was actually placed — `self.addConnectivityRoute` is
+group-scoped, `self.layout` is the parent, and a rename in
+cellgroup.py breaks the design file loudly instead of silently.
+`SidecarCell` subclasses the recipe (`SidecarPycell`), so a cell
+that needs more than declarations overrides
+`beforePlace/afterPlace/beforeRoute/afterPaint` and calls `super()`.
+
+### One class, one cell
 
 `design/<LIB>/<CELL>.py`:
 
 ```python
-from cicpy.sidecar import Stack, Mirror, Hier
+from cicpy.sidecar import SidecarCell, Stack, Mirror
 
-place = {"groupbreak": 6, "channel": 6}   # flat-build placement knobs
+class LELOTEMP_OTAR(SidecarCell):
 
-class p_bias(Stack):                      # class name = subcell name;
-    match = r'^(xba\d+|xstack_p_bias_(top|bot)|xfill_p_bias_\d+)$'
-    group = "pmos"                        # base = stack|diffpair|mirror
-    channel = "bias"                      # register a named vertical channel
-    order = ['xba1', 'xba8', 'xba2', 'xba6', 'xba7', 'xba3']
+    place = {"groupbreak": 6, "channel": 6}  # flat-build knobs
 
-    def beforeRoute(layout, entry):       # optional hooks, WITHOUT self:
-        ...                               # route what the recipe cannot
-        return None                       # True = subcell fully routed
+    class p_bias(Stack):                # class name = subcell name;
+        match = r'^(xba\d+|xstack_p_bias_(top|bot)|xfill_p_bias_\d+)$'
+        group = "pmos"                  # base = Stack|DiffPair|Mirror
+        channel = "bias"                # named vertical channel
+        order = ['xba1', 'xba8', 'xba2', 'xba6', 'xba7', 'xba3']
 
-class r_deg(Stack):
-    match = r'^(xd2<\d+>|...)$'
-    fill = False                          # no dummy fill for resistors
+        def beforeRoute(self, entry):   # self IS the built group
+            self.layout.addConnectivityRoute(...)  # parent-scoped
+            self.addConnectivityRoute(...)         # group-scoped
+            return None                 # True = fully routed here
 
-rows = [                                  # the floorplan, bottom row first;
-    [n_load_a, n_load_b, n_mirr, r_deg],  # the classes themselves, so a
-    [p_in_a, p_in_b, p_bias, p_sw],       # typo is a NameError
-]
+    class r_deg(Stack):
+        match = r'^(xd2<\d+>|...)$'
+        fill = False                    # no dummy fill for resistors
 
-supplies = [                              # rings + strap connections
-    {"net": "VDD_1V8", "ring": "t", "strap": "top", "guard_exclude": "^xbs6$"},
-    {"net": "VSS", "ring": "b", "strap": "bottom", "strap_exclude": "^xd2<[1-9]"},
-]
+    rows = [                            # the floorplan, bottom row
+        [n_load_a, n_load_b, n_mirr, r_deg],   # first; the classes
+        [p_in_a, p_in_b, p_bias, p_sw],        # themselves, so a
+    ]                                          # typo is a NameError
 
-class hier(Hier):                         # the assembled top
-    channel = 8                           # um between the rows
-    routes = [                            # one ChannelRoute per crossing net
+    supplies = [                        # rings + strap connections
+        {"net": "VDD_1V8", "ring": "t", "strap": "top",
+         "guard_exclude": "^xbs6$"},
+        {"net": "VSS", "ring": "b", "strap": "bottom",
+         "strap_exclude": "^xd2<[1-9]"},
+    ]
+
+    #- the assembled top IS the cell, so its declarations sit on the
+    #- cell class: `channel` um between the rows, one ChannelRoute
+    #- per crossing net; presence of `routes` enables the hier build
+    channel = 8
+    routes = [
         {"net": "VCP", "track": 6, "drops": [[n_mirr, "M2", "left"],
                                              [p_bias, "M2", "right"]]},
         {"net": "VS", "track": 14, "layer": "M4",
@@ -73,18 +85,25 @@ class hier(Hier):                         # the assembled top
     ]
 ```
 
-`cicpy/sidecar.py` compiles the module into a spec dict; the recipes
-that execute it live in `core/sidecarcell.py` (`SidecarPycell` for
-the flat build, `AssemblyPycell` for the top; publication in
-`core/subcell.py`). Detection is by content: a `<CELL>.py` defining
-`Subcell` classes is the sidecar; a module with module-level hooks
-and `data` is a classic pycell, unchanged — the escape hatch for a
-cell the recipe cannot say. Per-subcell hooks (`beforePlace`,
-`beforeRoute`, legacy `route`) live on the classes and run between
-afterPlace and beforeRoute; a separate `<SUBCELLNAME>.py` beside the
-design still works when a subcell's routing outgrows the sidecar
-file, but the class hooks win when both exist, and stubs are no
-longer generated.
+`SidecarCell.compile()` turns the class into the spec dict; the
+recipes that execute it live in `core/sidecarcell.py`
+(`SidecarPycell` for the flat build, `AssemblyPycell` for the top;
+publication in `core/subcell.py`). Detection is by content: a
+`<CELL>.py` defining a `SidecarCell` subclass is the sidecar; a
+module with module-level hooks and `data` is a classic pycell,
+unchanged — the escape hatch for a cell the recipe cannot say.
+
+Subcell hooks are methods — `beforePlace(self, entry)` /
+`beforeRoute(self, entry)`, run between afterPlace and beforeRoute.
+There is no class-level `route` hook: `LayoutCell.route()` is a real
+method a hook would shadow; claim the subcell by returning True from
+`beforeRoute`. A separate `<SUBCELLNAME>.py` beside the design still
+works (plain functions `(layout, entry)`, legacy `route` included)
+when a subcell's routing outgrows the sidecar file, but the class
+hooks win when both exist, and stubs are no longer generated. A
+`DiffPair`/`Mirror` declines the built-in series router through its
+`routeInternal()` — implementing that method on the class is where a
+real diffpair/mirror router will land.
 
 ### The flow
 

@@ -40,7 +40,9 @@ HIERARCHY_FULL = 3
 
 
 def _is_xfill_name(name):
-    return bool(name) and str(name).startswith("xfill_")
+    #- the one definition of the fill-device naming contract
+    from cicpy.groups import is_physical_fill_name
+    return bool(name) and is_physical_fill_name(str(name))
 
 
 class LayoutScene(QGraphicsScene):

@@ -386,19 +386,18 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
     pycell = None
     pycellData = None
-    if(os.path.exists(lcell.dirname + lcell.name + ".py")):
-        sys.path.append(lcell.dirname)
-        pycell = importlib.import_module(lcell.name)
-        #- detection is by CONTENT: a module declaring Subcell
-        #- classes is the declarative sidecar and the recipe executes
-        #- it; any other module is a classic pycell, hooks and data
-        #- as ever. See cicpy/sidecar.py.
-        from cicpy.sidecar import spec_from_module
-        _spec = spec_from_module(pycell)
-        if _spec is not None:
-            from cicpy.core.sidecarcell import SidecarPycell, has_placement
-            if has_placement(_spec):
-                pycell = SidecarPycell(_spec)
+    from cicpy.sidecar import import_beside
+    pycell = import_beside(lcell.dirname, lcell.name)
+    if pycell is not None:
+        #- detection is by CONTENT: a module declaring a SidecarCell
+        #- class is the declarative sidecar -- the instance IS the
+        #- pycell, recipe methods inherited and overridable; any
+        #- other module is a classic pycell, hooks and data as ever.
+        #- See cicpy/sidecar.py.
+        from cicpy.sidecar import sidecar_from_module
+        _side = sidecar_from_module(pycell)
+        if _side is not None:
+            pycell = _side
         if(hasattr(pycell,"data")):
             pycellData = pycell.data
     elif lcell.name.endswith("_HIER"):

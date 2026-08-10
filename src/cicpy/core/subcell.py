@@ -125,28 +125,43 @@ def subcell_membership(layout):
             if isinstance(c, (StackGroup, CellGroup)):
                 _claim(c, gname)
 
-    def _walk(grp):
-        #- marked by the design: it is a subcell whatever it is made of
-        if getattr(grp, "subcell", False):
-            _claim(grp, getattr(grp, "name", ""))
-            return
-        if isinstance(grp, StackGroup):
-            _claim(grp, getattr(grp, "name", ""))
-            return  #- below a stack is routing, not placement
-        for c in getattr(grp, "children", []) or []:
-            if isinstance(c, (StackGroup, CellGroup)):
-                _walk(c)
-
     #- the groups fill in around the sidecar, never over it: _claim
     #- respects an instance the sidecar already took
-    for grp in getattr(layout, "cellgroups", []) or []:
-        _walk(grp)
+    for gname, grp in iter_subcell_groups(layout):
+        _claim(grp, gname)
     return member
 
 
 #- the old name, kept because it reads correctly wherever the subcell
 #- IS a stack, which is still the common case
 stack_membership = subcell_membership
+
+
+def iter_subcell_groups(layout):
+    """Yield (name, group) for every group that IS a subcell: one the
+    design marked with ``subcell = True``, else any StackGroup -- a
+    column of devices is the decomposition that needs no thought.
+    Below a claimed group is routing, not placement, so the walk does
+    not descend into it.
+
+    THE one walk. subcell_membership and subcell_groups both consume
+    it; they used to carry their own copies of it, with a comment
+    begging to keep them in step.
+    """
+    from cicpy.core.cellgroup import CellGroup, StackGroup
+
+    def _walk(grp):
+        if getattr(grp, "subcell", False) or isinstance(grp, StackGroup):
+            nm = getattr(grp, "name", "")
+            if nm:
+                yield nm, grp
+            return
+        for c in getattr(grp, "children", []) or []:
+            if isinstance(c, (StackGroup, CellGroup)):
+                yield from _walk(c)
+
+    for grp in getattr(layout, "cellgroups", []) or []:
+        yield from _walk(grp)
 
 
 def subcell_groups(layout):
@@ -157,27 +172,8 @@ def subcell_groups(layout):
     instanceRegex and takes a different path through getNodeAccessRects
     than passing includeInstances by hand does. The hand written routes
     that worked all went through the group.
-
-    Same rule as subcell_membership: a group the design marked, else a
-    StackGroup. Keep the two in step or the router will be handed a
-    name it cannot find a group for.
     """
-    from cicpy.core.cellgroup import CellGroup, StackGroup
-    out = {}
-
-    def _walk(grp):
-        if getattr(grp, "subcell", False) or isinstance(grp, StackGroup):
-            nm = getattr(grp, "name", "")
-            if nm:
-                out[nm] = grp
-            return
-        for c in getattr(grp, "children", []) or []:
-            if isinstance(c, (StackGroup, CellGroup)):
-                _walk(c)
-
-    for grp in getattr(layout, "cellgroups", []) or []:
-        _walk(grp)
-    return out
+    return dict(iter_subcell_groups(layout))
 
 
 stack_groups = subcell_groups
@@ -200,7 +196,7 @@ def run_stack_pycells(layout, log=None):
     log = log or logging.getLogger("MazeRouter")
     handled = set()
     try:
-        plan = plan_stack_cells(layout)
+        plan = plan_subcells(layout)
     except Exception as e:
         log.warning(f"could not plan stack cells: {e}")
         return handled
@@ -254,7 +250,7 @@ def plan_subcells(layout, parent_name=None):
     #- name prefix -- so asking the router for a stack by name matched
     #- nothing and
     #- reported 0 routed, 0 blocked, which reads exactly like success.
-    member = stack_membership(layout)
+    member = subcell_membership(layout)
 
     for inst in layout.iterInstances():
         name = getattr(inst, "instanceName", "") or ""
@@ -466,12 +462,15 @@ def _run_stack_pycell(layout, entry, log, cell=None):
 
     Two places a subcell's hooks can live, tried in this order:
 
-      1. its Subcell class in the <CELL>.py sidecar -- beforePlace /
-         beforeRoute / route written inline, without self, beside the
-         declaration they belong to. See cicpy/sidecar.py.
+      1. methods on the subcell's own class in the <CELL>.py sidecar
+         -- beforePlace(self, entry) / beforeRoute(self, entry),
+         where self IS the built group (a Stack is a StackGroup), so
+         group-scoped routing is self.addConnectivityRoute and the
+         parent is self.layout. See cicpy/sidecar.py.
       2. its own <STACKCELL>.py beside the design -- same lookup as
          cic.py's, dirname + name + ".py" on sys.path. The escape
-         hatch for a subcell whose routing outgrows the sidecar file.
+         hatch keeps the old module contract: plain functions
+         (layout, entry), legacy route() included.
 
     The hook is `route(layout, entry)`: the parent the stack came from,
     and its plan entry. The parent is passed because the node graph
@@ -484,31 +483,27 @@ def _run_stack_pycell(layout, entry, log, cell=None):
     publication time, which is exactly the bug: by then route() has run
     and nothing the pycell adds will be drawn.
     """
-    import importlib
-    import os
-    import sys
     #- the plan carries the name; the CELL does not exist yet when this
     #- runs, and that is the point
     name = entry["name"]
-    cls = (getattr(layout, "_sidecar_classes", None) or {}).get(
-        entry["stack"])
-    if cls is not None:
+    grp = subcell_groups(layout).get(entry["stack"])
+    if grp is not None:
         from cicpy.sidecar import hooks_of
-        hooks = hooks_of(cls)
-        if hooks:
+        methods = hooks_of(type(grp))
+        if methods:
+            #- hooks are METHODS on the built group: (self, entry),
+            #- with self.layout the parent. Adapted to the shared
+            #- invoker's (layout, entry) shape here.
+            hooks = {h: (lambda fn=fn: lambda _lay, e: fn(grp, e))()
+                     for h, fn in methods.items()}
             return _invoke_stack_hooks(hooks, name, layout, entry,
                                        log, cell)
+    from cicpy.sidecar import import_beside
     dirname = getattr(layout, "dirname", "") or ""
-    path = os.path.join(dirname, name + ".py")
-    if not os.path.exists(path):
-        return False
-    if dirname not in sys.path:
-        sys.path.append(dirname)
-    try:
-        mod = importlib.import_module(name)
-        importlib.reload(mod)
-    except Exception as e:
-        log.error(f"{name}: pycell failed to import: {e}")
+    #- reload: the per-stack file is the one pycell edited between
+    #- runs of the same process
+    mod = import_beside(dirname, name, reload=True)
+    if mod is None:
         return False
     hooks = {h: getattr(mod, h) for h in
              ("beforePlace", "beforeRoute", "route")
@@ -591,7 +586,7 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
     if design is None:
         log.warning("no design reachable from the layout; no stack cells written")
         return []
-    plan = plan if plan is not None else plan_stack_cells(layout)
+    plan = plan if plan is not None else plan_subcells(layout)
     made = []
     for entry in plan:
         name = entry["name"]

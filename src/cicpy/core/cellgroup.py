@@ -226,6 +226,16 @@ class CellGroup(LayoutCell):
         self.layout = layout
         self.boundary_ports = {}
 
+    def routeInternal(self):
+        """The group's say on its own internal routing, asked by
+        route_stack_level after the hooks have run. Return None to
+        hand the nets to the built-in series router; a string
+        declines with that reason; True means fully routed here
+        (boundary nets stay the router's). Subcell kinds without a
+        built-in router (DiffPair, Mirror in cicpy/sidecar.py)
+        override this to decline instead of routing wrongly."""
+        return None
+
     @property
     def stacks(self):
         return [c for c in self.children if isinstance(c, StackGroup)]
@@ -376,8 +386,11 @@ class CellGroup(LayoutCell):
     # ------------------------------------------------------------------
     # Stack creation
     # ------------------------------------------------------------------
-    def addStack(self, name, instances, preserveOrder=False):
-        stack = StackGroup(self.layout, name)
+    def addStack(self, name, instances, preserveOrder=False, cls=None):
+        #- `cls` lets a declared subcell class BE the group that is
+        #- built (cicpy/sidecar.py): hooks are then methods on the
+        #- placed group itself
+        stack = (cls or StackGroup)(self.layout, name)
         stack.preserve_order = preserveOrder
         stack.addInstances(instances)
         self.add(stack)
@@ -396,13 +409,19 @@ class CellGroup(LayoutCell):
     def addParallelStackByGroup(self, groupName, name=None, fillGroup=None):
         return self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
 
-    def addTransistorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
+    def _addRoutedStackByGroup(self, groupName, name, fillGroup, kind,
+                               router, layer, terminals, edge, edges,
+                               excludeInstances, excludeNets, minRects,
+                               sameTerminal, routeDiodes, diodeLayer):
+        #- transistor and mirror stacks are the same build with a
+        #- different router and defaults; the two used to be
+        #- copy-pasted bodies
         stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
-        stack.kind = "transistorStack"
+        stack.kind = kind
         stack.stack().addTaps()
         if routeDiodes:
             stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
-        stack.routeParallel(
+        getattr(stack, router)(
             layer=layer,
             terminals=terminals,
             edge=edge,
@@ -413,27 +432,21 @@ class CellGroup(LayoutCell):
             sameTerminal=sameTerminal,
         )
         return stack
+
+    def addTransistorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
+        return self._addRoutedStackByGroup(
+            groupName, name, fillGroup, "transistorStack", "routeParallel",
+            layer, terminals, edge, edges, excludeInstances, excludeNets,
+            minRects, sameTerminal, routeDiodes, diodeLayer)
 
     def transistorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
         return self.addTransistorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
 
     def addCurrentMirrorStackByGroup(self, groupName, name=None, fillGroup=None, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, routeDiodes=True, diodeLayer="M1"):
-        stack = self.addStackByGroup(groupName, name=name, fillGroup=fillGroup)
-        stack.kind = "mirrorStack"
-        stack.stack().addTaps()
-        if routeDiodes:
-            stack.routeDiodeConnected(layer=diodeLayer, excludeInstances=excludeInstances)
-        stack.routeMirror(
-            layer=layer,
-            terminals=terminals,
-            edge=edge,
-            edges=edges,
-            excludeInstances=excludeInstances,
-            excludeNets=excludeNets,
-            minRects=minRects,
-            sameTerminal=sameTerminal,
-        )
-        return stack
+        return self._addRoutedStackByGroup(
+            groupName, name, fillGroup, "mirrorStack", "routeMirror",
+            layer, terminals, edge, edges, excludeInstances, excludeNets,
+            minRects, sameTerminal, routeDiodes, diodeLayer)
 
     def currentMirrorStack(self, groupName, name=None, fillGroup=None, **route_kwargs):
         return self.addCurrentMirrorStackByGroup(groupName, name=name, fillGroup=fillGroup, **route_kwargs)
@@ -449,32 +462,39 @@ class CellGroup(LayoutCell):
             return super().calcBoundingRect()
         return Cell.calcBoundingRectFromList(active, False)
 
+    def _extent_members(self):
+        """What counts as this group's content for the geometry
+        helpers below. ONE emptiness rule, overridden by StackGroup
+        to its `_members()` -- the guards used to be written twice
+        and had already started to drift."""
+        return self.stacks
+
     def left(self):
-        if not self.stacks:
+        if not self._extent_members():
             return 0
         self.updateBoundingRect()
         return self.x1
 
     def right(self):
-        if not self.stacks:
+        if not self._extent_members():
             return 0
         self.updateBoundingRect()
         return self.x2
 
     def bottom(self):
-        if not self.stacks:
+        if not self._extent_members():
             return 0
         self.updateBoundingRect()
         return self.y1
 
     def top(self):
-        if not self.stacks:
+        if not self._extent_members():
             return 0
         self.updateBoundingRect()
         return self.y2
 
     def abutTop(self, other, space=0):
-        if not self.stacks:
+        if not self._extent_members():
             return self
         dx = int(other.left() - self.left())
         dy = int(other.top() + space - self.bottom())
@@ -482,7 +502,7 @@ class CellGroup(LayoutCell):
         return self
 
     def abutBottom(self, other, space=0):
-        if not self.stacks:
+        if not self._extent_members():
             return self
         dx = int(other.left() - self.left())
         dy = int(other.bottom() - space - self.top())
@@ -490,7 +510,7 @@ class CellGroup(LayoutCell):
         return self
 
     def abutLeft(self, other, space=0):
-        if not self.stacks:
+        if not self._extent_members():
             return self
         dx = int(other.left() - space - self.right())
         dy = int(other.bottom() - self.bottom())
@@ -498,7 +518,7 @@ class CellGroup(LayoutCell):
         return self
 
     def abutRight(self, other, space=0):
-        if not self.stacks:
+        if not self._extent_members():
             return self
         dx = int(other.right() + space - self.left())
         dy = int(other.bottom() - self.bottom())
@@ -599,21 +619,11 @@ class StackGroup(CellGroup):
             instances.append(inst)
         return instances
 
-    def instanceRegex(self):
-        names = [re.escape(inst.instanceName) for inst in self._route_instances()]
-        if not names:
-            return ""
-        return "^(" + "|".join(names) + ")$"
-
-    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=1, excludeInstances=""):
-        include = self.instanceRegex()
-        self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
-        return self
-
-    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances=""):
-        include = self.instanceRegex()
-        self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include)
-        return self
+    #- instanceRegex / addConnectivityRoute /
+    #- addOrthogonalConnectivityRoute are INHERITED from CellGroup:
+    #- their bodies only reach self._route_instances(), which this
+    #- class overrides, so the parent versions already scope to the
+    #- stack. They were redefined here verbatim for a while.
 
     def representativeAccessRects(self, net, accessLayer, anymetal=False, terminalFilter="nonbulk"):
         rects = []
@@ -1153,23 +1163,8 @@ class StackGroup(CellGroup):
         self.sort()
         return max(inst.width() for inst in self.instances)
 
-    def left(self):
-        if not self._members():
-            return 0
-        self.updateBoundingRect()
-        return self.x1
-
-    def bottom(self):
-        if not self._members():
-            return 0
-        self.updateBoundingRect()
-        return self.y1
-
-    def top(self):
-        if not self._members():
-            return 0
-        self.updateBoundingRect()
-        return self.y2
+    def _extent_members(self):
+        return self._members()
 
     def stack(self, x=None, y=None, ygap=0):
         if not self.instances:
@@ -1185,50 +1180,6 @@ class StackGroup(CellGroup):
             ypos = int(inst.y2 + ygap)
         self.updateBoundingRect()
         return self
-
-    def right(self):
-        if not self._members():
-            return 0
-        self.updateBoundingRect()
-        return self.x2
-
-    def abutBottom(self, other, space=0):
-        if not self._members():
-            return self
-        dx = int(other.left() - self.left())
-        dy = int(other.bottom() - space - self.top())
-        self.translate(dx, dy)
-        return self
-
-    def abutTop(self, other, space=0):
-        if not self._members():
-            return self
-        dx = int(other.left() - self.left())
-        dy = int(other.top() + space - self.bottom())
-        self.translate(dx, dy)
-        return self
-
-    def abutLeft(self, other, space=0):
-        if not self._members():
-            return self
-        dx = int(other.left() - space - self.right())
-        dy = int(other.bottom() - self.bottom())
-        self.translate(dx, dy)
-        return self
-
-    def abutRight(self, other, space=0):
-        if not self._members():
-            return self
-        dx = int(other.right() + space - self.left())
-        dy = int(other.bottom() - self.bottom())
-        self.translate(dx, dy)
-        return self
-
-    def moveBelow(self, other, ygap=0):
-        return self.abutBottom(other, ygap)
-
-    def moveAbove(self, other, ygap=0):
-        return self.abutTop(other, ygap)
 
     def _tap_name(self, cell_name, suffix):
         #- the trailing D of a diode connected variant is not part of
@@ -1432,9 +1383,6 @@ class StackGroup(CellGroup):
         self.sort()
         self.updateBoundingRect()
         return self
-
-    def exportedPorts(self):
-        return self.exportBoundaryPorts()
 
     def toJson(self):
         return {

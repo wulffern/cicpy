@@ -3148,20 +3148,30 @@ class LayoutCell(Cell):
             riser.setNet(node)
             self.add(riser)
 
-            #- magic refuses a PARTIAL overlap of top-level geometry on
-            #- a subcell's on the same layer: cover the pad exactly
-            if r.layer == layer or r.layer == self._pinLayer():
-                cov = Rect(r.layer, int(r.x1), int(r.y1),
-                           int(r.x2 - r.x1), int(r.y2 - r.y1))
-                cov.setNet(node)
-                self.add(cov)
-
             ct = (self._fittedCut(r, layer)
                   or Cut.getInstance(r.layer, layer, 1, 1)
                   or Cut.getInstance(layer, r.layer, 1, 1))
             if ct is not None:
                 ct.moveCenter(cx, cy)
                 self.add(ct)
+
+            #- magic refuses a PARTIAL overlap of top-level geometry on
+            #- a subcell's on the same layer, and covering the pin
+            #- EXACTLY is not enough: a via that lands on a pin is
+            #- wider than the pin (a 1x1 M1-M5 stack is 4800 against a
+            #- 3200 tab), so its own enclosure is top-level metal
+            #- hanging over the subcell's edge -- which is the partial
+            #- overlap, one step out. The cover is the union of the pin
+            #- and the via, so the subcell's shape is wholly inside it.
+            if ct is not None and (r.layer == layer
+                                   or r.layer == self._pinLayer()):
+                ux1 = min(int(r.x1), int(ct.x1))
+                uy1 = min(int(r.y1), int(ct.y1))
+                ux2 = max(int(r.x2), int(ct.x2))
+                uy2 = max(int(r.y2), int(ct.y2))
+                cov = Rect(r.layer, ux1, uy1, ux2 - ux1, uy2 - uy1)
+                cov.setNet(node)
+                self.add(cov)
             #- the intermediate layers' own pads: a via stack leaves a
             #- cut-sized shape on each, and a cut-sized shape is under
             #- the minimum area every one of them asks for

@@ -354,13 +354,30 @@ class Route(Cell):
             return (1, 2)
         return (2, 1)
 
-    def _addCuts(self, rects, allcuts, hcuts, vcuts):
+    def _stopLayer(self, which):
+        """The layer a start/end stack should land on, or None.
+
+        ``startStopLayerM2`` / ``endStopLayerM2`` -- and the same with
+        an ``=``. A pin normally arrives with its own via under it, so
+        a route that drives down to the pin's layer stacks a second
+        via on the first; naming the layer the pin is already carried
+        up to leaves one via, and one set of pads, at that spot.
+        """
+        m = re.search(which + r"StopLayer=?([A-Za-z]+\d*)",
+                      self.options, re.IGNORECASE)
+        return m.group(1) if m else None
+
+    def _addCuts(self, rects, allcuts, hcuts, vcuts, stopLayer=None):
         if self.routeLayer == "PO":
             return []
         default_hcuts, default_vcuts = self._allowedCutCounts(hcuts, vcuts)
         cuts = []
         for rect in rects:
             if rect is None or self.routeLayer == rect.layer:
+                continue
+            #- the pin is already up at the stop layer: the route meets
+            #- it on its own metal, no cut belongs here at all
+            if stopLayer and self.routeLayer == stopLayer:
                 continue
 
             cut_h = default_hcuts
@@ -370,7 +387,9 @@ class Route(Cell):
             elif self.fillvcut and rect.isVertical():
                 cut_h, cut_v = (1, 2)
 
-            insts = Cut.getCutsForRects(self.routeLayer, [rect], cut_h, cut_v, self.leftAlignCut)
+            insts = Cut.getCutsForRects(self.routeLayer, [rect], cut_h,
+                                        cut_v, self.leftAlignCut,
+                                        stopLayer)
             inst = insts[0] if insts else None
             if inst is not None:
                 cuts.append(inst)
@@ -383,7 +402,8 @@ class Route(Cell):
 
         lcuts = self.startCuts if self.startCuts > 0 else self.cuts
         lvcuts = self.startVCuts if self.startVCuts > 0 else self.vcuts
-        cuts = self._addCuts(self.startRects, self.startCutRects, lcuts, lvcuts)
+        cuts = self._addCuts(self.startRects, self.startCutRects,
+                             lcuts, lvcuts, self._stopLayer("start"))
 
         if self.startOffsetCut == "HIGH":
             for cut in cuts:
@@ -404,7 +424,8 @@ class Route(Cell):
 
         lcuts = self.endCuts if self.endCuts > 0 else self.cuts
         lvcuts = self.endVCuts if self.endVCuts > 0 else self.vcuts
-        cuts = self._addCuts(self.stopRects, self.endCutRects, lcuts, lvcuts)
+        cuts = self._addCuts(self.stopRects, self.endCutRects,
+                             lcuts, lvcuts, self._stopLayer("end"))
 
         if self.endOffsetCut == "HIGH":
             for cut in cuts:

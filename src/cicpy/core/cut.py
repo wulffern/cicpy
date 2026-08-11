@@ -263,23 +263,38 @@ class Cut(Cell):
         return fill_inst
 
     @staticmethod
-    def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True):
-        """Get cuts for a list of rectangles, matching C++ implementation"""
+    def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True, stopLayer:str=None):
+        """Get cuts for a list of rectangles, matching C++ implementation
+
+        ``stopLayer`` ends the stack there instead of on the pin's own
+        layer. A pin usually arrives with its own via already under it
+        -- a li pin has an mcon, a MiM plate has its stack -- and a
+        route that drives all the way down lands a second via on top
+        of the first. The two are concentric, each paints its own
+        pads, and the pads are wider than the wire, so a lane pitched
+        for the wire loses its spacing to the neighbour. Stopping at
+        the layer the pin is ALREADY brought up to leaves one via and
+        one set of pads. The cut is still placed on the pin's
+        rectangle: only its lower end changes.
+        """
         cuts_out = []
         
         for r in rects:
             if r is None:
                 continue
             
-            if routeLayer != r.layer:
+            #- the layer the stack lands on: the pin's own, or the one
+            #- the caller says the pin is already carried up to
+            landing = stopLayer or r.layer
+            if routeLayer != landing:
                 # Need to create a cut
-                inst = Cut.getInstance(routeLayer, r.layer, cuts, vcuts)
+                inst = Cut.getInstance(routeLayer, landing, cuts, vcuts)
                 
                 if inst:
                     # Check if we need to swap cuts (orientation mismatch)
                     if (r.isVertical() and inst.isHorizontal()) or (r.isHorizontal() and inst.isVertical()):
                         # Got the wrong cut orientation, swap horizontal and vertical cuts
-                        inst = Cut.getInstance(routeLayer, r.layer, vcuts, cuts)
+                        inst = Cut.getInstance(routeLayer, landing, vcuts, cuts)
 
                     #- NEVER A CUT BIGGER THAN THE PIN IT LANDS ON. The
                     #- orientation swap fits the shape and not the size:
@@ -303,7 +318,7 @@ class Cut(Cell):
                         chosen = None
                         for (hc, vc) in ((vcuts, cuts), (2, 1), (1, 2),
                                          (1, 1)):
-                            alt = Cut.getInstance(routeLayer, r.layer,
+                            alt = Cut.getInstance(routeLayer, landing,
                                                   hc, vc)
                             if _fits(alt):
                                 chosen = alt

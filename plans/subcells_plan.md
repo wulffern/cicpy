@@ -779,3 +779,83 @@ match uniquely", both unchanged.
    (`LELOTEMP_CMP_P_DIFF.py`). They must stay findable by `import_beside` and
    not be mistaken for sidecars. Build CMP after Stage 5; it is the only cell
    using them.
+
+
+# The DRC that is left, and what is known about it (2026-08-12)
+
+Asked for: LELOTEMP_BIAS_IBP and LELO_TEMP DRC clean. NOT ACHIEVED.
+Both counts are unchanged from the start of this work -- 8 and 95 --
+so nothing here made them worse, but nothing made them go away either.
+What follows is everything established, so the next attempt starts from
+the end of this one rather than the beginning.
+
+## LELOTEMP_BIAS_IBP: 8 errors, one rule
+
+    "This layer can't abut or partially overlap between subcells"
+
+- **All 8 belong to LELOTEMP_BIAS_IBP itself** -- `drc listall count`
+  returns `{LELOTEMP_BIAS_IBP 8}`, nothing to its children. Every one of
+  its eleven subcells is 0 on its own.
+- Two sites, in `.mag` file units (multiply by 50 for cicpy units):
+  `1124 11844 1176 11940` (inside p_src, around its LPI pin) and
+  `15772 17152 15829 17200` (inside the OTA, around PWRUP_1V8).
+- The rule fires 52-56 times for 8 counted errors.
+
+**Ruled out, each by experiment:**
+
+- *Not* a via hanging over a subcell pin. LELOTEMP_OTAR has two cuts
+  that partially overlap a subcell pin (`xp_in_a/VIN`, 3400x8800 over
+  3200x4000) and is 0 DRC. The containment census is
+  OTAR: 14 inside / 8 containing / 2 partial, at 0 errors;
+  BIAS_IBP: 27 / 4 / 2, at 8.
+- *Not* the top-level cover. Covering the pin exactly, covering the
+  union of pin and via, and removing the cover altogether all give 8.
+- *Not* the pin being narrower than the smallest via (3200 against
+  3800). Growing the pin at the edge to 4800x4800 changed nothing.
+- *Not* introduced by the hierarchy work: the same 8 were there at the
+  stage3 baseline, before any of it.
+
+**A minimal reproducer exists**, which is the most useful thing here:
+adding one line to LELOTEMP_OTAR.afterPorts --
+
+    layout.addPortOnEdge("M3", "PWRUP_1V8", "top", "-|--", "")
+
+-- creates exactly this error inside OTAR (1 error, 6 fires) and takes
+BIAS_IBP from 8 to 6. So one `addPortOnEdge` on a gate tab reproduces it
+in a cell that is otherwise clean, in about two seconds per build.
+
+**What the next attempt should do first:** open the cell in magic
+INTERACTIVELY and look. Every scripted query returned empty --
+`what`, `what -list` and `select area` all produce nothing under
+`-dnull`, whether or not the cells are expanded, so the layer involved
+was never identified. Interactively:
+
+    magic -T sky130A ../design/LELO_TEMP_SKY130A/LELOTEMP_BIAS_IBP.mag
+    box values 1100 11820 1200 11960 ; expand ; select area ; what
+
+The one unanswered question is WHICH LAYER, and it is one command away
+from someone with a display. Everything else above is already narrowed.
+
+Worth knowing: klayout on the flattened GDS (`make kdrc`) reports a
+DIFFERENT set -- ct.2 x12, psdm.1 x10, ct.1, via2.1a, 24 total -- so
+the magic rule and the sign-off deck disagree about this cell, and
+which of them the tapeout actually cares about is a question for the
+owner.
+
+## LELO_TEMP: 95 errors, and why they are a different job
+
+LELO_TEMP is the one prototype the plan never converted. Its 778 lines
+are `_signal_routes` with a local `wire()` painting raw Rects, `stk()`
+placing via stacks, and literal offsets (`- 1500`, `- 4250`, `3000`) --
+exactly the custom route code rule 1 forbids and the stored coordinates
+rule 3 forbids. Its errors are in that hand geometry, in three clusters
+(file units): a met4 bus at y 21790-21820 spanning x 6400-11200, a
+met3/met4 knot at 19620-19840 x 21990-22200, and a met1/met2 knot at
+29850-30550 x 1690-3730 -- plus 56 fires of the BIAS_IBP rule above,
+inherited.
+
+Fixing those 95 one at a time is not the work. Converting LELO_TEMP to
+the declarative flow is, and it is a stage of its own: an L-shaped
+floorplan that `rows` cannot state, four finished blocks rather than
+device columns, and a hand-built signal net between them. It should be
+scoped before it is started.

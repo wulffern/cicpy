@@ -129,11 +129,18 @@ class MazeRouter:
         first search did not finish in five minutes. The obstacles do not change during a
         search, so they are gathered once here.
 
-        Buckets are keyed on the axis the pin's own layer runs along.
+        A GRID, keyed (x bucket, y bucket). It was one scalar range from
+        min(x1,y1) to max(x2,y2), which is not an index of anything: a
+        pin far along x was filed in every bucket from its y up to its
+        x, and a query near the far corner of the cell got back most of
+        the pins in it. via_is_free then walked that list per node --
+        34 of 40 profiled seconds on LELO_TEMP, none of it in a call it
+        could be blamed on.
         """
         #- a set: one pin spans many tracks and would otherwise be
         #- indexed once per track. Measured, 45 copies of a single box.
         index = defaultdict(set)
+        bucket = self.BUCKET
         for layer, direction in self.tm.directions.items():
             horizontal = direction == "h"
             for t in self.tm.tracks.get(layer, []):
@@ -145,18 +152,25 @@ class MazeRouter:
                         #- its layer runs
                         box = ((s0, s1, t.coord, t.coord) if horizontal
                                else (t.coord, t.coord, s0, s1))
-                        lo = int(min(box[0], box[2]) // self.BUCKET)
-                        hi = int(max(box[1], box[3]) // self.BUCKET)
-                        for b in range(lo, hi + 1):
-                            index[b].add((other, box))
+                        for bx in range(int(box[0] // bucket),
+                                        int(box[1] // bucket) + 1):
+                            for by in range(int(box[2] // bucket),
+                                            int(box[3] // bucket) + 1):
+                                index[(bx, by)].add((other, box))
         return {k: list(v) for k, v in index.items()}
 
     def _pins_near(self, x1, x2, y1, y2):
-        lo = int(min(x1, y1) // self.BUCKET)
-        hi = int(max(x2, y2) // self.BUCKET)
+        """Every indexed pin that COULD overlap this box.
+
+        A superset -- the caller tests the overlap exactly -- so the
+        grid only has to be conservative, never tight.
+        """
+        bucket = self.BUCKET
         out = []
-        for b in range(lo, hi + 1):
-            out.extend(self._pin_index.get(b, ()))
+        get = self._pin_index.get
+        for bx in range(int(x1 // bucket), int(x2 // bucket) + 1):
+            for by in range(int(y1 // bucket), int(y2 // bucket) + 1):
+                out.extend(get((bx, by), ()))
         return out
 
     def _coords(self, layer):
@@ -203,9 +217,11 @@ class MazeRouter:
             return False
         reach = self.clearance(layer)
         near = False
-        for t in tracks:
-            if abs(t.coord - coord) >= reach:
-                continue
+        #- strictly within one clearance either side; the coordinates
+        #- are integers on a fixed pitch, so the open interval is the
+        #- closed one a unit in
+        for t in self.tm.track_range(layer, coord - reach + 1,
+                                     coord + reach - 1):
             near = True
             if t.wire_overlaps(self.net, lo, hi):
                 return False
@@ -326,9 +342,7 @@ class MazeRouter:
             #- of that they must still be `space` apart.
             margin = (self.rule(layer, "space")
                       + self.rule(layer, "width") // 2)
-            for t in self.tm.tracks.get(layer, []):
-                if not (lo - margin <= t.coord <= hi + margin):
-                    continue
+            for t in self.tm.track_range(layer, lo - margin, hi + margin):
                 #- On the pin layer, look at unattributed metal too and
                 #- let the route's own pins through. Everywhere else the
                 #- layer rule stands.

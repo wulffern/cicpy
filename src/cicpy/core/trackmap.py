@@ -543,12 +543,50 @@ class TrackMap:
                 out.append(t.index)
         return out
 
+    def _pitch_of(self, tracks):
+        """The step between consecutive tracks, or 0 if there is none.
+
+        The coordinates are built as ``lo + i * pitch`` -- an arithmetic
+        sequence -- so a coordinate maps to an index by arithmetic. 0
+        means "cannot", and every caller falls back to a scan.
+        """
+        if len(tracks) < 2:
+            return 0
+        pitch = tracks[1].coord - tracks[0].coord
+        return pitch if pitch > 0 else 0
+
+    def track_range(self, layer, lo, hi):
+        """The tracks whose coordinate lies in [lo, hi], as a slice.
+
+        Callers ask this per node of a maze search, and scanning the
+        whole layer to answer it was 36 of 44 profiled seconds on
+        LELO_TEMP -- every via test walking every track of every layer
+        it touched.
+        """
+        tracks = self.tracks.get(layer)
+        if not tracks:
+            return ()
+        pitch = self._pitch_of(tracks)
+        if not pitch:
+            return [t for t in tracks if lo <= t.coord <= hi]
+        base = tracks[0].coord
+        i0 = max(0, -((base - lo) // pitch))          # ceil((lo-base)/pitch)
+        i1 = min(len(tracks) - 1, (hi - base) // pitch)
+        return tracks[int(i0):int(i1) + 1] if i1 >= i0 else ()
+
     def track_at(self, layer, coord):
-        best = None
-        for t in self.tracks.get(layer, ()):
-            if best is None or abs(t.coord - coord) < abs(best.coord - coord):
-                best = t
-        return best
+        tracks = self.tracks.get(layer)
+        if not tracks:
+            return None
+        pitch = self._pitch_of(tracks)
+        if not pitch:
+            best = None
+            for t in tracks:
+                if best is None or abs(t.coord - coord) < abs(best.coord - coord):
+                    best = t
+            return best
+        i = round((coord - tracks[0].coord) / pitch)
+        return tracks[min(len(tracks) - 1, max(0, int(i)))]
 
     def report(self, layer=None, band=None, verbose=False):
         """A human and model readable picture of the routing budget."""

@@ -541,6 +541,25 @@ class LayoutCell(Cell):
         return True
 
     def _layersDirectlyConnect(self, layer1, layer2):
+        #- a pure question about the TECHNOLOGY, asked once per pair of
+        #- rects by the connectivity flood -- 3.5 million times on
+        #- LELOTEMP_CMP, for the handful of distinct answers a .tech
+        #- file has. Cached on the Rules instance, so a new technology
+        #- gets a new cache and there is nothing to invalidate.
+        rules = Rules.getInstance()
+        if rules is not None:
+            cache = getattr(rules, "_layer_connect_cache", None)
+            if cache is None:
+                cache = rules._layer_connect_cache = {}
+            key = (layer1, layer2)
+            hit = cache.get(key)
+            if hit is None:
+                hit = cache[key] = self._layersDirectlyConnectUncached(
+                    layer1, layer2)
+            return hit
+        return self._layersDirectlyConnectUncached(layer1, layer2)
+
+    def _layersDirectlyConnectUncached(self, layer1, layer2):
         l1 = self._normalizeLayerName(layer1)
         l2 = self._normalizeLayerName(layer2)
         if l1 == l2:
@@ -844,21 +863,41 @@ class LayoutCell(Cell):
         #- flood: touching metal of the same layer is the same conductor.
         #- Touch includes abutment (closed intervals) -- cicpy draws a
         #- conductor as abutting rects more often than overlapping ones.
+        #-
+        #- Only the ATTRIBUTED rects of the rect's own layer can extend
+        #- the flood, so those are what it scans. It used to rescan the
+        #- whole body for every unattributed rect on every pass, which
+        #- is the same answer for O(n^3) work: 2.0 BILLION getattr calls
+        #- and 109 of 213 profiled seconds on LELOTEMP_CMP, a cell with
+        #- four stacks. The index is kept in BODY ORDER, and a rect
+        #- joins it the moment it is attributed, so the neighbour that
+        #- wins a tie is the same one as before, pass for pass.
+        seed_order = {id(rr): i for i, rr in enumerate(body)}
+        attributed = {}
+        for i, rr in enumerate(body):
+            if getattr(rr, "net", ""):
+                attributed.setdefault(rr.layer, []).append((i, rr))
+        pending = [rr for rr in body if not getattr(rr, "net", "")]
         changed = True
-        while changed:
+        while changed and pending:
             changed = False
-            for rr in body:
-                if getattr(rr, "net", ""):
-                    continue
-                for other in body:
-                    onet = getattr(other, "net", "")
-                    if not onet or other.layer != rr.layer:
-                        continue
+            rest = []
+            for rr in pending:
+                hit = None
+                for _, other in attributed.get(rr.layer, ()):
                     if (rr.x1 <= other.x2 and rr.x2 >= other.x1
                             and rr.y1 <= other.y2 and rr.y2 >= other.y1):
-                        rr.setNet(onet)
-                        changed = True
+                        hit = other
                         break
+                if hit is None:
+                    rest.append(rr)
+                    continue
+                rr.setNet(hit.net)
+                changed = True
+                same = attributed.setdefault(rr.layer, [])
+                same.append((seed_order[id(rr)], rr))
+                same.sort(key=lambda t: t[0])
+            pending = rest
         for rr in body:
             if not getattr(rr, "net", ""):
                 rr.device_metal = True

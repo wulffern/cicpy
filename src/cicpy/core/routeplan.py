@@ -42,11 +42,25 @@ log = logging.getLogger("RoutePlan")
 
 
 def stack_key(instances):
-    """The fingerprint of a stack's own placement: every member's
-    name, cell and position."""
+    """The fingerprint of a stack's own ARRANGEMENT: every member's
+    name, cell and position RELATIVE to the stack's own corner.
+
+    Relative, because the question a wires block asks is "are these
+    the same devices in the same arrangement", and that is a property
+    of the stack alone. Hashing absolute coordinates answered a
+    different question -- "is this stack still in the same place in
+    its parent" -- so a block went stale when a neighbouring column
+    changed width, and every subcell's block would go stale the day
+    subcells are placed from their own origin.
+    """
+    insts = [i for i in instances if i is not None]
+    if not insts:
+        return hashlib.sha1(b"[]").hexdigest()[:12]
+    ox = min(int(i.x1) for i in insts)
+    oy = min(int(i.y1) for i in insts)
     rows = sorted((getattr(i, "instanceName", ""),
-                   getattr(i, "cell", ""), int(i.x1), int(i.y1))
-                  for i in instances if i is not None)
+                   getattr(i, "cell", ""), int(i.x1) - ox, int(i.y1) - oy)
+                  for i in insts)
     return hashlib.sha1(repr(rows).encode()).hexdigest()[:12]
 
 
@@ -74,6 +88,17 @@ def wires_lookup(entry, key):
     return out
 
 
+def _cut_counts(opts):
+    """The (horizontal, vertical) cut array a wire's options ask for.
+
+    Same defaults as Route (`core/route.py`): `<N>cuts` and `<N>vcuts`,
+    2x1 when the options say nothing.
+    """
+    m = re.search(r"(\d+)cuts", opts or "")
+    mv = re.search(r"(\d+)vcuts", opts or "")
+    return (int(m.group(1)) if m else 2, int(mv.group(1)) if mv else 1)
+
+
 def replay_claims(rects, layer, pin_layer, opts):
     """The claims a replayed wire makes, recomputed from its pins.
 
@@ -89,10 +114,18 @@ def replay_claims(rects, layer, pin_layer, opts):
     if m and ys:
         claims.append((int(float(m.group(1))), min(ys), max(ys)))
     if layer and pin_layer and layer != pin_layer:
+        #- the cut the route will ACTUALLY draw, which is a 2x1 by
+        #- default (route.py: cuts=2, vcuts=1). Sizing the claim off a
+        #- 1x1 under-reserved every landing pad by a cut's width, so a
+        #- net still searching was told a replayed neighbour needed
+        #- less room than it takes.
         pad_w = 0
         try:
             from .cut import Cut
-            ct = (Cut.getInstance(pin_layer, layer, 1, 1)
+            hc, vc = _cut_counts(opts)
+            ct = (Cut.getInstance(pin_layer, layer, hc, vc)
+                  or Cut.getInstance(layer, pin_layer, hc, vc)
+                  or Cut.getInstance(pin_layer, layer, 1, 1)
                   or Cut.getInstance(layer, pin_layer, 1, 1))
             if ct is not None:
                 pad_w = int(max(ct.width(), ct.height()))

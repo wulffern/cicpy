@@ -606,11 +606,9 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- MERGE their guards -- shared in the parent, and paid in full
         #- by a stack standing alone. The size is right; nothing to trim.
         #-
-        #- Normalised to the origin below, like any library cell: a
-        #- placeable cell whose content starts at the parent's absolute
-        #- offset is only placeable at one position. The offset it was
-        #- cut from is kept on the cell as `placed_at`, which is where
-        #- a hierarchical parent puts its instance.
+        #- NOT normalised to the origin: a cell built out of the
+        #- parent's own instance objects cannot be translated without
+        #- moving them. The parent reads the published box instead.
         cell.boundaryIgnoreRouting = True
         #- the bbox check reads ignoreBoundaryRouting (set through
         #- setBoundaryIgnoreRouting); assigning the attribute above
@@ -817,9 +815,7 @@ def write_stack_cells(layout, design=None, plan=None, log=None):
         #- copies, so translating it drags the parent's devices with it
         #- -- measured, 2 shorts and 23 DRC in a top that was clean.
         #- Origin-normalisation belongs to the restructuring step where
-        #- the instances genuinely move out of the parent. Until then
-        #- placed_at records the offset a hierarchical parent needs.
-        cell.placed_at = (int(cell.x1), int(cell.y1))
+        #- the instances genuinely move out of the parent.
         lines, fp = stack_subckt(layout, entry)
         cell.cic_subckt = lines
         cell.cic_fingerprint = fp

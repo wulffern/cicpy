@@ -89,7 +89,27 @@ class MagicDesign(cic.Design):
         return cell
 
     def getLayoutCell(self,subcktName):
-        cell = None
+        """The cell to instantiate for this subckt name.
+
+        A CELL BUILT THIS RUN WINS over a .mag on disk, and that
+        ordering is load bearing rather than cosmetic. scanLibraryPath
+        globs libdir/**/*.mag, which on any rebuild includes the
+        PREVIOUS run's generated subcells -- so preferring maglib would
+        quietly build a parent against last run's children and only the
+        timestamps would say so.
+
+        This is also what lets a subcell be generated and used in one
+        process. Until now the only way in was a .mag that existed
+        before the run started, which is why the hierarchical build had
+        to be two commands.
+        """
+        cell = self.cells.get(subcktName)
+        if cell is not None:
+            if subcktName in self.maglib:
+                self.log.debug(
+                    f"{subcktName}: built this run, shadowing "
+                    f"{self.maglib[subcktName].filename}")
+            return cell
         if(subcktName in self.maglib):
-            cell = self.maglib[subcktName].getLayoutCell()
-        return cell
+            return self.maglib[subcktName].getLayoutCell()
+        return None

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """MCP server exposing cicpy's layout inspection as tools.
 
-Lets an agent doing schematic driven layout render a cell (returned as an
-inline image, flipped so y is up like the layout), inspect the placement
+Lets an agent doing schematic driven layout render a cell or a finished
+GDS (returned as an inline image, y up like the layout), inspect the
+placement
 of a cic file, query a spice netlist for connectivity, run the design
 repo's own DRC target, and read the layout field guide.
 
@@ -39,7 +40,10 @@ mcp = _Server(
     "cicpy",
     instructions=(
         "Tools for schematic driven layout with cicpy. 'render' draws a "
-        "cell from a cic file and returns the image inline, y up. "
+        "cell from a cic file and returns the image inline, y up; "
+        "'render_gds' draws a finished GDS the same way, with "
+        "'top_only' for a routing view that leaves the placed "
+        "blocks as outlines. "
         "'cell_info' reports placement: instances, groups, pitches and "
         "ports. 'netlist_info' reports which devices connect to which "
         "nets, read it before choosing placement groups. 'drc' runs the "
@@ -315,6 +319,168 @@ def render(
             data = fh.read()
     finally:
         os.chdir(cwd)
+    return Image(data=data, format="png")
+
+
+def _tech_layers(techfile):
+    """{(gds number, datatype): (cicpy layer name, colour, material, z)}.
+
+    Straight off the technology file -- the server carries no layer
+    table of its own, same as every other tool here.
+    """
+    with open(techfile) as fh:
+        tech = json.load(fh)
+    order = {"well": 0, "diffusion": 1, "implant": 2, "poly": 3,
+             "metal": 5, "cut": 20}
+    out = {}
+    for name, layer in tech.get("layers", {}).items():
+        num, dt = layer.get("number"), layer.get("datatype")
+        if num is None or dt is None:
+            continue
+        key = (int(num), int(dt))
+        #- one GDS purpose carries several cicpy names (PDIFF, NDIFF,
+        #- OD): keep the first drawing one, and never let a _pin win
+        if key in out or name.endswith("_pin"):
+            continue
+        mat = layer.get("material") or ""
+        z = order.get(mat, 4)
+        if mat == "metal" and name[1:].isdigit():
+            z = order["metal"] + int(name[1:])
+        #- the technology file already says which layers are markers:
+        #- "fill": "nofill". Those are boundaries, implants and wells
+        #- -- filled, they bury the layout under one flat colour.
+        fill = layer.get("fill") != "nofill"
+        out[key] = (name, layer.get("color") or "grey", mat, z, fill)
+    return out
+
+
+@mcp.tool()
+def render_gds(
+    gdsfile: str,
+    techfile: str,
+    cell: str | None = None,
+    top_only: bool = False,
+    only_layers: list[str] | None = None,
+    outlines: bool = True,
+    title: str | None = None,
+    height: int = 1200,
+) -> Image:
+    """Draw a GDS the way a layout engineer reads it, and return it inline.
+
+    The companion to `render`, which draws the cic file cicpy wrote.
+    This one draws what actually reached the GDS -- subcell contents
+    included -- with one colour per technology layer and a legend that
+    names the layers the way the sidecar does (M1..M5, not met1..met4).
+
+    `top_only` is the mode to reach for when debugging routing: it
+    draws only the paint the TOP cell owns and leaves the placed
+    blocks as labelled outlines, so a hand written route is not lost
+    among a hundred thousand transistor rectangles.
+
+    Args:
+        gdsfile: Path to the .gds file.
+        techfile: Path to the technology file; supplies the GDS layer
+            numbers, the colours and the layer names.
+        cell: Cell to draw. Omit for the file's top cell.
+        top_only: Draw only the top cell's own paint (routing view).
+        only_layers: Restrict to these cicpy layer names, e.g.
+            ["M3", "M4", "M5"]. Omit for every layer that has paint;
+            layers the technology marks "nofill" (boundary, implant,
+            well) are drawn as outlines rather than filled.
+        outlines: Draw instance outlines. Always on when top_only.
+        title: Title for the figure. Defaults to the cell name.
+        height: Raster height in pixels.
+    """
+    try:
+        import gdstk
+    except ImportError:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "render_gds needs gdstk: pip install 'cicpy[mcp]'")
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon as _MPoly, Rectangle as _Rect
+
+    style = _tech_layers(os.path.abspath(techfile))
+    lib = gdstk.read_gds(os.path.abspath(gdsfile))
+    cells = {c.name: c for c in lib.cells}
+    if cell is None:
+        tops = lib.top_level()
+        if not tops:
+            raise ValueError(f"no top cell in {gdsfile}")
+        top = tops[0]
+    else:
+        if cell not in cells:
+            raise ValueError(
+                f"no cell {cell!r} in {gdsfile}; have "
+                f"{', '.join(sorted(cells)[:20])}")
+        top = cells[cell]
+
+    keep = set(only_layers) if only_layers else None
+    bylayer = collections.defaultdict(list)
+    for poly in top.get_polygons(depth=0 if top_only else None):
+        info = style.get((poly.layer, poly.datatype))
+        if info is None:
+            continue
+        if keep is not None and info[0] not in keep:
+            continue
+        bylayer[(poly.layer, poly.datatype)].append(poly.points)
+
+    bbox = top.bounding_box() or ((0, 0), (1, 1))
+    (x1, y1), (x2, y2) = bbox
+    span = max(x2 - x1, y2 - y1) or 1.0
+    fig, ax = plt.subplots(
+        figsize=(height / 100.0 * (x2 - x1) / span + 3, height / 100.0),
+        dpi=100)
+
+    if outlines or top_only:
+        for ref in top.references:
+            rb = ref.bounding_box()
+            if rb is None:
+                continue
+            (rx1, ry1), (rx2, ry2) = rb
+            ax.add_patch(_Rect((rx1, ry1), rx2 - rx1, ry2 - ry1,
+                               fill=top_only, fc="#f0f0f0",
+                               ec="#999999", lw=0.8, zorder=0))
+            #- only label a block with room for the name: a strip of
+            #- abutted standard cells turns into a stack of overlapping
+            #- labels otherwise
+            if top_only and (ry2 - ry1) > span / 25.0:
+                nm = getattr(getattr(ref, "cell", None), "name", "")
+                ax.text((rx1 + rx2) / 2.0, (ry1 + ry2) / 2.0, nm,
+                        fontsize=7, ha="center", va="center",
+                        color="#777777", zorder=1)
+
+    for key in sorted(bylayer, key=lambda k: style[k][3]):
+        name, color, mat, z, fill = style[key]
+        alpha = 0.9 if mat == "cut" else (0.45 if fill else 0.7)
+        for pts in bylayer[key]:
+            ax.add_patch(_MPoly(pts, closed=True,
+                                facecolor=color if fill else "none",
+                                edgecolor=color, alpha=alpha,
+                                linewidth=0.2 if fill else 0.5,
+                                zorder=3 + z))
+        ax.plot([], [], color=color, lw=6 if fill else 1.5, alpha=alpha,
+                label=name)
+
+    pad = span * 0.03
+    ax.set_xlim(x1 - pad, x2 + pad)
+    ax.set_ylim(y1 - pad, y2 + pad)
+    ax.set_aspect("equal")
+    ax.set_xlabel("um")
+    ax.set_ylabel("um")
+    ax.set_title(title or (top.name + (" -- top-level paint only"
+                                       if top_only else "")))
+    if bylayer:
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                  fontsize=8, frameon=False)
+    fig.tight_layout()
+    tmpdir = tempfile.mkdtemp(prefix="cicpy_mcp_")
+    pngfile = os.path.join(tmpdir, top.name + ".png")
+    fig.savefig(pngfile, bbox_inches="tight")
+    plt.close(fig)
+    with open(pngfile, "rb") as fh:
+        data = fh.read()
     return Image(data=data, format="png")
 
 

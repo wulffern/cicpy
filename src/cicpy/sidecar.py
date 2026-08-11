@@ -53,10 +53,24 @@ the built-in router take what it will. There is no class-level
 shadow. The file-based <SUBCELLNAME>.py escape hatch keeps the old
 no-self contract, legacy `route` included.
 
-The recipe itself is inherited: SidecarCell subclasses SidecarPycell
-(core/sidecarcell.py), so a cell that needs more than declarations
-overrides beforePlace/afterPlace/beforeRoute/afterPaint and calls
-super() -- the escape hatch is ordinary inheritance.
+The class IS the LayoutCell. SidecarCell subclasses both recipes in
+core/sidecarcell.py -- SidecarPycell, which places the devices, and
+HierLayoutCell, which assembles the published subcells -- so a cell
+that needs more than declarations overrides beforePlace / afterPlace
+/ beforeRoute / afterPaint / place / route and calls super(); the
+escape hatch is ordinary inheritance. There is ONE object per build:
+the cell the framework builds is the instance of the design's own
+class, and it is handed to itself as the pycell, so every hook the
+design declares runs. It used to be two -- the declaration was a
+pycell, and the assembled top a separate HierLayoutCell handed over
+as `hier_cell` -- and the assembly pass loaded no pycell at all, so
+every hook on the design's class was silently dead there.
+
+Which of the two recipes runs is the cell's ROLE, fixed at
+construction: the flat build (devices, subcells published) is
+`SidecarCell()`, the assembly `SidecarCell(hier=True)`. cic.py picks
+it from the cell name -- <CELL> flat, <CELL>_HIER the assembly --
+and a cell that declares `routes` gets both passes, in that order.
 
 `compile()` turns the class into the spec dict the recipes consume;
 detection in cic.py is by content: a module defining a SidecarCell
@@ -69,6 +83,7 @@ import os
 import sys
 
 from cicpy.core.cellgroup import StackGroup
+from cicpy.core.layoutcell import LayoutCell
 from cicpy.core.sidecarcell import SidecarPycell, HierLayoutCell
 
 log = logging.getLogger("Sidecar")
@@ -148,28 +163,98 @@ class Mirror(Stack):
                 f"on {type(self).__name__} or retype it")
 
 
-class SidecarCell(SidecarPycell):
-    """Base of a declared cell. Subclass, declare, done.
+class SidecarCell(SidecarPycell, HierLayoutCell):
+    """Base of a declared cell -- and the cell. Subclass, declare, done.
 
     Class declarations: `place` (flat-build knobs), nested Subcell
     classes, `rows` (the floorplan, bottom row first, referencing the
     classes), `supplies`, and for the assembled top `channel` (um
     between the rows) and `routes` (one ChannelRoute per crossing
-    net). The recipe methods are inherited from SidecarPycell;
-    override and call super() when the declarations cannot say it.
+    net). Declaring `routes` is what makes the cell build in two
+    passes: subcells first, then the parent assembled from them.
+
+    An instance IS the LayoutCell the framework builds, and its own
+    pycell -- so beforePlace, afterPlace, beforeRoute, afterPaint,
+    afterPorts and the rest are the cell's methods and run in BOTH
+    passes. `hier` picks which recipe place()/route() are: the flat
+    build (devices, then the subcells published) or the assembly (the
+    published subcells tiled and the channel routes laid). The
+    hook-shaped half of the flat recipe is flat-only; a design's own
+    overrides are not, which is the point -- a cell says where its
+    ports go once, and the pass that publishes them obeys.
     """
-    place = {}
     rows = []
     supplies = []
     channel = 8
     routes = None
-    #- the LayoutCell class the hier build instantiates for the
-    #- assembled top; a design subclasses HierLayoutCell and points
-    #- here when the recipe's place()/route() cannot say it
-    hier_cell = HierLayoutCell
+    #- `place` the declaration and place() the method are the same
+    #- name on the same object now, so the declaration is read off
+    #- the class ONCE, here, and taken off it -- see _place
+    _place = {}
 
-    def __init__(self):
-        super().__init__(type(self).compile())
+    def __init_subclass__(cls, **kw):
+        super().__init_subclass__(**kw)
+        knobs = vars(cls).get("place")
+        if isinstance(knobs, dict):
+            cls._place = knobs
+            delattr(cls, "place")
+        if "hier_cell" in vars(cls):
+            log.warning(f"{cls.__name__}: hier_cell is gone -- the "
+                        f"cell IS its layout cell now. Move the "
+                        f"class's place()/route() onto {cls.__name__} "
+                        f"itself and delete the declaration.")
+
+    @property
+    def assembled(self):
+        """Is THIS pass the assembly of the published subcells?
+
+        The one thing a design's own override has to ask, because it
+        is the same method on the same class in both passes: a route
+        that reads the assembly's geometry has nothing to read in the
+        flat build, and would draw itself into the subcells about to
+        be published.
+        """
+        return self._hier
+
+    def __init__(self, hier=False):
+        HierLayoutCell.__init__(self, type(self).compile())
+        self._hier = hier
+        if not hier:
+            #- the flat recipe's data-driven half. NOT in the
+            #- assembly: resetOrigins is about the placed devices
+            self.data = SidecarPycell.recipe_data()
+
+    # -- the cell's own methods; the role picks the recipe ----------
+
+    def place(self):
+        if self._hier:
+            HierLayoutCell.place(self)
+        else:
+            LayoutCell.place(self)
+
+    def route(self):
+        if self._hier:
+            HierLayoutCell.route(self)
+        else:
+            LayoutCell.route(self)
+
+    # -- the flat recipe, which only the flat pass wants. A design
+    # -- override calls super() and gets it in the pass that has it
+    def beforePlace(self, layout):
+        if not self._hier:
+            SidecarPycell.beforePlace(self, layout)
+
+    def afterPlace(self, layout):
+        if not self._hier:
+            SidecarPycell.afterPlace(self, layout)
+
+    def beforeRoute(self, layout):
+        if not self._hier:
+            SidecarPycell.beforeRoute(self, layout)
+
+    def afterPaint(self, layout):
+        if not self._hier:
+            SidecarPycell.afterPaint(self, layout)
 
     @classmethod
     def compile(cls):
@@ -180,8 +265,8 @@ class SidecarCell(SidecarPycell):
         cells.sort(key=lambda c: c._sidecar_index)
 
         spec = {}
-        if cls.place:
-            spec["place"] = cls.place
+        if cls._place:
+            spec["place"] = cls._place
         subcells = []
         for c in cells:
             entry = {"name": c.__name__, "type": c.type, "cls": c}
@@ -197,8 +282,7 @@ class SidecarCell(SidecarPycell):
             spec["supplies"] = cls.supplies
         if cls.routes is not None:
             spec["hier"] = {"channel": cls.channel,
-                            "routes": _normalize_routes(cls.routes),
-                            "cell": cls.hier_cell}
+                            "routes": _normalize_routes(cls.routes)}
         return spec
 
 
@@ -229,12 +313,15 @@ def _normalize_routes(routes):
 
 
 def sidecar_from_module(mod):
-    """The module's SidecarCell, instantiated -- or None.
+    """The module's SidecarCell class -- or None.
 
-    None when the module defines no SidecarCell subclass of its own,
-    which is what makes detection safe: a classic pycell that happens
-    to import this module is still a classic pycell. When several are
-    defined, the one named like the module wins.
+    The CLASS, not an instance: the caller registers it with the
+    Design and the framework instantiates it as the cell being built
+    (see cic.py). None when the module defines no SidecarCell
+    subclass of its own, which is what makes detection safe: a
+    classic pycell that happens to import this module is still a
+    classic pycell. When several are defined, the one named like the
+    module wins.
     """
     cands = [v for v in vars(mod).values()
              if isinstance(v, type) and issubclass(v, SidecarCell)
@@ -244,12 +331,12 @@ def sidecar_from_module(mod):
         return None
     for c in cands:
         if c.__name__ == mod.__name__:
-            return c()
+            return c
     if len(cands) > 1:
         log.warning(f"{mod.__name__}: {len(cands)} SidecarCell "
                     f"classes and none named like the module; "
                     f"taking {cands[0].__name__}")
-    return cands[0]()
+    return cands[0]
 
 
 def import_beside(dirname, name, reload=False):
@@ -278,8 +365,8 @@ def import_beside(dirname, name, reload=False):
     return mod
 
 
-def load_sidecar_spec(dirname, name):
-    """The compiled spec of <dirname>/<name>.py, or None.
+def load_sidecar_class(dirname, name):
+    """The SidecarCell class declared by <dirname>/<name>.py, or None.
 
     None when there is no file, the import fails (loudly, in the
     log), or the module is a classic pycell rather than a sidecar.
@@ -287,9 +374,10 @@ def load_sidecar_spec(dirname, name):
     mod = import_beside(dirname, name)
     if mod is None:
         return None
-    for v in vars(mod).values():
-        if (isinstance(v, type) and issubclass(v, SidecarCell)
-                and v is not SidecarCell
-                and getattr(v, "__module__", None) == mod.__name__):
-            return v.compile()
-    return None
+    return sidecar_from_module(mod)
+
+
+def load_sidecar_spec(dirname, name):
+    """The compiled spec of <dirname>/<name>.py, or None."""
+    cls = load_sidecar_class(dirname, name)
+    return None if cls is None else cls.compile()

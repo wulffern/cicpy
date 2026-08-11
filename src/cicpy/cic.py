@@ -253,12 +253,15 @@ def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)
 
-def _declares_hier_cell(lib, cell, libdir):
-    """Does <CELL>.py declare a hier_cell?
+def _declares_hier(lib, cell, libdir):
+    """Does <CELL>.py declare the assembled top -- a class `routes`?
 
     Read, not imported: importing a design file to decide how to build
     it would run its module body before the technology is loaded, and
-    the answer is one attribute on one class.
+    the answer is one attribute on one class. `hier_cell` is the old
+    spelling, when the assembly was a second class; it is gone, but a
+    design still carrying one gets the two-pass build (and a warning
+    from the sidecar) rather than a silently flat one.
     """
     path = os.path.join(libdir, lib, cell + ".py")
     if not os.path.exists(path):
@@ -275,7 +278,8 @@ def _declares_hier_cell(lib, cell, libdir):
                            else [stmt.target]
                            if isinstance(stmt, _ast.AnnAssign) else [])
                 for t in targets:
-                    if isinstance(t, _ast.Name) and t.id == "hier_cell":
+                    if (isinstance(t, _ast.Name)
+                            and t.id in ("routes", "hier_cell")):
                         return True
     return False
 
@@ -332,9 +336,9 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
                  subcells_only=True,only_subcells=subcells)
         return
 
-    if not hier and _declares_hier_cell(lib, cell, libdir):
-        print(f"INFO: {cell} declares hier_cell: building its subcells "
-              f"first, then assembling the parent from them")
+    if not hier and _declares_hier(lib, cell, libdir):
+        print(f"INFO: {cell} declares an assembled top: building its "
+              f"subcells first, then assembling the parent from them")
         #- SEPARATE PROCESSES, deliberately. The two passes share a
         #- process only if they are called in one, and the caches that
         #- back a build -- Cut._cuts, the Rules singleton, the Design's
@@ -356,7 +360,8 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
             raise click.ClickException(f"subcell pass failed for {cell}")
         if not os.path.exists(hspi):
             raise click.ClickException(
-                f"{cell} declares hier_cell but {hspi} was not written")
+                f"{cell} declares an assembled top but {hspi} was "
+                f"not written")
         rc = os.system(f"cicpy spi2mag {hspi} {lib} {cell}_HIER "
                        f"--libdir {libdir} --techlib {techlib} "
                        f"--xspace {xspace} --yspace {yspace} "
@@ -452,21 +457,25 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     except Exception as ex:
         log.warning(f"Could not register primitive providers: {ex}")
 
-    #- the scaffold cell <CELL>_HIER is a HierLayoutCell (or the
-    #- design's own subclass, declared as hier_cell on the sidecar)
-    #- when the base cell's sidecar carries a `hier` declaration and
-    #- no <CELL>_HIER.py shadows it. Registered BEFORE the read: the
-    #- framework instantiates the top cell there, and the class IS the
-    #- assembly -- place() tiles the published subcells natively.
+    #- THE CELL IS THE SIDECAR. A <CELL>.py declaring a SidecarCell
+    #- is registered BEFORE the read, so the cell the framework
+    #- instantiates is an instance of the design's own class -- and
+    #- it is handed to itself as the pycell below, which is what
+    #- makes every hook the design declares run.
+    #-
+    #- Both passes of a two-pass cell, the flat one under <CELL> and
+    #- the assembly under the scaffold name <CELL>_HIER; `hier` picks
+    #- which recipe place()/route() are. The assembly reads the
+    #- sidecar of the BASE cell, unless a <CELL>_HIER.py shadows it.
     dirname = libdir + lib + os.path.sep
-    if (cell.endswith("_HIER")
-            and not os.path.exists(os.path.join(dirname, cell + ".py"))):
-        from cicpy.sidecar import load_sidecar_spec
-        _spec = load_sidecar_spec(dirname, cell[:-5])
-        if _spec and "hier" in _spec:
-            from cicpy.core.sidecarcell import HierLayoutCell
-            _cls = _spec["hier"].get("cell") or HierLayoutCell
-            design.registerLayoutCellClass(cell, lambda: _cls(_spec))
+    _hier = cell.endswith("_HIER")
+    _base = cell[:-5] if _hier else cell
+    if not (_hier and os.path.exists(os.path.join(dirname, cell + ".py"))):
+        from cicpy.sidecar import load_sidecar_class
+        _side = load_sidecar_class(dirname, _base)
+        if _side is not None and (not _hier or "hier" in _side.compile()):
+            design.registerLayoutCellClass(
+                cell, lambda: _side(hier=_hier))
 
     log.info(f"Reading {spi}")
     lcell = design.readFromSpice(spi,cell)
@@ -493,18 +502,18 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
     pycell = None
     pycellData = None
-    from cicpy.sidecar import import_beside
-    pycell = import_beside(lcell.dirname, lcell.name)
+    from cicpy.sidecar import SidecarCell, import_beside
+    if isinstance(lcell, SidecarCell):
+        #- the cell IS the sidecar, so it is its own pycell: the
+        #- hooks the design declared are the cell's own methods and
+        #- run against the object being built. One object, both
+        #- passes.
+        pycell = lcell
+    else:
+        #- any other module is a classic pycell, hooks and data as
+        #- ever -- the escape hatch for a cell the recipe cannot say
+        pycell = import_beside(lcell.dirname, lcell.name)
     if pycell is not None:
-        #- detection is by CONTENT: a module declaring a SidecarCell
-        #- class is the declarative sidecar -- the instance IS the
-        #- pycell, recipe methods inherited and overridable; any
-        #- other module is a classic pycell, hooks and data as ever.
-        #- See cicpy/sidecar.py.
-        from cicpy.sidecar import sidecar_from_module
-        _side = sidecar_from_module(pycell)
-        if _side is not None:
-            pycell = _side
         if(hasattr(pycell,"data")):
             pycellData = pycell.data
 

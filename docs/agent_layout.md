@@ -31,9 +31,13 @@ the recipe builds the declared class itself, so a hook's `self` is
 the group that was actually placed — `self.addConnectivityRoute` is
 group-scoped, `self.layout` is the parent, and a rename in
 cellgroup.py breaks the design file loudly instead of silently.
-`SidecarCell` subclasses the recipe (`SidecarPycell`), so a cell
-that needs more than declarations overrides
-`beforePlace/afterPlace/beforeRoute/afterPaint` and calls `super()`.
+`SidecarCell` subclasses both the recipes AND `LayoutCell`, so the
+class IS the cell being built and is handed to itself as the pycell
+— every hook it declares runs, in both passes. A cell that needs
+more than declarations overrides
+`beforePlace/afterPlace/beforeRoute/afterPaint/place/route` and
+calls `super()`; ask `self.assembled` when the override is only
+right in one of the two passes.
 
 ### One class, one cell
 
@@ -85,12 +89,16 @@ class LELOTEMP_OTAR(SidecarCell):
     ]
 ```
 
-`SidecarCell.compile()` turns the class into the spec dict; the
-recipes that execute it live in `core/sidecarcell.py`
-(`SidecarPycell` for the flat build, `HierLayoutCell` -- a real
-`LayoutCell` whose `place()`/`route()` assemble the published
-subcells natively, declared per design via `hier_cell` -- for the top;
-publication in `core/subcell.py`). Detection is by content: a
+`SidecarCell.compile()` turns the class into the spec dict; the two
+recipes that execute it live in `core/sidecarcell.py` and are mixed
+into every sidecar cell -- `SidecarPycell` for the flat build,
+`HierLayoutCell` whose `place()`/`route()` assemble the published
+subcells natively; publication in `core/subcell.py`. Which one runs
+is the cell's role, and cic.py takes that from the name it is
+building: `<CELL>` flat, the scaffold `<CELL>_HIER` the assembly.
+There is no separate assembly class — a pass that builds a cell the
+design does not own is a pass whose hooks the design cannot reach,
+which is exactly what `hier_cell` used to be. Detection is by content: a
 `<CELL>.py` defining a `SidecarCell` subclass is the sidecar; a
 module with module-level hooks and `data` is a classic pycell,
 unchanged — the escape hatch for a cell the recipe cannot say.

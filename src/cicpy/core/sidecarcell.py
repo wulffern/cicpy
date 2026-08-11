@@ -41,11 +41,18 @@ log = logging.getLogger("SidecarPycell")
 
 
 class SidecarPycell:
-    """A pycell built from the sidecar. Quacks like the module."""
+    """The FLAT recipe: the devices placed, routed and published.
 
-    def __init__(self, spec):
-        self.spec = spec
-        self.data = {"afterPaint": [{"resetOrigins": [[1]]}]}
+    Hooks only -- `self.spec` is the compiled sidecar and the cell is
+    `layout`, which for a SidecarCell is the same object (see
+    cicpy/sidecar.py). Mixed into SidecarCell rather than handed over
+    as a module, so a design overrides a step and calls super().
+    """
+
+    @staticmethod
+    def recipe_data():
+        """The data-driven half of the recipe, in pycell `data` form."""
+        return {"afterPaint": [{"resetOrigins": [[1]]}]}
 
     # -- hooks -------------------------------------------------------
 
@@ -176,7 +183,7 @@ class SidecarPycell:
 
 
 class HierLayoutCell(LayoutCell):
-    """The hierarchical top from the same sidecar, as a real cell.
+    """The ASSEMBLY recipe: the published subcells, as a real cell.
 
     place() IS the assembly: the published subcells are tiled row by
     row straight from the sidecar spec, each row keeping its published
@@ -189,11 +196,13 @@ class HierLayoutCell(LayoutCell):
     addRouteConnection drops -- plus the supply rings, then hands over
     to the ordinary router.
 
-    The scaffold cell <CELL>_HIER is built as this class (via
-    Design.registerLayoutCellClass) when the <CELL>.py sidecar
-    carries a `hier` declaration and no <CELL>_HIER.py exists; a
-    design points the sidecar at its own subclass with
-    `hier_cell = MyHierCell`.
+    Mixed into SidecarCell, which is what the scaffold cell
+    <CELL>_HIER is built as when the <CELL>.py sidecar declares
+    `routes` and no <CELL>_HIER.py exists. A design that needs more
+    than the declarations overrides place()/route() on ITS OWN class
+    and calls super() -- there is no separate assembly class, because
+    a pass that builds a cell the design does not own is a pass whose
+    hooks the design cannot reach.
     """
 
     def __init__(self, spec=None):

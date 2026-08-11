@@ -1520,12 +1520,18 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                         log.info(f"{net}: {why}; drawn as one comb on "
                                  f"{len(rects)} pins")
                     else:
+                        #- ONE path for the whole net, not one per pair.
+                        #- Consecutive pairs share most of their route,
+                        #- and two shapes of one net a few units apart
+                        #- are a NOTCH -- a minimum-spacing error like
+                        #- any other. Separate paths cannot see each
+                        #- other's metal; one path merges its own.
+                        pth = grp.layout.path(net, tm.pin_layer,
+                                              [rects[0]], list(rects[1:]))
                         for aa, bb, nodes in searched:
-                            pth = grp.layout.path(net, tm.pin_layer,
-                                                  [aa], [bb])
-                            pth.fromNodes(nodes)
+                            pth.fromNodes(nodes, aa, bb)
                         log.info(f"{net}: {why}; drawn as {len(searched)} "
-                                 f"path(s) of the searched shape")
+                                 f"leg(s) of the searched shape")
                     routed.append((stack, net))
 
                 if unshaped:

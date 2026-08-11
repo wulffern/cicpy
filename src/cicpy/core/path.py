@@ -40,6 +40,7 @@ unknown name raises at parse time rather than drawing something
 plausible.
 """
 import logging
+import os
 
 from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo
 from .route import Route
@@ -215,11 +216,23 @@ class Step:
 
 @step
 class Start(Step):
-    """Begin ON THE PORT, wherever the port is."""
+    """Begin ON THE PORT, wherever the port is.
+
+    A step carries its OWN rect when it is given one. The steps run at
+    route time, long after they are built, so a leg that read the
+    path's startRects then would see whatever they had become -- and a
+    net drawn as several legs would anchor every one of them to the
+    same pin. Measured: eight of ten pins never landed on, three
+    devices and three nets missing at LVS.
+    """
     name = "start"
 
+    def __init__(self, rect=None):
+        self.rect = rect
+
     def apply(self, path, cur):
-        r = path.anchorRect(path.startRects)
+        r = self.rect if self.rect is not None else \
+            path.anchorRect(path.startRects)
         if r is None:
             return cur
         return (int(r.centerX()), int(r.centerY()), r.layer)
@@ -230,8 +243,12 @@ class End(Step):
     """Land ON THE PORT. Draws whatever leg is still needed to reach it."""
     name = "end"
 
+    def __init__(self, rect=None):
+        self.rect = rect
+
     def apply(self, path, cur):
-        r = path.anchorRect(path.stopRects)
+        r = self.rect if self.rect is not None else \
+            path.anchorRect(path.stopRects)
         if r is None:
             return cur
         x, y, layer = cur
@@ -392,11 +409,11 @@ class Path(Route):
         self.steps.append(s)
         return self
 
-    def start(self):
-        return self._add(Start())
+    def start(self, rect=None):
+        return self._add(Start(rect))
 
-    def end(self):
-        return self._add(End())
+    def end(self, rect=None):
+        return self._add(End(rect))
 
     def up(self, layer=None):
         return self._add(Up(layer))
@@ -562,6 +579,55 @@ class Path(Route):
         cur = (0, 0, self.routeLayer)
         for s in self.steps:
             cur = s.apply(self, cur)
+        #- NOT by default. mergeOwnRects removes real redundancy --
+        #- 28 rects of one ten-pin net -- but doing so costs
+        #- connectivity: with it on, LVS goes from "Circuits match
+        #- uniquely" to "Netlists do not match", and why a shape wholly
+        #- inside another should matter is not yet understood. Set
+        #- CICPY_PATH_MERGE=1 to investigate.
+        if os.environ.get("CICPY_PATH_MERGE"):
+            self.mergeOwnRects()
+
+    def mergeOwnRects(self):
+        """Drop this path's own redundant metal.
+
+        A net with N pins is drawn as N-1 stories, and consecutive
+        stories share most of their route -- the same lane, a few units
+        apart. Two shapes of ONE net that overlap are not a short, but
+        two that ALMOST overlap are a notch, and a notch is a
+        minimum-spacing error like any other. So a rect wholly inside
+        another goes, and two that overlap on the same centreline
+        become one.
+        """
+        rects = [c for c in list(self.children)
+                 if hasattr(c, "isRect") and c.isRect()]
+        drop = set()
+        for i, a in enumerate(rects):
+            if i in drop:
+                continue
+            for j, b in enumerate(rects):
+                if i == j or j in drop or a.layer != b.layer:
+                    continue
+                #- b inside a
+                if (b.x1 >= a.x1 and b.x2 <= a.x2
+                        and b.y1 >= a.y1 and b.y2 <= a.y2):
+                    drop.add(j)
+                    continue
+                #- CONTAINMENT ONLY. Growing `a` to swallow an
+                #- overlapping neighbour also works and takes DRC one
+                #- lower, but it MUTATES a rect other things may already
+                #- be holding -- port placement reads the net's own
+                #- geometry -- and that came back as a failed pin match.
+                #- Removing a shape that is wholly inside another
+                #- changes no geometry at all, so it cannot.
+        if not drop:
+            return
+        for idx in sorted(drop, reverse=True):
+            try:
+                self.children.remove(rects[idx])
+            except ValueError:
+                pass
+        log.info(f"{self.net}: merged {len(drop)} redundant rects")
 
     def astuples(self):
         """The story as the serialised form the router emits."""
@@ -581,7 +647,7 @@ class Path(Route):
         return False
 
     #- -- from a searched path --------------------------------------
-    def fromNodes(self, nodes):
+    def fromNodes(self, nodes, a=None, b=None):
         """Take the shape the maze search actually found.
 
         The search returns a node per grid step, so a path that turns
@@ -596,7 +662,7 @@ class Path(Route):
         corners = simplify(nodes)
         if len(corners) < 2:
             return self
-        self.start()
+        self.start(a)
         cur = corners[0]
         for nxt in corners[1:]:
             if nxt[2] != cur[2]:
@@ -606,7 +672,7 @@ class Path(Route):
             if nxt[1] != cur[1]:
                 self.movey(_FixedAnchor(nxt[1], "y"))
             cur = nxt
-        self.end()
+        self.end(b)
         return self
 
 

@@ -2799,22 +2799,69 @@ class LayoutCell(Cell):
     def channelTrackCoord(self, name, index, layer=None):
         """The coordinate of track `index` inside a named channel.
 
-        Tracks are counted from the low edge at the ROUTE pitch for the
-        channel's direction, so the same index means the same relative
-        position whatever the technology makes the pitch.
+        A TRACK IS ONE LEGAL LANE: the pitch is `width + space` for the
+        metal that will ride it, so track N and track N+1 are the
+        closest two wires the technology allows and consecutive indices
+        are consecutive lanes.
+
+        It used to be `ROUTE.horizontalgrid`/`verticalgrid`, which is
+        the SEARCH grid and finer than a lane -- the maze router says
+        so itself (`mazerouter.clearance`: "THE TRACK GRID IS FINER
+        THAN THAT... Two nets on ADJACENT tracks abut exactly and
+        short"). So a design could not use consecutive indices, and
+        both hierarchical designs had been hand-compensating: every
+        `track:` in them was even, with a comment explaining that
+        channel tracks go two apart. On a horizontal channel two apart
+        was 8000 against a legal 6000 and wasted a third of every lane.
+
+        `layer` names the metal when the caller knows it. Otherwise the
+        widest lane in the stack is used, so an index is legal for
+        whatever ends up riding it -- a channel carries bars and drops
+        on several layers, and a track that is only legal for the
+        thinnest of them is a short waiting for the design to change
+        one `bar_layer`.
         """
         ch = self.routingChannel(name)
         if ch is None:
             self.log.error(f"no routing channel named {name}")
             return None
         lo, hi, horizontal = ch
-        rules = Rules.getInstance()
-        pitch = rules.get("ROUTE", "verticalgrid" if horizontal else "horizontalgrid")
+        pitch = self._lanePitch(layer)
         n = max(1, int((hi - lo) // pitch))
         if index >= n:
             self.log.warning(
                 f"channel {name} has {n} tracks, asked for {index}")
         return lo + (index + 0.5) * pitch
+
+    def _lanePitch(self, layer=None):
+        """One legal lane, centre to centre: `width + space`.
+
+        The ruler the framework already uses where it gets this right
+        -- `mazerouter.clearance()` is width + space, `via_is_free`'s
+        margin is space + width//2. Without `layer`, the widest lane in
+        the metal stack, which is legal for every layer.
+        """
+        rules = Rules.getInstance()
+
+        def lane(l):
+            return int(rules.get(l, "width")) + int(rules.get(l, "space"))
+
+        if layer:
+            try:
+                return lane(layer)
+            except Exception:
+                pass
+        widest = 0
+        for l in self._metalStack():
+            try:
+                widest = max(widest, lane(l))
+            except Exception:
+                continue
+        if widest:
+            return widest
+        #- no metal stack to read: the search grid is the only number
+        #- left, and it is at least a number
+        return int(rules.get("ROUTE", "horizontalgrid"))
 
     def _resolveChannelOptions(self, options):
         """Turn channel names into this run's coordinates.

@@ -357,7 +357,11 @@ class Route(Cell):
         hcuts = int(hcuts)
         vcuts = int(vcuts)
         #- an explicit "1cuts" means a single cut: a 2x1 pad is 8400
-        #- wide and a tab beside a guard ring has no room for it
+        #- wide and a tab beside a guard ring has no room for it.
+        #- This is the ONE way to get a lone via, and it is a request,
+        #- not a fallback -- getCutsForRects never shrinks to 1x1 on
+        #- its own, because a lone via is a reliability liability and
+        #- the caller should be the one accepting it.
         if hcuts == 1 and vcuts <= 1:
             return (1, 1)
         if vcuts > hcuts:
@@ -417,10 +421,15 @@ class Route(Cell):
             elif self.fillvcut and rect.isVertical():
                 cut_h, cut_v = (1, 2)
 
+            #- cutv/cuth OVERRIDE, where fillhcut/fillvcut above only
+            #- reinforce: those two say "when the rect is horizontal
+            #- use 2x1", which is the aspect heuristic again, and they
+            #- cannot help when it is the heuristic that is wrong.
+            #- These say it regardless of the rect.
             if cutShape == "v":
-                cut_h, cut_v = 1, max(2, int(vcuts) or 2)
+                cut_h, cut_v = 1, max(2, int(vcuts))
             elif cutShape == "h":
-                cut_h, cut_v = max(2, int(hcuts) or 2), 1
+                cut_h, cut_v = max(2, int(hcuts)), 1
             insts = Cut.getCutsForRects(self.routeLayer, [rect], cut_h,
                                         cut_v, self.leftAlignCut,
                                         stopLayer,

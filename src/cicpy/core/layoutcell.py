@@ -2729,7 +2729,9 @@ class LayoutCell(Cell):
         r.route()
         return r
 
-    def path(self, net, layer, start=None, stop=None, options=""):
+    def path(self, net, layer, start=None, stop=None, options="",
+             includeInstances="", excludeInstances="",
+             includeGroups=""):
         """A route told as a story: anchored steps, spelled `~`.
 
         The twelfth shape, beside the eleven ASCII ones -- additive, so
@@ -2744,6 +2746,17 @@ class LayoutCell(Cell):
         Registered and routed like any other route -- see core/path.py.
         """
         from .path import Path
+        if start is None and stop is None:
+            #- SCOPED like addConnectivityRoute: the same collector, the
+            #- same include/exclude, so a story decomposes a net the way
+            #- a design already does -- one route for the gates, one for
+            #- the drains -- instead of forcing every pin onto one rail.
+            stop = self.getNodeAccessRects(
+                net, layer, includeInstances=includeInstances,
+                excludeInstances=excludeInstances,
+                includeGroups=includeGroups, options=options)
+            if not stop:
+                self.log.error(f"path: no rectangles on {net}")
         p = Path(net, layer, start, stop, options)
         p.layoutcell = self
         self.add(p)

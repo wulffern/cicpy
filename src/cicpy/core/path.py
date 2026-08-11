@@ -336,8 +336,7 @@ class Trunk(Step):
 
     def apply(self, path, cur):
         x, y, layer = cur
-        rects = [r for r in (path.startRects + path.stopRects)
-                 if r is not None]
+        rects = path.allRects()
         if not rects:
             return cur
         c = x if self.at is None else path.resolveAnchor(self.at)
@@ -433,6 +432,9 @@ class Path(Route):
     def comb(self, at=None, direction="v"):
         return self._add(Comb(at, direction))
 
+    def merge(self, at=None, direction="right"):
+        return self._add(Merge(at, direction))
+
     #- -- what the steps use ----------------------------------------
     def cell(self):
         if self.layoutcell is not None:
@@ -445,6 +447,15 @@ class Path(Route):
                 return p
             p = getattr(p, "parent", None)
         return None
+
+    def allRects(self):
+        """Every pin this path is scoped to, start and stop alike.
+
+        A merge or a trunk serves the whole scope; only start() and
+        end() care which end a rect is.
+        """
+        return [r for r in (self.startRects + self.stopRects)
+                if r is not None]
 
     def anchorRect(self, rects):
         live = [r for r in rects if r is not None]
@@ -677,6 +688,55 @@ class Path(Route):
 
 
 @step
+class Merge(Step):
+    """Bring every pin sideways onto one lane, ON THIS LAYER.
+
+    The step that stops a router going up and down. A net whose pins do
+    not share a column can still be one rail if the pins are first
+    brought to a common lane -- and the way to do that is a leg per pin
+    on the layer they are already on, not a via per pin to hop over the
+    device and back.
+
+    Pair it with `trunk` at the same anchor: merge lays the legs, trunk
+    lays the rail they meet on. That is the two-line story behind
+
+        conn("M1", "^VD1$", "||", "trunktab", 1, "", r"^(xnd1|xnd3)$")
+
+    and it is why the hand-written version has no vias in it at all.
+    """
+    name = "merge"
+
+    def __init__(self, at=None, direction="right"):
+        self.at = at
+        self.direction = direction
+
+    def apply(self, path, cur):
+        rects = path.allRects()
+        if not rects:
+            return cur
+        c = path.resolveAnchor(self.at)
+        if c is None:
+            log.error(f"{path.net}: merge needs a lane to merge onto")
+            return cur
+        layer = path.routeLayer
+        for r in rects:
+            y = int(r.centerY())
+            #- from the pin EDGE facing the lane, so the leg is as
+            #- short as it can be and still start on its own pin
+            if c >= int(r.x2):
+                x = int(r.x2)
+            elif c <= int(r.x1):
+                x = int(r.x1)
+            else:
+                continue        # the lane already crosses this pin
+            path.drawSegment(x, y, c, y, layer)
+        return (c, cur[1], layer)
+
+    def astuple(self):
+        return (self.name, self.direction, repr(self.at))
+
+
+@step
 class Comb(Step):
     """One trunk, and a stub from every pin to it.
 
@@ -698,8 +758,7 @@ class Comb(Step):
         self.direction = direction
 
     def apply(self, path, cur):
-        rects = [r for r in (path.startRects + path.stopRects)
-                 if r is not None]
+        rects = path.allRects()
         if not rects:
             return cur
         c = path.resolveAnchor(self.at) if self.at is not None else None

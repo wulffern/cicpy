@@ -253,6 +253,29 @@ def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)
 
+@cli.command("cost")
+@click.pass_context
+@click.argument("cicfile")
+@click.argument("techfile")
+@click.argument("cell", required=False)
+@click.option("--top", default=12, help="How many nets to list")
+def cost(ctx, cicfile, techfile, cell, top):
+    """What a cell's routing costs: wire length, vias, pieces.
+
+    DRC and LVS both pass on a net that reached its pins by climbing
+    two layers, crossing, and coming back down at every device. This
+    is the number that says so.
+    """
+    from cicpy.core.wirecost import report
+    rules = cic.Rules(techfile)
+    um = 10000
+    try:
+        um = int(rules.get("ROUTE", "um"))
+    except Exception:
+        pass
+    click.echo(report(cicfile, cell, um=um, top=top))
+
+
 def _declares_hier(lib, cell, libdir):
     """Does <CELL>.py declare the assembled top -- a class `routes`?
 

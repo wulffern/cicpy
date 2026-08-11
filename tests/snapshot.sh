@@ -11,6 +11,8 @@ set -u
 IP=${IP:-/Users/wulff/data/2023/aicex/ip/lelo_temp_sky130a}
 CELLS=${CELLS:-"LELOTEMP_CMP LELOTEMP_CCMP LELOTEMP_OTAR LELOTEMP_BIAS_IBP LELO_TEMP"}
 SNAP=${SNAP:-/tmp/cicpy_snapshots}
+LIB=${LIB:-LELO_TEMP_SKY130A}
+TECH=${TECH:-sky130A}
 
 mode=${1:?usage: snapshot.sh save|check <tag>}
 tag=${2:?usage: snapshot.sh save|check <tag>}
@@ -28,11 +30,14 @@ build() {
       printf "BUILD FAILED   "; tail -3 /tmp/snap_$c.log; continue
     fi
     make drc CELL=$c >/dev/null 2>&1
-    make cdl PRCELL=$c CELL=$c >/dev/null 2>&1
-    make lvs CELL=$c >/tmp/snap_lvs_$c.log 2>&1
-    printf "%-28s %s\n" \
+    #- gds cdl lvs, in that order and always: lvs on its own reads
+    #- whatever was last extracted, which is not necessarily this build
+    make gds cdl lvs CELL=$c >/tmp/snap_lvs_$c.log 2>&1
+    printf "%-28s %-38s %s\n" \
       "$(tail -1 drc/${c}_drc.log 2>/dev/null)" \
-      "$(grep -a 'Final result' /tmp/snap_lvs_$c.log | tail -1)"
+      "$(grep -a 'Final result' /tmp/snap_lvs_$c.log | tail -1)" \
+      "$(cicpy cost ../design/${LIB}/${c}.cic ../tech/cic/${TECH}.tech $c \
+         2>/dev/null | tail -1)"
   done
 }
 

@@ -78,6 +78,7 @@ is a classic pycell, as ever.
 """
 import itertools
 import logging
+import re
 import os
 import sys
 
@@ -259,6 +260,7 @@ class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
             if "match" not in entry:
                 log.warning(f"{cls.__name__}.{c.__name__}: no match "
                             f"regex; the subcell claims no instances")
+            _warn_absolute_wires(f"{cls.__name__}.{c.__name__}", entry)
             subcells.append(entry)
         spec["subcells"] = subcells
         if cls.rows:
@@ -295,6 +297,36 @@ def _normalize_routes(routes):
             r["drops"] = drops
         out.append(r)
     return out
+
+
+def _warn_absolute_wires(where, entry):
+    """A `wires` block holding a COORDINATE, said where it is written.
+
+    An anchor -- trunktab, trunkright, trunkleft -- is recomputed from
+    the net's own pins every run, so it survives a resize and another
+    technology and it says why the wire is there. A trunkx does none of
+    that, and it cannot even be checked: the fingerprint that guards a
+    wires block is translation-invariant by design, so a coordinate
+    resolved against another placement replays silently. That happened
+    to three blocks in one design and was found only by measuring the
+    geometry.
+
+    The router writes anchors now (mazerouter.anchored_options), so a
+    coordinate here is either hand-typed or generated before that --
+    both worth saying out loud. Not an error: a trunk that genuinely
+    lies on no pin anchor has nothing else to be yet.
+    """
+    for w in (entry.get("wires") or []):
+        if len(w) < 4:
+            continue
+        m = re.search(r"(trunkx|bandy)=?(-?\d+)", str(w[3]))
+        if m:
+            log.warning(
+                f"{where}: {w[0]} is wired to the coordinate "
+                f"{m.group(0)}. A coordinate survives neither a resize "
+                f"nor another technology, and a stale one replays "
+                f"without complaint -- prefer trunktab / trunkright / "
+                f"trunkleft, which the router now emits.")
 
 
 def sidecar_from_module(mod):

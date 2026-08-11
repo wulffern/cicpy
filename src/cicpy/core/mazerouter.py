@@ -893,6 +893,87 @@ def _pin_layer_if_clear(path, tm, router, pins, trunk, extent_rects=None):
     return None
 
 
+
+def _preferPinAnchor(opts, trunk, rects, layer, tm, net, log):
+    """Say the trunk as an anchor when the pins name the same lane."""
+    m = re.search(r"trunkx=(-?[0-9.]+)", opts or "")
+    if not m:
+        return opts, trunk
+    x = int(float(m.group(1)))
+    try:
+        from cicpy.core.route import trunkAnchorCoords
+        anchors = trunkAnchorCoords(rects, layer)
+    except Exception:
+        return opts, trunk
+    if not anchors:
+        return opts, trunk
+    name, coord = min(anchors.items(), key=lambda kv: abs(kv[1] - x))
+    coord = int(coord)
+    if coord == x:
+        return re.sub(r"trunkx=-?[0-9.]+", name, opts), trunk
+    try:
+        half = int(tm.rules.get(layer, "width")) // 2
+    except Exception:
+        half = 0
+    if not half or abs(coord - x) >= half:
+        return opts, trunk
+    #- the anchor must still land on every pin, which is the same test
+    #- the searched trunk had to pass
+    ox1 = max(int(rr.x1) for rr in rects)
+    ox2 = min(int(rr.x2) for rr in rects)
+    if coord < ox1 + half or coord > ox2 - half:
+        return opts, trunk
+    log.info(f"{net}: trunk {x} -> {name} ({coord}), "
+             f"{abs(coord - x)} inside half a wire")
+    return re.sub(r"trunkx=-?[0-9.]+", name, opts), coord
+
+
+def anchored_options(opts, rects, layer, net="", log=None):
+    """A captured wire's options with its trunk said as an ANCHOR.
+
+    THE SEARCH DECIDES, AND THEN THE DESIGN HAS TO HOLD THE DECISION.
+    A resolved coordinate is the worst possible form for that: it
+    survives neither a resize nor another technology, it says nothing
+    about why the wire is where it is, and -- measured this session --
+    it replays silently against a placement it was never computed for,
+    because the fingerprint guarding it is deliberately
+    translation-invariant while a coordinate is not.
+
+    An anchor has none of those problems. `trunkright` is recomputed
+    from the net's own pins on every run, so it cannot go stale, and it
+    reads as intent: the right edge of the pins' common overlap, not
+    64100.
+
+    Only the WRITTEN form changes. The run that produced it kept the
+    number, so every check downstream still sees a coordinate, and the
+    substitution is made only when the anchor resolves to EXACTLY the
+    lane the search chose -- which is what makes replaying the anchor
+    draw the identical wire. An anchor that is merely near the searched
+    lane is a different lane, and moving a wire the search placed
+    against a map of its neighbours is how a route lands on the
+    neighbour it was avoiding.
+    """
+    m = re.search(r"trunkx=(-?[0-9.]+)", opts or "")
+    if not m:
+        return opts
+    x = int(float(m.group(1)))
+    try:
+        from cicpy.core.route import trunkAnchorCoords
+        anchors = trunkAnchorCoords(rects, layer)
+    except Exception:
+        anchors = {}
+    for name, coord in anchors.items():
+        if int(coord) == x:
+            return re.sub(r"trunkx=-?[0-9.]+", name, opts)
+    if anchors and log is not None:
+        near = min(anchors.items(), key=lambda kv: abs(kv[1] - x))
+        log.info(f"{net}: trunk {x} is not a pin anchor; nearest is "
+                 f"{near[0]} at {int(near[1])} "
+                 f"({int(abs(near[1] - x))} away) -- written as a "
+                 f"coordinate")
+    return opts
+
+
 def route_spec(path, tm, claimed=(), router=None, pins=None,
                extent_rects=None):
     """Turn a searched path into a route.py command, or None.
@@ -1370,6 +1451,21 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 grp = groups.get(stack)
                 if grp is not None and len(w) >= 4:
                     _, wlayer, wtype, wopts = w[:4]
+                    #- a DECLARED coordinate that the pins reproduce
+                    #- exactly is the anchor, said the worse way. Take
+                    #- the anchor -- identical geometry this run, and
+                    #- the one form that cannot go stale -- and say so,
+                    #- so the design file can stop holding the number.
+                    anchored = anchored_options(wopts, rects,
+                                                wlayer, net, log)
+                    if anchored != wopts:
+                        log.warning(
+                            f"{stack}/{net}: declared {wopts} is "
+                            f"{anchored}; write the anchor instead -- "
+                            f"a coordinate does not survive a resize "
+                            f"and cannot be checked against its own "
+                            f"placement")
+                        wopts = anchored
                     grp.addConnectivityRoute(wlayer,
                                              f"^{re.escape(net)}$",
                                              wtype, wopts, 1)
@@ -1428,7 +1524,9 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                         claimed.add((lane0, min(ys0), max(ys0)))
                         routed.append((stack, net))
                         captured_by_stack.setdefault(stack, []).append(
-                            (net, tm.pin_layer, "||", f"trunkx={lane0}"))
+                            (net, tm.pin_layer, "||",
+                             anchored_options(f"trunkx={lane0}", rects,
+                                              tm.pin_layer, net, log)))
                         continue
                 #- Search for the shape, then hand it to route.py. The
                 #- search proves a path exists and says which layer and
@@ -1661,6 +1759,23 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                 f"the smallest {tm.pin_layer}-{layer} "
                                 f"pad is {w_cut}; it overhangs whatever "
                                 f"the placement")
+                #- THE PINS ARE THE SPECIFICATION. The search works on
+                #- its own TrackMap grid, whose origin is
+                #- min(pin.x1) - margin -- a number from the map, not
+                #- from the design -- so the lane it returns lands a
+                #- fraction of a wire width off the lane the pins
+                #- themselves name. Measured across both hierarchical
+                #- designs: every miss was 800 or 1000 to the LEFT of
+                #- trunktab, all of one sign, which is a grid offset
+                #- and not a decision.
+                #-
+                #- Within half a wire width the two are the SAME LANE,
+                #- so the one the pins name wins -- and the wire then
+                #- has a reason a design can hold instead of a
+                #- coordinate that goes stale. Beyond that they are
+                #- different lanes and the search's answer stands.
+                opts, trunk = _preferPinAnchor(opts, trunk, rects, layer,
+                                               tm, net, log)
                 if trunk is not None:
                     claimed.add(trunk)
                 grp = groups.get(stack)
@@ -1685,7 +1800,8 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                      int((pr.x2 - pr.x1) // 2 + pad_w // 2)))
                 routed.append((stack, net))
                 captured_by_stack.setdefault(stack, []).append(
-                    (net, layer, rtype, opts or ""))
+                    (net, layer, rtype,
+                     anchored_options(opts or "", rects, layer, net, log)))
             except Blocked as e:
                 blocked.append((stack, net, str(e)))
                 captured_by_stack.setdefault(stack, []).append(

@@ -14,6 +14,39 @@ def _option_int(options, name):
     return int(m.group(2)) if m else None
 
 
+def trunkAnchorCoords(rects, layer):
+    """{anchor name: the coordinate it resolves to}, from the pins.
+
+    The pins ARE the specification, so every one of these survives a
+    resize and a change of technology; a trunkx does neither.
+
+    Module level, and shared: `Route.trunkAnchors` asks it what a
+    design's anchor means, and the maze router asks it the inverse --
+    given the coordinate the search chose, which anchor would have
+    produced it -- which is what lets the router emit an anchor instead
+    of a number. Two copies of this arithmetic would be two answers to
+    the same question.
+    """
+    rects = [r for r in (rects or []) if r is not None]
+    if not rects:
+        return {}
+    from .rules import Rules
+    w = Rules.getInstance().get(layer, "width")
+    #- the RIGHTMOST narrow rect: instances carry duplicate subports,
+    #- and the narrowest pick has landed a rail on the neighbouring
+    #- bars before (measured)
+    narrow = [r for r in rects if (r.x2 - r.x1) <= 4000]
+    pick = max(narrow or rects, key=lambda r: r.x1)
+    return {
+        "trunktab": int(pick.x1) + int((pick.x2 - pick.x1) // 2),
+        #- the COMMON overlap's right edge: the rightmost trunk that
+        #- still lies on every pin it must land on. max(x2) would hug
+        #- the widest pin and slide off the narrowest.
+        "trunkright": int(min(r.x2 for r in rects)) - w // 2,
+        "trunkleft": int(max(r.x1 for r in rects)) + w // 2,
+    }
+
+
 class Route(Cell):
 
     def __init__(self, net, layer, start, stop, options, routeType):
@@ -505,25 +538,8 @@ class Route(Cell):
         produced it -- which is what turns a searched trunk back into
         something a design can hold. See CICPY_TRUNK_REPORT.
         """
-        rects = [r for r in (self.startRects + self.stopRects)
-                 if r is not None]
-        if not rects:
-            return {}
-        from .rules import Rules
-        w = Rules.getInstance().get(self.routeLayer, "width")
-        #- the RIGHTMOST narrow rect: instances carry duplicate
-        #- subports, and the narrowest pick has landed a rail on the
-        #- neighbouring bars before (measured)
-        narrow = [r for r in rects if (r.x2 - r.x1) <= 4000]
-        pick = max(narrow or rects, key=lambda r: r.x1)
-        return {
-            "trunktab": int(pick.x1) + int((pick.x2 - pick.x1) // 2),
-            #- the COMMON overlap's right edge: the rightmost trunk
-            #- that still lies on every pin it must land on. max(x2)
-            #- would hug the widest pin and slide off the narrowest.
-            "trunkright": int(min(r.x2 for r in rects)) - w // 2,
-            "trunkleft": int(max(r.x1 for r in rects)) + w // 2,
-        }
+        return trunkAnchorCoords(self.startRects + self.stopRects,
+                                 self.routeLayer)
 
     def _reportTrunkAnchors(self):
         """Say which pin anchor would reproduce this route's trunk.

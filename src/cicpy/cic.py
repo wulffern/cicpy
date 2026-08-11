@@ -253,6 +253,33 @@ def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
     svg = cic.SvgPrinter(library,rules,scale,x,y)
     svg.print(design)
 
+def _declares_hier_cell(lib, cell, libdir):
+    """Does <CELL>.py declare a hier_cell?
+
+    Read, not imported: importing a design file to decide how to build
+    it would run its module body before the technology is loaded, and
+    the answer is one attribute on one class.
+    """
+    path = os.path.join(libdir, lib, cell + ".py")
+    if not os.path.exists(path):
+        return False
+    try:
+        import ast as _ast
+        tree = _ast.parse(open(path).read())
+    except Exception:
+        return False
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ClassDef):
+            for stmt in node.body:
+                targets = (stmt.targets if isinstance(stmt, _ast.Assign)
+                           else [stmt.target]
+                           if isinstance(stmt, _ast.AnnAssign) else [])
+                for t in targets:
+                    if isinstance(t, _ast.Name) and t.id == "hier_cell":
+                        return True
+    return False
+
+
 @cli.command("sch2mag")
 @click.pass_context
 @click.argument("lib")
@@ -267,12 +294,76 @@ def svg(ctx,cicfile,techfile,library,scale,x,y,includes):
 @click.option("--hier", is_flag=True,
               help="The top INSTANTIATES its subcells instead of "
                    "containing their devices. Run sch2subcells first.")
-def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,hier):
-    """Netlist a xschem to spice, and load file to Magic"""
+@click.option("--subcell","subcells",multiple=True,
+              help="Write only this subcell and stop -- do not assemble "
+                   "the parent. Repeatable. Matches the subcell's short "
+                   "name (p_sw) or its cell name (MYCELL_P_SW). For "
+                   "working on one subcell without regenerating the "
+                   "rest. The cell is still PLACED in full, so the "
+                   "subcell is identical to the one a full run writes.")
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,hier,subcells):
+    """Netlist a xschem to spice, and load file to Magic.
+
+    ONE command for every cell. The design file decides what happens:
+
+      - a module of plain hooks (beforePlace, afterPlace, ...) is a
+        classic pycell and is placed and routed in one pass
+      - a SidecarCell subclass is a sidecar, placed the same way
+      - a sidecar that also names a ``hier_cell`` is built in TWO
+        passes, because that is what it means: every subcell is
+        written and verifiable on its own first, then the parent is
+        assembled from them
+
+    The two-pass cells used to need `make subcells hier` by hand while
+    every other cell needed `make mag`, with nothing in the cell to
+    say which -- and a hier cell built the flat way SUCCEEDS, writes a
+    .mag, and fails LVS with split nets, which reads as the design
+    having broken rather than the command being wrong.
+    """
 
     os.system(f"make xsch LIB={lib} CELL={cell}")
 
     spi = "xsch/" + cell + ".spice"
+
+    if subcells:
+        #- one subcell, and stop: the parent is left as it is
+        print(f"INFO: writing only {', '.join(subcells)} of {cell}")
+        _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,
+                 subcells_only=True,only_subcells=subcells)
+        return
+
+    if not hier and _declares_hier_cell(lib, cell, libdir):
+        print(f"INFO: {cell} declares hier_cell: building its subcells "
+              f"first, then assembling the parent from them")
+        #- SEPARATE PROCESSES, deliberately. The two passes share a
+        #- process only if they are called in one, and the caches that
+        #- back a build -- Cut._cuts, the Rules singleton, the Design's
+        #- cell registry -- are global. Run in one process the second
+        #- pass inherits the first one's, and the assembled parent came
+        #- out failing pin matching while the same two passes as two
+        #- commands matched uniquely (measured on LELOTEMP_BIAS_IBP).
+        hspi = os.path.join(libdir, lib, f"{cell}_HIER.spice")
+        opt = ""
+        if check_connectivity:
+            opt += " --check-connectivity"
+        if strict:
+            opt += " --strict"
+        rc = os.system(f"cicpy sch2subcells {lib} {cell} "
+                       f"--libdir {libdir} --techlib {techlib} "
+                       f"--xspace {xspace} --yspace {yspace} "
+                       f"--gbreak {gbreak}")
+        if rc != 0:
+            raise click.ClickException(f"subcell pass failed for {cell}")
+        if not os.path.exists(hspi):
+            raise click.ClickException(
+                f"{cell} declares hier_cell but {hspi} was not written")
+        rc = os.system(f"cicpy spi2mag {hspi} {lib} {cell}_HIER "
+                       f"--libdir {libdir} --techlib {techlib} "
+                       f"--xspace {xspace} --yspace {yspace} "
+                       f"--gbreak {gbreak} --outcell {cell}{opt}")
+        if rc != 0:
+            raise click.ClickException(f"assembly failed for {cell}")
+        return
 
     _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,
              hier=hier)

@@ -309,15 +309,20 @@ class Cut(Cell):
                         return (i is not None
                                 and i.width() <= r.width()
                                 and i.height() <= r.height())
-                    #- A lone 1x1 via is a reliability liability: walk
-                    #- the shrink chain through every two-cut shape
-                    #- (2x1, 1x2) first and fall through to a single
-                    #- cut only when nothing larger fits -- and to an
-                    #- overhanging one only when even the 1x1 doesn't.
+                    #- A lone 1x1 via is a reliability liability, and
+                    #- this chain never produces one: it walks the
+                    #- two-cut shapes in the rect's own orientation
+                    #- first, and if none of them fits it takes the
+                    #- SMALLEST two-cut shape and lets it overhang.
+                    #- Overhanging the pin is the lesser evil -- the
+                    #- 1x1 fallback that used to end this chain got
+                    #- left-aligned onto a pad that already carried a
+                    #- via, and the two notched each other down to a
+                    #- sub-minimum width (measured on LELOTEMP_CMP:
+                    #- DRC 0 -> 2 on exactly that).
                     if not _fits(inst):
                         chosen = None
-                        for (hc, vc) in ((vcuts, cuts), (2, 1), (1, 2),
-                                         (1, 1)):
+                        for (hc, vc) in ((vcuts, cuts), (2, 1), (1, 2)):
                             alt = Cut.getInstance(routeLayer, landing,
                                                   hc, vc)
                             if _fits(alt):

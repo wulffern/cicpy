@@ -2197,7 +2197,8 @@ class LayoutCell(Cell):
     def addRailConnection(self, name:str, includeInstances:str="",
                           location:str="t", layer:str="M2",
                           excludeInstances:str="", align:str="center",
-                          cuts:int=2, key:str=None, pin_cut:bool=True):
+                          cuts:int=2, key:str=None, pin_cut:bool=True,
+                          cut_shape:str="auto"):
         """Drop a net's pins onto its rail -- ChannelRoute or ring.
 
         NOT addRouteConnection, which is a DIFFERENT method with a
@@ -2326,8 +2327,17 @@ class LayoutCell(Cell):
             for target, yc, at_rail in ends:
                 if layer == target.layer:
                     continue
+                #- "auto" asks for cuts along the target's long side
+                #- and lets getCutsForRects swap them to the rect's
+                #- aspect. That is right until the pad it makes is
+                #- what collides: a 2x1 on a horizontal rail is 8.8 um
+                #- wide over a 3 um wire and reaches into whatever
+                #- runs beside it. "v"/"h" force the direction so the
+                #- SAME two cuts occupy the axis that has room.
+                hc, vc = (1, cuts) if cut_shape == "v" else (cuts, 1)
                 cs = Cut.getCutsForRects(layer, [target.getCopy()],
-                                         cuts, 1, True)
+                                         hc, vc, True,
+                                         forceShape=cut_shape in ("v", "h"))
                 if cs:
                     ct = cs[0]
                     half = ct.width() / 2

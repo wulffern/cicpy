@@ -284,7 +284,8 @@ class HierLayoutCell(LayoutCell):
             defaults = {"layer": r.get("layer", "M2"),
                         "align": r.get("align", "center"),
                         "cuts": r.get("cuts", 2),
-                        "pin_cut": r.get("pin_cut", True)}
+                        "pin_cut": r.get("pin_cut", True),
+                        "cut_shape": r.get("cut_shape", "auto")}
             overrides = {}
             for d in r.get("drops", []):
                 if isinstance(d, dict):
@@ -294,6 +295,8 @@ class HierLayoutCell(LayoutCell):
                     if len(d) > 1: o["layer"] = d[1]
                     if len(d) > 2: o["align"] = d[2]
                     if "nopin" in d[3:]: o["pin_cut"] = False
+                    if "cutv" in d[3:]: o["cut_shape"] = "v"
+                    if "cuth" in d[3:]: o["cut_shape"] = "h"
                     overrides[d[0]] = o
             for inst in self.iterInstances():
                 nm = getattr(inst, "instanceName", "")
@@ -311,7 +314,8 @@ class HierLayoutCell(LayoutCell):
                 self.addRailConnection(net, f"^{re.escape(nm)}$", "t",
                                         o["layer"], align=o["align"],
                                         cuts=o["cuts"],
-                                        pin_cut=o["pin_cut"])
+                                        pin_cut=o["pin_cut"],
+                                        cut_shape=o["cut_shape"])
             #- a route may keep an end at the cell edge as its PIN for
             #- the level above: "trim" names the ends to pull back
             #- (default both; "l"/"b" low end, "r"/"t" high end, "" none)

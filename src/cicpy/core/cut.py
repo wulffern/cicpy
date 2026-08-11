@@ -263,7 +263,7 @@ class Cut(Cell):
         return fill_inst
 
     @staticmethod
-    def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True, stopLayer:str=None):
+    def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True, stopLayer:str=None, forceShape:bool=False, centerAlignCut:bool=False):
         """Get cuts for a list of rectangles, matching C++ implementation
 
         ``stopLayer`` ends the stack there instead of on the pin's own
@@ -292,7 +292,16 @@ class Cut(Cell):
                 
                 if inst:
                     # Check if we need to swap cuts (orientation mismatch)
-                    if (r.isVertical() and inst.isHorizontal()) or (r.isHorizontal() and inst.isVertical()):
+                    #- forceShape: the caller has already decided the
+                    #- array's direction and means it. The aspect swap
+                    #- below is a good default -- cuts along the long
+                    #- side of what they land on -- but it is only a
+                    #- default, and it silently undid an explicit
+                    #- choice made to steer a pad away from a
+                    #- neighbour it was colliding with.
+                    if not forceShape and (
+                            (r.isVertical() and inst.isHorizontal())
+                            or (r.isHorizontal() and inst.isVertical())):
                         # Got the wrong cut orientation, swap horizontal and vertical cuts
                         inst = Cut.getInstance(routeLayer, landing, vcuts, cuts)
 
@@ -320,7 +329,15 @@ class Cut(Cell):
                     #- via, and the two notched each other down to a
                     #- sub-minimum width (measured on LELOTEMP_CMP:
                     #- DRC 0 -> 2 on exactly that).
-                    if not _fits(inst):
+                    #- forceShape means it: the caller picked the
+                    #- array's direction to steer the pad away from
+                    #- something, and the fitting chain below would
+                    #- hand back the other orientation as "the one
+                    #- that fits" -- which is the pad they were
+                    #- steering away from. Overhanging the pin is the
+                    #- lesser evil and the chain never drops below two
+                    #- cuts anyway.
+                    if not _fits(inst) and not forceShape:
                         chosen = None
                         for (hc, vc) in ((vcuts, cuts), (2, 1), (1, 2)):
                             alt = Cut.getInstance(routeLayer, landing,
@@ -340,18 +357,32 @@ class Cut(Cell):
                             inst = chosen
 
                     # Position the cut
-                    if leftAlignCut:
+                    if centerAlignCut:
+                        inst.moveTo(int(r.centerX() - inst.width() / 2),
+                                    r.y1)
+                    elif leftAlignCut:
                         inst.moveTo(r.x1, r.y1)
                     else:
                         inst.moveTo(r.x2 - inst.width(), r.y1)
                     
-                    xc = r.centerX()
-                    
-                    # Ensure the rectangle spans at least the cut width around its center.
-                    if inst.x1 > xc or inst.x2 < xc:
-                        half = inst.width() / 2
-                        r.x1 = xc - half
-                        r.x2 = xc + half
+                    #- The landing rect follows the CUT, not the pin's
+                    #- centre. It used to be recentred here -- "spans
+                    #- the cut width around its center" -- which on any
+                    #- pin wider than the cut is every time, because a
+                    #- cut placed at either end never straddles the
+                    #- middle. leftAlignCut and cutalignright were both
+                    #- thrown away by it: on a 22.4 um pin the landing
+                    #- came out in the same 9.6 um mid-pin slot either
+                    #- way, and in LELOTEMP_BIAS_IBP that slot ends
+                    #- 0.1 um from VR1's trunk. Following the cut keeps
+                    #- the metal no wider than before and puts it where
+                    #- the alignment asked for.
+                    if inst.x1 < r.x1 or inst.x2 > r.x2:
+                        r.x1 = min(r.x1, inst.x1)
+                        r.x2 = max(r.x2, inst.x2)
+                    else:
+                        r.x1 = inst.x1
+                        r.x2 = inst.x2
                     
                     cuts_out.append(inst)
         

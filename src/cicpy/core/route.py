@@ -42,6 +42,14 @@ class Route(Cell):
         self.startCutRects = list()
         self.endCutRects = list()
         self.leftAlignCut = True
+        #- the landing pad's position on a pin wider than the cut.
+        #- Left is the default, "cutalignright" the other end, and
+        #- "cutaligncenter" the middle -- which is what every route
+        #- used to get whether it asked or not, because the rect was
+        #- recentred after the fact. Centre is right when the trunk
+        #- meets the pin in its middle and wrong when a neighbour
+        #- runs there, so it is a choice now, not a rule.
+        self.centerAlignCut = False
         self.startOffset = "NO_OFFSET"
         self.stopOffset = "NO_OFFSET"
         self.startOffsetCut = "NO_OFFSET"
@@ -145,6 +153,8 @@ class Route(Cell):
         self.endVCuts = get_int(r"(\d+)endvcuts(\s+|,|$)", 0)
         self.cuts = get_int(r"(\d+)cuts", 2)
         self.vcuts = get_int(r"(\d+)vcuts", 1)
+        if re.search(r"cutaligncenter", self.options):
+            self.centerAlignCut = True
         self.routeWidthRule = get_str(r"routeWidth=([^,\\s+,$]+)", "width")
         self.startLayer = get_str(r"startLayer=([^,\\s+,$]+)", "")
         self.stopLayer = get_str(r"stopLayer=([^,\\s+,$]+)", "")
@@ -367,7 +377,27 @@ class Route(Cell):
                       self.options, re.IGNORECASE)
         return m.group(1) if m else None
 
-    def _addCuts(self, rects, allcuts, hcuts, vcuts, stopLayer=None):
+    def _cutShape(self, which):
+        """"cutv"/"cuth" -- force the cut ARRAY's direction.
+
+        By default the array follows the aspect of the rect it lands
+        on, two cuts along its long side. That is a good default and a
+        bad law: on a wide pin it makes a pad several times the width
+        of the wire, and the pad is what collides with the neighbour.
+        Forcing the direction keeps both cuts and puts them on the
+        axis that has room. `startcutv`/`endcutv` name one end.
+        """
+        for tag, shape in (("cutv", "v"), ("cuth", "h")):
+            if re.search(which + tag, self.options, re.IGNORECASE):
+                return shape
+        for tag, shape in (("cutv", "v"), ("cuth", "h")):
+            if re.search(r"(^|,|\s)" + tag + r"(,|\s|$)", self.options,
+                         re.IGNORECASE):
+                return shape
+        return None
+
+    def _addCuts(self, rects, allcuts, hcuts, vcuts, stopLayer=None,
+                 cutShape=None):
         if self.routeLayer == "PO":
             return []
         default_hcuts, default_vcuts = self._allowedCutCounts(hcuts, vcuts)
@@ -387,9 +417,15 @@ class Route(Cell):
             elif self.fillvcut and rect.isVertical():
                 cut_h, cut_v = (1, 2)
 
+            if cutShape == "v":
+                cut_h, cut_v = 1, max(2, int(vcuts) or 2)
+            elif cutShape == "h":
+                cut_h, cut_v = max(2, int(hcuts) or 2), 1
             insts = Cut.getCutsForRects(self.routeLayer, [rect], cut_h,
                                         cut_v, self.leftAlignCut,
-                                        stopLayer)
+                                        stopLayer,
+                                        forceShape=cutShape is not None,
+                                        centerAlignCut=self.centerAlignCut)
             inst = insts[0] if insts else None
             if inst is not None:
                 cuts.append(inst)
@@ -403,7 +439,8 @@ class Route(Cell):
         lcuts = self.startCuts if self.startCuts > 0 else self.cuts
         lvcuts = self.startVCuts if self.startVCuts > 0 else self.vcuts
         cuts = self._addCuts(self.startRects, self.startCutRects,
-                             lcuts, lvcuts, self._stopLayer("start"))
+                             lcuts, lvcuts, self._stopLayer("start"),
+                             self._cutShape("start"))
 
         if self.startOffsetCut == "HIGH":
             for cut in cuts:
@@ -425,7 +462,8 @@ class Route(Cell):
         lcuts = self.endCuts if self.endCuts > 0 else self.cuts
         lvcuts = self.endVCuts if self.endVCuts > 0 else self.vcuts
         cuts = self._addCuts(self.stopRects, self.endCutRects,
-                             lcuts, lvcuts, self._stopLayer("end"))
+                             lcuts, lvcuts, self._stopLayer("end"),
+                             self._cutShape("end"))
 
         if self.endOffsetCut == "HIGH":
             for cut in cuts:

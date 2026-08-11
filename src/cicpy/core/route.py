@@ -4,6 +4,7 @@ from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo, sort
 from .text import Text
 from .rules import Rules
 from .cut import Cut
+import os
 import re
 import logging
 
@@ -494,6 +495,55 @@ class Route(Cell):
             rect.translate(0, -width)
         self.updateBoundingRect()
 
+    def trunkAnchors(self):
+        """{anchor name: the coordinate it resolves to}, from the pins.
+
+        The pins ARE the specification, so every one of these survives a
+        resize and a change of technology; a trunkx does neither. Split
+        out of _resolveTrunkAlign so the same arithmetic can answer the
+        inverse question -- given a coordinate, which anchor would have
+        produced it -- which is what turns a searched trunk back into
+        something a design can hold. See CICPY_TRUNK_REPORT.
+        """
+        rects = [r for r in (self.startRects + self.stopRects)
+                 if r is not None]
+        if not rects:
+            return {}
+        from .rules import Rules
+        w = Rules.getInstance().get(self.routeLayer, "width")
+        #- the RIGHTMOST narrow rect: instances carry duplicate
+        #- subports, and the narrowest pick has landed a rail on the
+        #- neighbouring bars before (measured)
+        narrow = [r for r in rects if (r.x2 - r.x1) <= 4000]
+        pick = max(narrow or rects, key=lambda r: r.x1)
+        return {
+            "trunktab": int(pick.x1) + int((pick.x2 - pick.x1) // 2),
+            #- the COMMON overlap's right edge: the rightmost trunk
+            #- that still lies on every pin it must land on. max(x2)
+            #- would hug the widest pin and slide off the narrowest.
+            "trunkright": int(min(r.x2 for r in rects)) - w // 2,
+            "trunkleft": int(max(r.x1 for r in rects)) + w // 2,
+        }
+
+    def _reportTrunkAnchors(self):
+        """Say which pin anchor would reproduce this route's trunk.
+
+        The evidence for retiring trunkx: a resolved coordinate that
+        some anchor already reaches never needed to be a coordinate.
+        One line per route on stdout, off unless CICPY_TRUNK_REPORT.
+        """
+        if not os.environ.get("CICPY_TRUNK_REPORT"):
+            return
+        anchors = self.trunkAnchors()
+        trunk = int(self.absoluteTrunk)
+        hit = [k for k, v in anchors.items() if int(v) == trunk]
+        near = sorted(((abs(int(v) - trunk), k, int(v))
+                       for k, v in anchors.items()))
+        detail = " ".join(f"{k}={v}" for _, k, v in near)
+        print(f"TRUNKREPORT\t{self.net}\t{self.routeLayer}\t{self.route_}\t"
+              f"trunkx={trunk}\t{hit[0] if hit else 'NONE'}\t"
+              f"off={near[0][0] if near else '-'}\t{detail}")
+
     def _resolveTrunkAlign(self):
         """Pin-relative trunk options, resolved against the collected
         rects: `trunkright` hugs the pins' right edge, `trunkleft` the
@@ -505,31 +555,18 @@ class Route(Cell):
         where the rail goes, and it survives a resize untouched.
         """
         if self.hasAbsoluteTrunk:
+            #- a trunk that arrived as a coordinate: say what it should
+            #- have been instead
+            self._reportTrunkAnchors()
             return
         m = re.search(r"trunk(right|left|tab)\b", self.options or "")
         if not m:
             return
-        rects = [r for r in (self.startRects + self.stopRects)
-                 if r is not None]
-        if not rects:
+        anchors = self.trunkAnchors()
+        if not anchors:
             return
-        from .rules import Rules
-        w = Rules.getInstance().get(self.routeLayer, "width")
         kind = m.group(1)
-        if kind == "tab":
-            #- the RIGHTMOST narrow rect: instances carry duplicate
-            #- subports, and the narrowest pick has landed a rail on
-            #- the neighbouring bars before (measured)
-            narrow = [r for r in rects if (r.x2 - r.x1) <= 4000]
-            pick = max(narrow or rects, key=lambda r: r.x1)
-            trunk = int(pick.x1) + int((pick.x2 - pick.x1) // 2)
-        elif kind == "right":
-            #- the COMMON overlap's right edge: the rightmost trunk
-            #- that still lies on every pin it must land on. max(x2)
-            #- would hug the widest pin and slide off the narrowest.
-            trunk = int(min(r.x2 for r in rects)) - w // 2
-        else:
-            trunk = int(max(r.x1 for r in rects)) + w // 2
+        trunk = anchors["trunk" + kind]
         self.hasAbsoluteTrunk = True
         self.absoluteTrunk = trunk
         #- the readers that parse options directly see it too

@@ -274,11 +274,44 @@ The node counts are an artefact of the search stepping off the pin layer and
 back — `route_spec`'s own comment: *"a path bends for its own reasons... and
 reads as a bend even when the pins are squarely in line."* **47 nodes is not 47
 corners.** So the risk is not that the step vocabulary is too small; it is that
-the emitter gives up too early. Budget accordingly: less design, more emitter. One thing to expect: the
-TrackMap grid and the channel grid have different origins — TrackMap's `lo` is
-`min(pin.x1) - margin` (`mazerouter.py:1303-1306`), `channelTrackCoord`'s is the
-channel's registered low edge. **Unifying those two grids is probably the whole
-job**, because then a path x *is* a channel track index by construction.
+the emitter gives up too early. Budget accordingly: less design, more emitter.
+
+### MEASURED (2026-08-11): `CICPY_TRUNK_REPORT=1 make mag`
+
+`Route.trunkAnchors()` resolves every pin anchor and reports which one
+reproduces a route's trunk. Over both hierarchical designs, **19 resolved
+trunks**:
+
+| | count | verdict |
+|---|---|---|
+| exactly a pin anchor, `off=0` | **10** | `trunktab` ×4, `trunkright` ×3, `trunkleft` ×3 |
+| within 1000 of `trunktab` | **7** | R1<0..4> ×6, VDD_1V8 ×1 |
+| an L-route's vertical leg | **2** | `-|--` on M2, 4100 left of `trunkright` |
+
+The 7 near-misses are all *left* of the tab centre by 800–1000 — under half a
+wire width, and all of one sign. That is the search snapping to its own
+TrackMap grid, whose origin is `min(pin.x1) - margin`
+(`mazerouter.py:1303-1306`) rather than anything in the design.
+**Unifying that grid with `channelTrackCoord`'s converts all 7 to exact
+anchors**, which is the single highest-value change in the whole emitter.
+
+Only **2 of 19** genuinely lack vocabulary, and both are `-|--` L-routes where
+"one trunk coordinate" was the wrong model to begin with — an L has a corner,
+not a trunk. That is precisely what a polyline expresses and a single anchor
+cannot.
+
+### And the 18 `blocked` entries
+
+| reason | count | does the polyline fix it? |
+|---|---|---|
+| `no path ... closest approach N away` | 8 | **No** — and it does not need to: all 8 are VDD_1V8/VSS, which the ring and strap machinery connects at cell level. The designs pass LVS with these blocked. |
+| `not a shape route.py can draw` | 5 | **Yes**, directly |
+| `pins share only -N of column, a straight vertical cannot land` | 3 | **Yes** — the pins do not overlap in x, so no `\|\|` can work; an L or Z can |
+| `trunk N lies outside the pins' common overlap` | 2 | **Yes** — an anchor problem, not a path problem |
+
+**10 of 18 blocked nets are polyline-fixable, and the other 8 were never the
+stack router's job.** Together with the trunk table: the vocabulary is not the
+risk. The emitter is.
 
 ## Stage 2 — `~`, a twelfth shape: the route story
 

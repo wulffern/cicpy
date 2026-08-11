@@ -37,7 +37,7 @@ build() {
 }
 
 record() {
-  mkdir -p $dir && rm -f $dir/*
+  mkdir -p $dir && rm -f $dir/*(N)
   for f in $lib/*.mag; do
     grep -v '^timestamp' $f > $dir/$(basename $f)
   done

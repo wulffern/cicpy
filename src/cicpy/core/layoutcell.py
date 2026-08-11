@@ -2729,6 +2729,26 @@ class LayoutCell(Cell):
         r.route()
         return r
 
+    def path(self, net, layer, start=None, stop=None, options=""):
+        """A route told as a story: anchored steps, spelled `~`.
+
+        The twelfth shape, beside the eleven ASCII ones -- additive, so
+        nothing that works today can change. Use it where the canned
+        shapes ran out, which is exactly the set of nets the maze
+        router currently abandons as "not a shape route.py can draw".
+
+            p = cell.path("VBP", "M1", startRects, stopRects)
+            p.start(); p.up(); p.movex(p.tab_lane()); p.trunk()
+            p.down(); p.end()
+
+        Registered and routed like any other route -- see core/path.py.
+        """
+        from .path import Path
+        p = Path(net, layer, start, stop, options)
+        p.layoutcell = self
+        self.add(p)
+        return p
+
     def addRoutingChannel(self, name, lo, hi, horizontal=True):
         """Name the gap the placement opened, so routes can aim at it.
 

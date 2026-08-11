@@ -1421,6 +1421,8 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 #- search proves a path exists and says which layer and
                 #- direction it wants; the drawing is not ours to do.
                 specs = []
+                searched = []
+                unshaped = False
                 other_claims = claimed | {c for n2, c in preclaims
                                           if n2 != net}
                 for a, b in zip(rects, rects[1:]):
@@ -1430,14 +1432,39 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     r._own = [a, b]
                     path = r.search(start, goal,
                                     r.manhattan_heuristic(r.snap(goal)))
+                    searched.append((a, b, path))
                     spec = route_spec(path, tm, other_claims, r, (a, b),
                                       extent_rects=rects)
                     if spec is None:
-                        raise Blocked(
-                            f"path for {net} is not a shape route.py can "
-                            f"draw ({len(path)} nodes, layers "
-                            f"{sorted({n[2] for n in path})})")
+                        #- The search FOUND a path; only the eleven canned
+                        #- shapes could not hold it. That used to abandon
+                        #- the net -- which is what every "not a shape
+                        #- route.py can draw" in a design file is, and why
+                        #- those nets carry a hand written beforeRoute.
+                        unshaped = True
+                        continue
                     specs.append(spec)
+
+                def draw_as_paths(why):
+                    """The searched shape, drawn as it was found.
+
+                    ALL of the net's pairs, never a mixture: one
+                    addConnectivityRoute covers every rect of a net, so
+                    drawing some pairs both ways would double them.
+                    """
+                    grp = groups.get(stack)
+                    if grp is None:
+                        raise Blocked(f"no group object for stack {stack}")
+                    for aa, bb, nodes in searched:
+                        pth = grp.layout.path(net, tm.pin_layer, [aa], [bb])
+                        pth.fromNodes(nodes)
+                    log.info(f"{net}: {why}; drawn as {len(searched)} "
+                             f"path(s) of the searched shape")
+                    routed.append((stack, net))
+
+                if unshaped:
+                    draw_as_paths("no canned shape fits")
+                    continue
                 #- one command per net: route.py finds the net's own
                 #- rects, so a repeated spec would redraw the same thing
                 #- Scoped to this stack's instances. route.py finds a
@@ -1516,14 +1543,22 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     #- width in from the pin edge by construction, and a
                     #- clearance-sized margin blocked every one of them
                     w2 = r.rule(tm.pin_layer, "width") // 2
+                    #- Both of these say the same thing: the pins do not
+                    #- support a STRAIGHT VERTICAL. That is a fact about
+                    #- the shape, not about the net -- the search found a
+                    #- path, and a path with a corner lands on both pins
+                    #- where a straight one cannot. So draw what was
+                    #- found instead of abandoning the net.
                     if ox2 - ox1 < 2 * w2:
-                        raise Blocked(
-                            f"{net}: pins share only {ox2 - ox1} of "
-                            f"column, a straight vertical cannot land")
+                        draw_as_paths(
+                            f"pins share only {ox2 - ox1} of column, so no "
+                            f"straight vertical lands")
+                        continue
                     if tx is None or tx < ox1 + w2 or tx > ox2 - w2:
-                        raise Blocked(
-                            f"{net}: trunk {tx} lies outside the pins' "
-                            f"common overlap {ox1}..{ox2}")
+                        draw_as_paths(
+                            f"trunk {tx} lies outside the pins' common "
+                            f"overlap {ox1}..{ox2}")
+                        continue
                     #- and if the route needs a VIA at each pin, the
                     #- smallest cut must FIT the narrowest pin. A 3800
                     #- pad on a 3200 gate tab overhangs 300 a side

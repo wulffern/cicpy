@@ -107,11 +107,14 @@ class PathGeometry(unittest.TestCase):
         p.route()
         segs = self._segments(p, "M2")
         self.assertTrue(segs)
-        ys = [int(s.y1) for s in segs] + [int(s.y2) for s in segs]
-        self.assertEqual(min(ys), int(a.centerY()))
-        self.assertEqual(max(ys), int(b.centerY()))
+        #- centred on the port's OWN x, which is off every pitch
         xs = [int(s.centerX()) for s in segs]
         self.assertEqual(set(xs), {int(a.centerX())})
+        #- and covering both port centres; a leg overlaps its endpoint
+        #- by half a width so the landing is solid, never short of it
+        ys = [int(s.y1) for s in segs] + [int(s.y2) for s in segs]
+        self.assertLessEqual(min(ys), int(a.centerY()))
+        self.assertGreaterEqual(max(ys), int(b.centerY()))
 
     def test_a_path_is_a_route(self):
         """isType walks the MRO, and LayoutCell.route() only draws what
@@ -146,3 +149,56 @@ class PathGeometry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SearchedPaths(unittest.TestCase):
+    """A searched node list becomes the corners it actually has."""
+
+    def setUp(self):
+        self.rules = _rules()
+        self.cell = LayoutCell()
+        self.cell.name = "PATHTEST2"
+
+    def test_simplify_keeps_only_corners(self):
+        from cicpy.core.path import simplify
+        #- a straight run of five nodes is two points
+        straight = [(0, y, "M2") for y in range(0, 5000, 1000)]
+        self.assertEqual(len(simplify(straight)), 2)
+
+    def test_simplify_keeps_the_turn(self):
+        from cicpy.core.path import simplify
+        nodes = ([(0, y, "M2") for y in (0, 1000, 2000)]
+                 + [(x, 2000, "M2") for x in (1000, 2000)])
+        pts = simplify(nodes)
+        self.assertEqual(pts[0], (0, 0, "M2"))
+        self.assertEqual(pts[-1], (2000, 2000, "M2"))
+        self.assertIn((0, 2000, "M2"), pts)
+
+    def test_simplify_keeps_layer_changes(self):
+        from cicpy.core.path import simplify
+        nodes = [(0, 0, "M2"), (0, 1000, "M2"), (0, 1000, "M3"),
+                 (0, 2000, "M3")]
+        pts = simplify(nodes)
+        layers = [p[2] for p in pts]
+        self.assertIn("M2", layers)
+        self.assertIn("M3", layers)
+
+    def test_a_staircase_draws_and_is_marked_resolved(self):
+        """The 47-node case in miniature: it DRAWS, and it knows it
+        holds coordinates so the wires writer will refuse it."""
+        a, b = _pin("M2", 0, 0), _pin("M2", 9000, 9000)
+        nodes = ([(0, y, "M2") for y in range(0, 9001, 3000)]
+                 + [(x, 9000, "M2") for x in range(3000, 9001, 3000)])
+        p = self.cell.path("N", "M2", [a], [b])
+        p.fromNodes(nodes)
+        p.route()
+        rects = [c for c in p.children if hasattr(c, "isRect") and c.isRect()]
+        self.assertTrue(rects, "a searched path drew nothing")
+        self.assertTrue(p.isResolved(),
+                        "a path built from coordinates must say so")
+
+    def test_an_anchored_path_is_not_resolved(self):
+        a, b = _pin("M2", 0, 0), _pin("M2", 0, 9000)
+        p = self.cell.path("N", "M2", [a], [b])
+        p.start().trunk(p.left_of_pins()).end()
+        self.assertFalse(p.isResolved())

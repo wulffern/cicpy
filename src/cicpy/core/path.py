@@ -146,6 +146,30 @@ class _TrunkAnchor(Anchor):
         return path.trunkAnchors().get(self.kind)
 
 
+class _FixedAnchor(Anchor):
+    """A resolved coordinate. THE TOOLS' FORM, never a design's.
+
+    route.py has said it for years: "trunkx is the resolved form and
+    belongs to the tools, not to a pycell". The search works in
+    coordinates and must be able to draw what it found; what it may not
+    do is write one into a design file. `is_fixed` is how the wires
+    writer tells the difference and refuses.
+    """
+
+    is_fixed = True
+
+    def __init__(self, value, axis="x"):
+        super().__init__()
+        self.value = int(value)
+        self.axis = axis
+
+    def coord(self, path):
+        return self.value
+
+    def __repr__(self):
+        return f"fixed({self.value})"
+
+
 class _TrackAnchor(Anchor):
     """A track inside a named routing channel. The fallback for when no
     pin anchor says it -- an index means the same relative position
@@ -307,7 +331,7 @@ class Trunk(Step):
             hi = max(int(r.y2) for r in rects)
             if c != x:
                 path.drawSegment(x, y, c, y, layer)
-            path.drawSegment(c, lo, c, hi, layer)
+            path.drawSegment(c, lo, c, hi, layer, extend=False)
             return (c, y, layer)
         lo = min(int(r.x1) for r in rects)
         hi = max(int(r.x2) for r in rects)
@@ -438,12 +462,37 @@ class Path(Route):
             return None
         return getattr(cl, direction, "") or None
 
-    def drawSegment(self, x1, y1, x2, y2, layer):
+    def drawSegment(self, x1, y1, x2, y2, layer, extend=True):
+        """One leg, drawn CORNER TO CORNER rather than end to end.
+
+        A polyline drawn as abutting rects leaves a notch at every turn
+        -- the two legs meet at a point, so the outer corner is a
+        square of nothing and the inner one is a sliver. Both are
+        minimum-width errors, and a leg shorter than the wire width is
+        one all by itself. Extending each leg half a width past its
+        endpoint makes consecutive legs OVERLAP squarely, which is what
+        a corner is, and puts a floor under the length of a short one.
+        This is the detail `route_spec` warns about: "emitting raw rects
+        and cut instances instead reimplements that badly... 272 DRC
+        errors of minimum width, minimum area and via enclosure".
+        """
         w = Rules.getInstance().get(layer, self.routeWidthRule)
-        if y1 == y2:
-            r = HorizontalRectangleFromTo(layer, x1, x2, y1 - w // 2, w)
-        elif x1 == x2:
-            r = VerticalRectangleFromTo(layer, x1 - w // 2, y1, y2, w)
+        #- half centres the wire on its own centreline, always. ext is
+        #- the corner overlap, and a SPAN ends where it says it ends: a
+        #- trunk reaches the pins it lands on and no further, exactly as
+        #- `||` does. Only a leg that turns into another needs it.
+        half = w // 2
+        ext = half if extend else 0
+        if y1 == y2 and x1 != x2:
+            lo, hi = (x1, x2) if x1 < x2 else (x2, x1)
+            r = HorizontalRectangleFromTo(layer, lo - ext, hi + ext,
+                                          y1 - half, w)
+        elif x1 == x2 and y1 != y2:
+            lo, hi = (y1, y2) if y1 < y2 else (y2, y1)
+            r = VerticalRectangleFromTo(layer, x1 - half, lo - ext,
+                                        hi + ext, w)
+        elif x1 == x2 and y1 == y2:
+            return None
         else:
             log.error(f"{self.net}: a step asked for a diagonal from "
                       f"({x1},{y1}) to ({x2},{y2})")
@@ -502,3 +551,95 @@ class Path(Route):
     def astuples(self):
         """The story as the serialised form the router emits."""
         return [s.astuple() for s in self.steps]
+
+    def isResolved(self):
+        """Does any step still carry a coordinate?
+
+        A resolved path may be DRAWN but must not be written into a
+        design: the wires writer asks this and records the net as
+        searched-not-declared instead of pasting a number.
+        """
+        for s in self.steps:
+            a = getattr(s, "anchor", None) or getattr(s, "at", None)
+            if getattr(a, "is_fixed", False):
+                return True
+        return False
+
+    #- -- from a searched path --------------------------------------
+    def fromNodes(self, nodes):
+        """Take the shape the maze search actually found.
+
+        The search returns a node per grid step, so a path that turns
+        twice can be forty-seven nodes long -- `route_spec`'s own
+        comment says the count is an artefact: "a path bends for its
+        own reasons... and reads as a bend even when the pins are
+        squarely in line". What matters is the CORNERS, so collinear
+        runs collapse first. Emitting a rect per node instead is what
+        produced "272 DRC errors of minimum width, minimum area and via
+        enclosure" the last time someone bypassed route.py.
+        """
+        corners = simplify(nodes)
+        if len(corners) < 2:
+            return self
+        self.start()
+        cur = corners[0]
+        for nxt in corners[1:]:
+            if nxt[2] != cur[2]:
+                self._add(_LayerTo(nxt[2]))
+            if nxt[0] != cur[0]:
+                self.movex(_FixedAnchor(nxt[0]))
+            if nxt[1] != cur[1]:
+                self.movey(_FixedAnchor(nxt[1], "y"))
+            cur = nxt
+        self.end()
+        return self
+
+
+@step
+class _LayerTo(Step):
+    """Change to a named layer. What `up`/`down` become once the search
+    has already decided which layer it wants."""
+    name = "layer"
+
+    def __init__(self, layer):
+        self.layer = layer
+
+    def apply(self, path, cur):
+        x, y, layer = cur
+        if self.layer == layer:
+            return cur
+        path.drawVia(x, y, layer, self.layer)
+        return (x, y, self.layer)
+
+    def astuple(self):
+        return (self.name, self.layer)
+
+
+def simplify(nodes):
+    """A searched node list as its CORNERS.
+
+    Drops every node that continues the run it is already on -- same
+    layer, same direction -- so a forty-seven node staircase becomes
+    the handful of turns it actually is.
+    """
+    pts = [(int(n[0]), int(n[1]), n[2]) for n in (nodes or [])]
+    if len(pts) < 3:
+        return pts
+    out = [pts[0]]
+    for prev, cur, nxt in zip(pts, pts[1:], pts[2:]):
+        if cur[2] != prev[2] or cur[2] != nxt[2]:
+            out.append(cur)          # a layer change is always a corner
+            continue
+        dx0, dy0 = cur[0] - prev[0], cur[1] - prev[1]
+        dx1, dy1 = nxt[0] - cur[0], nxt[1] - cur[1]
+        #- collinear iff the two steps point the same way on one axis
+        if (dx0 == 0 and dx1 == 0) or (dy0 == 0 and dy1 == 0):
+            continue
+        out.append(cur)
+    out.append(pts[-1])
+    #- a layer change repeated at one point collapses to one corner
+    dedup = [out[0]]
+    for p in out[1:]:
+        if p != dedup[-1]:
+            dedup.append(p)
+    return dedup

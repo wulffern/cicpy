@@ -2226,7 +2226,12 @@ class LayoutCell(Cell):
         for rail, ring in ((ra, a), (rb, b)):
             if layer == rail.layer:
                 continue
-            ct = Cut.getInstance(layer, rail.layer, 1, 1)
+            #- the largest array the rail can hold, not a lone cut. A
+            #- 1x1 between two supply rings is one contact carrying a
+            #- ring's current, and it was typed here rather than chosen
+            ct = self._fittedCut(rail, layer)
+            if ct is None:
+                ct = Cut.getInstance(layer, rail.layer, 1, 1)
             if ct is None:
                 ct = Cut.getInstance(rail.layer, layer, 1, 1)
             if ct is not None:
@@ -2672,6 +2677,7 @@ class LayoutCell(Cell):
         #- still took the spine its own pins implied. Five ladder nets
         #- asked for five tracks and landed on one.
         options = self._resolveChannelOptions(options)
+        options = self._withCuts(options, cuts)
         self.log.info(f"addConnectivityRoute(layer={layer}, regex={regex}, routeType={routeType}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, includeGroups={includeGroups})")
         prefer_anymetal = bool(re.search(r"anymetal(,|\s+|$)", options or ""))
         for node in list(self.nodeGraphList):
@@ -2709,7 +2715,7 @@ class LayoutCell(Cell):
                 for rr in rects:
                     self.add(rr.getCopy(layer))
 
-    def addOrthogonalRouteFromRects(self, net, verticalLayer, horizontalLayer, rects, options="", cuts=1):
+    def addOrthogonalRouteFromRects(self, net, verticalLayer, horizontalLayer, rects, options="", cuts=2):
         self.log.info(
             f"addOrthogonalRouteFromRects(net={net}, verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, options={options}, cuts={cuts}, rects={len(rects or [])})"
         )
@@ -2864,6 +2870,22 @@ class LayoutCell(Cell):
         #- left, and it is at least a number
         return int(rules.get("ROUTE", "horizontalgrid"))
 
+    @staticmethod
+    def _withCuts(options, cuts):
+        """Say the caller's cut count in the options, where route.py
+        reads it.
+
+        `cuts` reached the debug annotation and nothing else -- it was
+        never passed to Route -- so every design that typed a number
+        here was writing a comment, and route.py's own default (2x1)
+        decided. The parameter says what it means now; an explicit
+        `<N>cuts` in the options still wins, because that is the
+        narrower statement.
+        """
+        if not cuts or re.search(r"\d+cuts", options or ""):
+            return options
+        return (options + "," if options else "") + f"{int(cuts)}cuts"
+
     def _resolveChannelOptions(self, options):
         """Turn channel names into this run's coordinates.
 
@@ -2902,7 +2924,7 @@ class LayoutCell(Cell):
         return options.strip(",")
 
     def addChannelConnection(self, verticalLayer, horizontalLayer, regex,
-                             channel, track, cuts=1, includeInstances="",
+                             channel, track, cuts=2, includeInstances="",
                              excludeInstances="", options=""):
         """Connect pins to a track of a named routing channel.
 
@@ -2950,6 +2972,7 @@ class LayoutCell(Cell):
 
     def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, includeInstances, includeGroups=""):
         options = self._resolveChannelOptions(options)
+        options = self._withCuts(options, cuts)
         self.log.info(
             f"addOrthogonalConnectivityRoute(verticalLayer={verticalLayer}, horizontalLayer={horizontalLayer}, regex={regex}, options={options}, cuts={cuts}, excludeInstances={excludeInstances}, includeInstances={includeInstances}, includeGroups={includeGroups})"
         )

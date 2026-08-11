@@ -1043,7 +1043,7 @@ class Route(Cell):
 
 class OrthogonalLayerRoute(Route):
 
-    def __init__(self, net, vertical_layer, horizontal_layer, access_rects, options="", cuts=1):
+    def __init__(self, net, vertical_layer, horizontal_layer, access_rects, options="", cuts=2):
         Cell.__init__(self, net)
         self.log = logging.getLogger("OrthogonalLayerRoute")
         self.net = net

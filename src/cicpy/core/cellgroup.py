@@ -255,12 +255,12 @@ class CellGroup(LayoutCell):
             return ""
         return "^(" + "|".join(names) + ")$"
 
-    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=1, excludeInstances=""):
+    def addConnectivityRoute(self, layer, regex, routeType, options="", cuts=2, excludeInstances=""):
         include = self.instanceRegex()
         self.layout.addConnectivityRoute(layer, regex, routeType, options, cuts, excludeInstances, include)
         return self
 
-    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=1, excludeInstances=""):
+    def addOrthogonalConnectivityRoute(self, verticalLayer, horizontalLayer, regex, options="", cuts=2, excludeInstances=""):
         include = self.instanceRegex()
         self.layout.addOrthogonalConnectivityRoute(verticalLayer, horizontalLayer, regex, options, cuts, excludeInstances, include)
         return self

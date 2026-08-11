@@ -605,17 +605,29 @@ class MazeRouter:
             #- question is via_is_free's, asked at the candidate's own
             #- size.
             inst = None
-            for (hc, vc) in ((2, 1), (1, 2), (1, 1)):
+            for (hc, vc) in ((2, 1), (1, 2)):
                 cand = Cut.getInstance(a_layer, b_layer, hc, vc)
                 if cand is None:
                     continue
-                if (hc, vc) != (1, 1) and not self.via_is_free(
+                if not self.via_is_free(
                         x, y, a_layer, b_layer,
                         cut_wh=(int(cand.width()), int(cand.height()))):
                     continue
                 inst = cand
                 break
             if inst is None:
+                #- NO LONE VIA. A 1x1 used to sit at the end of this
+                #- list as the last resort, so a corner with room for
+                #- nothing better silently got one contact carrying the
+                #- whole net -- the reliability question answered by
+                #- whichever candidate happened to fit. There is no
+                #- answer here that is both small enough and good
+                #- enough, so the failure is reported instead: the net
+                #- wanted a via at a place that cannot hold one.
+                self.log.error(f"{self.net}: no room for a 2-cut via at "
+                               f"({int(x)}, {int(y)}) between {a_layer} "
+                               f"and {b_layer}; the net is left open "
+                               f"there rather than given a lone contact")
                 continue
             inst.moveCenter(int(x), int(y))
             inst.updateBoundingRect()

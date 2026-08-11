@@ -631,6 +631,15 @@ what a cell is MADE OF is read off its own `routes` declaration.
    outside the copied window and was silently left behind; built from its own
    origin it lands inside the cell. The cursor is `None` until a step sets it.
 
+## Stage 3b — DONE (2026-08-11)
+
+`channelTrackCoord` spaces tracks by `width + space` for the layer named,
+or the widest lane in the stack when the caller does not know one, so an
+index is legal for whatever rides it. Both designs renumbered
+`0,2,4,...` -> `0,1,2,...` and the "two apart" rule is gone from the
+comments because it is gone from the arithmetic. DRC/LVS parity on all
+five cells; BIAS_IBP cost +0.7% (758.22 -> 763.62), everything else flat.
+
 ## Stage 6 — the declarative surface
 
 `self.instRegex`, `self.groupName`, `self.addOrder([...])` in `__init__`;
@@ -640,9 +649,41 @@ needs a *declaration instance*: `Stack.__init__(self, layout=None, name=None)`
 that only calls `StackGroup.__init__` when bound to a layout. Convert
 `LELOTEMP_CMP.py` (a classic pycell today) as the fifth prototype.
 
-## Stage 7 — 1x2 / 2x1 cuts minimum
+### NOT DONE, and two thirds of it should not be (2026-08-11)
+
+- **The `__init__` surface is a step backwards.** Class attributes ARE the
+  declaration, and `compile()` reading them without instantiating is the
+  property that lets cic.py decide what a cell is before the technology is
+  loaded. Moving them into `__init__` trades a file that can be read without
+  running it for one that cannot, and buys nothing.
+- **`SidecarCell` -> `HierCell` would be a lie after Stage 5.** A sidecar
+  cell is not necessarily hierarchical: LELOTEMP_CCMP is a sidecar made of
+  devices. What a cell is made of is now a property of its own declaration,
+  which is exactly why the name should not claim it.
+- **Converting LELOTEMP_CMP is still open**, and it is the stage's real
+  content. It is not free: CMP never calls `stack()` (it relies on the
+  framework's own placement) and never fills, so the recipe would re-lay it
+  and its `track`-numbered routes would need re-tuning. It is also the only
+  byte-identical control left among the prototypes for a cell built without
+  `hierarchy()`. Worth doing deliberately, with its own gate, not as a
+  by-product.
+
+## Stage 7 — 1x2 / 2x1 cuts minimum — DONE (2026-08-11)
 
 Geometry-changing, therefore never debugged alongside Stage 5.
+
+**The finding that mattered: `cuts` was dead.** `addConnectivityRoute` passed
+it to `_annotateRoute` and never to `Route`, so all 14 design sites typing a
+number were writing comments and route.py's own 2x1 default decided
+everything. The designs were migrated to 2 FIRST and the parameter wired
+through second, which makes the no-op provable: DRC, LVS and `cicpy cost`
+identical on all five cells afterwards.
+
+The framework `cuts=1` defaults are 2; the ring-to-ring cut is `_fittedCut`
+instead of a typed 1x1; the maze router's last-resort lone via is gone and
+reports the position it could not serve. It never fires on the five cells.
+OTAR's `1cuts` is kept and now says so twice -- a 2x1 pad does not fit
+beside that guard ring.
 
 - **framework `cuts=1` defaults** — `core/cellgroup.py:258`, `:263`,
   `core/route.py:1009`, `core/layoutcell.py:2711`, `:2824`. These are what
@@ -654,7 +695,7 @@ Geometry-changing, therefore never debugged alongside Stage 5.
   fit beside a guard ring. Widen the lane or accept the delta — do not migrate
   blind. `route.py:33`'s `vcuts = 1` with `cuts = 2` is a 2x1 already; leave it.
 
-## Stage 8 — the last imperative geometry
+## Stage 8 — the last imperative geometry — DONE (2026-08-11)
 
 `LELOTEMP_BIAS_IBP.route()` builds its powerdown pins from `Rect`, `Cut` and
 literals. `addPortOnEdge` (`core/layoutcell.py:2880-2936`) is close but requires
@@ -662,6 +703,11 @@ the net to be in `self.ports` (it is an *instance* port here). A
 `promoteInstancePort(net, instanceRegex, edge, layer)` covers it, with the
 off-centre attach rule derived from `Rules.get(layer,'space')` instead of the
 typed `2400`.
+
+Shipped as written. `LELOTEMP_BIAS_IBP.route()`'s twenty lines of Rect and Cut
+are two calls; 2400 is `space + width/2`, 5000 is the layer's minimum-area pad,
+20000 is twice that pad, and the 1x1 via is `_fittedCut`. 8 DRC and "Circuits
+match uniquely", both unchanged.
 
 ## Verification
 

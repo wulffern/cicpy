@@ -37,6 +37,7 @@ from .routegroup import RouteGroup
 from .guard import Guard
 from .cut import Cut
 import cicspi as spi
+import math
 import re
 import logging
 import inspect
@@ -3053,6 +3054,135 @@ class LayoutCell(Cell):
             self.log.error(f"addPortOnEdge: Failed to create route for node '{node}': {e}. Adding rect directly.")
             self.add(rp)
             p.set(rp)
+
+    def promoteInstancePort(self, node, instanceRegex, location, layer,
+                            excludeInstances=""):
+        """Carry a SUBCELL's port out to this cell's edge, as a pin.
+
+        `addPortOnEdge` does this for a net that is already one of this
+        cell's ports. The net that needs it most is not: a powerdown
+        signal lives deep inside a finished subcell, and the parent has
+        to present it at an edge before anything above can reach it.
+        That was hand-drawn geometry -- a Rect for the riser, a 1x1
+        Cut, a pad sized by a literal, an attach point 2400 off the
+        pin's left edge -- in the one design that needed it.
+
+        Every number here comes from the technology instead:
+
+        - the CUT is the largest that fits the pin (`_fittedCut`), so
+          the rule against 1x1 vias holds here too;
+        - the PAD on each intermediate layer is the minimum area that
+          layer demands, because a bare cut pad is under it;
+        - the ATTACH POINT is `space + width/2` in from the end of a
+          WIDE pin. Mid-bar, the cut pad's overhang lands a fraction of
+          a lane from the neighbouring track's bar (met3.2, measured);
+          a pin no wider than a pad is its own only landing and is
+          taken at its centre.
+
+        The riser runs on `layer` from the pin to `location` ("top",
+        "bottom", "left", "right"), and the rect at the edge becomes
+        this cell's port for `node`.
+        """
+        from .cut import Cut
+        from .rect import Rect
+        rules = Rules.getInstance()
+        made = 0
+        for inst in self.iterInstances():
+            nm = getattr(inst, "instanceName", "") or ""
+            if not re.search(instanceRegex, nm):
+                continue
+            if excludeInstances and re.search(excludeInstances, nm):
+                continue
+            pt = (getattr(inst, "instancePorts", None) or {}).get(node)
+            r = pt.get() if pt is not None else None
+            if r is None:
+                continue
+
+            w = int(rules.get(layer, "width"))
+            #- in from the END of a wide pin, not its middle
+            reach = int(rules.get(r.layer, "space")) + \
+                int(rules.get(r.layer, "width")) // 2
+            pad = self._minAreaPad(layer)
+            if int(r.x2 - r.x1) > 2 * pad:
+                cx = int(r.x1) + reach
+            else:
+                cx = int(r.centerX())
+            cy = int(r.centerY())
+
+            horizontal = location in ("left", "right")
+            if location == "top":
+                lo, hi = cy - w, int(self.y2)
+            elif location == "bottom":
+                lo, hi = int(self.y1), cy + w
+            elif location == "right":
+                lo, hi = cx - w, int(self.x2)
+            else:
+                lo, hi = int(self.x1), cx + w
+            if horizontal:
+                riser = Rect(layer, lo, cy - w, hi - lo, 2 * w)
+            else:
+                riser = Rect(layer, cx - w, lo, 2 * w, hi - lo)
+            riser.setNet(node)
+            self.add(riser)
+
+            #- magic refuses a PARTIAL overlap of top-level geometry on
+            #- a subcell's on the same layer: cover the pad exactly
+            if r.layer == layer or r.layer == self._pinLayer():
+                cov = Rect(r.layer, int(r.x1), int(r.y1),
+                           int(r.x2 - r.x1), int(r.y2 - r.y1))
+                cov.setNet(node)
+                self.add(cov)
+
+            ct = (self._fittedCut(r, layer)
+                  or Cut.getInstance(r.layer, layer, 1, 1)
+                  or Cut.getInstance(layer, r.layer, 1, 1))
+            if ct is not None:
+                ct.moveCenter(cx, cy)
+                self.add(ct)
+            #- the intermediate layers' own pads: a via stack leaves a
+            #- cut-sized shape on each, and a cut-sized shape is under
+            #- the minimum area every one of them asks for
+            for mid in self._layersBetween(r.layer, layer):
+                p = self._minAreaPad(mid)
+                mp = Rect(mid, cx - p, cy - p, 2 * p, 2 * p)
+                mp.setNet(node)
+                self.add(mp)
+
+            #- the EDGE is the pin the level above reaches
+            if horizontal:
+                px = int(self.x1) if location == "left" else int(self.x2) - 4 * w
+                pin = Rect(layer, px, cy - w, 4 * w, 2 * w)
+            else:
+                py = int(self.y1) if location == "bottom" else int(self.y2) - 4 * w
+                pin = Rect(layer, cx - w, py, 2 * w, 4 * w)
+            pin.setNet(node)
+            self.updatePort(node, pin)
+            made += 1
+        if not made:
+            self.log.warning(f"promoteInstancePort: no instance matching "
+                             f"{instanceRegex} exposes {node}")
+        return self
+
+    def _minAreaPad(self, layer):
+        """Half the side of the smallest square meeting the layer's
+        minimum area, falling back to its width when the technology
+        states no area rule."""
+        rules = Rules.getInstance()
+        w = int(rules.get(layer, "width"))
+        try:
+            area = int(rules.get(layer, "area"))
+        except Exception:
+            return w
+        side = int(math.ceil(math.sqrt(area)))
+        return max(w, (side + 1) // 2)
+
+    def _layersBetween(self, a, b):
+        """The metals strictly between `a` and `b` in the stack."""
+        stack = self._metalStack()
+        if a not in stack or b not in stack:
+            return []
+        i, j = sorted((stack.index(a), stack.index(b)))
+        return stack[i + 1:j]
 
     def _runSelfMethod(self,name,args=()):
         if(hasattr(self,name)):

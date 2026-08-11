@@ -676,7 +676,7 @@ def supply_polarity(net):
     every sibling ties to a rail). Which END of a column a supply
     belongs to -- ground low, power high -- is not in the netlist,
     so the naming convention decides, and every consumer asks here
-    rather than growing its own regex (write_stack_cells and Port
+    rather than growing its own regex (subcell publication and Port
     each had one, and they disagreed on GND).
     """
     n = (net or "").upper()
@@ -1337,9 +1337,10 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         order = sorted(subs, key=lambda n: (n not in supplies, n))
         #- the sidecar's declared wires for THIS stack, fingerprint
         #- gated against the stack's own placement
-        skey = stack_key(inst_by_name.get(n) for n in insts_in_stack)
+        members = [inst_by_name.get(n) for n in insts_in_stack]
+        skey = stack_key(members)
         keys_by_stack[stack] = skey
-        declared = wires_lookup(spec_subcells.get(stack), skey)
+        declared = wires_lookup(spec_subcells.get(stack), skey, members)
         pin_layer_guess = None
         for net in order:
             rects = subs[net]
@@ -1694,7 +1695,7 @@ _MOVED_TO_SUBCELL = {
     "subcell_spec", "subcell_membership", "stack_membership",
     "subcell_groups", "stack_groups", "plan_subcells",
     "plan_stack_cells", "stack_subckt", "design_of",
-    "run_stack_pycells", "write_stack_cells",
+    "run_stack_pycells",
 }
 
 

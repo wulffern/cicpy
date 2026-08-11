@@ -3042,9 +3042,29 @@ class LayoutCell(Cell):
 
 
 
+    def hierarchy(self):
+        """Build the cells this one is MADE OF, before it is placed.
+
+        A flat cell is made of primitives and does nothing here. A cell
+        that declares a decomposition splits its own netlist, builds a
+        LayoutCell per part and registers each in the design ahead of
+        itself -- so by the time place() runs, the instances it is
+        about to place resolve to cells built moments ago in this same
+        process. See SidecarCell.hierarchy.
+
+        HERE, and not in readFromSpice: `dirname`, the place_* knobs
+        and the default pycell are all set AFTER the read (cic.py), so
+        a subcell built at read time inherits none of them and cannot
+        find its own hooks. layout() is one line later and has
+        everything.
+        """
+        return None
+
     def layout(self,pycell=None,data=None):
         self.ignoreBoundaryRouting = False
         self.log.info(f"Assembling layout....")
+
+        self.hierarchy()
 
         self._runMethod(pycell,data,"beforePlace")
         #- Place cell

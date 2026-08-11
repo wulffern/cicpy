@@ -64,13 +64,23 @@ def stack_key(instances):
     return hashlib.sha1(repr(rows).encode()).hexdigest()[:12]
 
 
-def wires_lookup(entry, key):
+def wires_lookup(entry, key, instances=()):
     """{net: wire tuple} of a subcell's declared wires, or None.
 
     None when nothing is declared, replay is disabled, or the
     declared wires_key does not match the placement fingerprint --
     the last one warns, because silently replaying stale coordinates
     is the one thing this must never do.
+
+    And the key alone cannot see it. The fingerprint is deliberately
+    translation-invariant -- it asks "the same devices in the same
+    arrangement", which is a property of the stack -- while a
+    resolved `trunkx` is an ABSOLUTE coordinate. Move the stack and
+    every key still matches while every trunk is off by the
+    translation. So the coordinates are checked against the stack
+    they claim to be inside: a trunk outside its own devices is not a
+    stale block that can be replayed carefully, it is a wire in
+    another cell.
     """
     wires = entry.get("wires") if entry else None
     if not wires or os.environ.get("CICPY_NO_ROUTEPLAN"):
@@ -81,10 +91,29 @@ def wires_lookup(entry, key):
                     f"does not match the placement ({key}); the wires "
                     f"block is stale -- searching afresh")
         return None
+    insts = [i for i in (instances or []) if i is not None]
+    span = None
+    if insts:
+        #- one device of slack each side: a trunk just beside the
+        #- column is ordinary, a trunk a column away is not
+        slack = max(int(i.x2 - i.x1) for i in insts)
+        span = (min(int(i.x1) for i in insts) - slack,
+                max(int(i.x2) for i in insts) + slack)
     out = {}
     for w in wires:
-        if len(w) >= 2:
-            out[str(w[0])] = tuple(w)
+        if len(w) < 2:
+            continue
+        if span is not None and len(w) >= 4:
+            m = re.search(r"trunkx=(-?[0-9.]+)", str(w[3]) or "")
+            if m and not (span[0] <= float(m.group(1)) <= span[1]):
+                log.error(
+                    f"{entry.get('name', '?')}: {w[0]} declares "
+                    f"trunkx={m.group(1)}, which is outside the "
+                    f"stack's own {span[0]}..{span[1]}. The block was "
+                    f"resolved against another placement -- searching "
+                    f"this net afresh.")
+                continue
+        out[str(w[0])] = tuple(w)
     return out
 
 
@@ -151,27 +180,39 @@ def format_wires_block(stack, entries, key):
 
 def write_suggestions(layout, captured_by_stack, keys_by_stack):
     """The searched stacks' conclusions, as paste-ready blocks in
-    `<CELL>.routes.py` beside the design."""
+    `<CELL>.routes.py` beside the design.
+
+    <CELL> is the cell whose SIDECAR declares the subcell, which is
+    not always the cell being routed: a subcell is built as a cell of
+    its own now, and its blocks belong in its parent's file, where
+    its class is. `routes_owner` names that cell, and the parent
+    clears the file before it builds anything, so one run's blocks
+    accumulate and the previous run's do not survive it.
+    """
     if not captured_by_stack:
         return
     dirname = getattr(layout, "dirname", "") or ""
     name = getattr(layout, "name", "") or ""
     if not dirname or not name:
         return
-    path = os.path.join(dirname, name + ".routes.py")
-    blocks = [f"#- ROUTER-GENERATED wires for {name}. Paste each block\n"
-              f"#- into its subcell class in {name}.py; the build then\n"
-              f"#- replays them instead of searching. This file is\n"
-              f"#- scratch output, rewritten by every searched build."]
+    owner = getattr(layout, "routes_owner", "") or name
+    path = os.path.join(dirname, owner + ".routes.py")
+    blocks = []
+    if not os.path.exists(path):
+        blocks.append(
+            f"#- ROUTER-GENERATED wires for {owner}. Paste each block\n"
+            f"#- into its subcell class in {owner}.py; the build then\n"
+            f"#- replays them instead of searching. This file is\n"
+            f"#- scratch output, rewritten by every searched build.")
     for stack in sorted(captured_by_stack):
         blocks.append(format_wires_block(
             stack, captured_by_stack[stack], keys_by_stack.get(stack, "")))
     try:
-        with open(path, "w") as f:
+        with open(path, "a") as f:
             f.write("\n\n".join(blocks) + "\n")
     except Exception as e:
         log.warning(f"{path}: could not write wire suggestions: {e}")
         return
     log.info(f"route conclusions for {len(captured_by_stack)} "
              f"stack(s) written to {path}; paste the blocks into "
-             f"{name}.py to replay them")
+             f"{owner}.py to replay them")

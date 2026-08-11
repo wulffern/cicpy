@@ -91,17 +91,25 @@ class LELOTEMP_OTAR(SidecarCell):
 
 `SidecarCell.compile()` turns the class into the spec dict; the two
 recipes that execute it live in `core/sidecarcell.py` and are mixed
-into every sidecar cell -- `SidecarPycell` for the flat build,
-`HierLayoutCell` whose `place()`/`route()` assemble the published
-subcells natively; publication in `core/subcell.py`. Which one runs
-is the cell's role, and cic.py takes that from the name it is
-building: `<CELL>` flat, the scaffold `<CELL>_HIER` the assembly.
-There is no separate assembly class — a pass that builds a cell the
-design does not own is a pass whose hooks the design cannot reach,
-which is exactly what `hier_cell` used to be. Detection is by content: a
-`<CELL>.py` defining a `SidecarCell` subclass is the sidecar; a
-module with module-level hooks and `data` is a classic pycell,
-unchanged — the escape hatch for a cell the recipe cannot say.
+into every sidecar cell -- `SidecarPycell`, which places devices, and
+`HierPycell`, whose `hierarchy()` splits the cell's netlist and
+builds a LayoutCell per subcell before `place()` tiles them.
+
+Which recipe a cell gets is what it DECLARES, not how it was built:
+declare `routes` and the cell is made of SUBCELLS, otherwise it is
+made of DEVICES. One object, one pass, one process — there is no
+`<CELL>_HIER` scaffold, no generated netlist between two passes and
+no role to pass in. Detection is by content: a `<CELL>.py` defining a
+`SidecarCell` subclass is the sidecar; a module with module-level
+hooks and `data` is a classic pycell, unchanged — the escape hatch
+for a cell the recipe cannot say.
+
+The split itself is `core/hierarchy.py`: membership from the
+design's own regexes over `ckt.instances`, and a net is a port iff it
+is used outside the subcell. Both are properties of the NETLIST, so
+they are known before anything is placed — which is what lets a
+subcell be BUILT as a cell from its own `Subckt`, from its own
+origin, instead of copied out of a placed parent.
 
 Subcell hooks are methods — `beforePlace(self, entry)` /
 `beforeRoute(self, entry)`, run between afterPlace and beforeRoute.
@@ -153,10 +161,9 @@ every declaration.
 
 ```bash
 cd work
-make subcells CELL=X     # flat build; publishes each subcell's
-                         # .mag/.cic/.sch/.sym and X_HIER.spice
-make hier     CELL=X     # assembles the top from the published cells
-                         # and writes X.mag (spi2mag --outcell X)
+make mag      CELL=X     # ONE command: X's subcells are built, each
+                         # written as .mag/.cic/.sch/.sym, and X is
+                         # assembled from them
 make drc      CELL=X_P_BIAS       # every subcell verifies standalone
 make gds cdl lvs CELL=X_P_BIAS    # gds FIRST or extraction is stale
 make drc      CELL=X

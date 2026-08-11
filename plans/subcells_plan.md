@@ -573,6 +573,64 @@ that `LELOTEMP_CMP_P_DIFF.py` and friends use.
 from their own origin. CMP, CCMP and LELO_TEMP must stay byte-identical, since
 `hierarchy()` is a no-op for them.
 
+### DONE (2026-08-11). Result, against the stage3 baseline:
+
+| | DRC | LVS | `cicpy cost` |
+|---|---|---|---|
+| CMP | 0 = | match = | 1554.60 = |
+| CCMP | 0 = | match = | 178.20 = |
+| OTAR | 0 = | match = | **492.40** (was 500.40) |
+| BIAS_IBP | 8 = | match = | **758.22** (was 825.02) |
+| LELO_TEMP | 95 = | (VR1 artefact) = | 2322.29 = |
+
+Everything at or better than baseline, and the two hierarchical cells cost
+less wire than the two-pass build did. One command, one process: `make
+subcells hier` and `<CELL>_HIER.spice` are gone.
+
+**What the plan got right.** The seam (`layout()`, not `readFromSpice`), the
+in-memory split, `design.cells` before `maglib`, and the role split being
+derivable rather than passed in — `SidecarCell()` takes no arguments now, and
+what a cell is MADE OF is read off its own `routes` declaration.
+
+**Five things it did not predict**, each measured:
+
+1. **A subcell is tiled by its COLUMN, not by its geometry.** The cell box
+   after `layout()` is everything drawn; the box the flat recipe abutted is
+   the built `StackGroup`, which can start 4800 inside it (the guard the
+   column carries past its own edge so two abutted columns MERGE their
+   guards). Tiled by the geometry every seam opened by that much and the
+   guards stopped merging: 181 DRC. `HierPycell._setAbutmentBox` translates
+   the cell so the column box is at the origin and then STATES the box.
+2. **The fills stop existing.** `fillDummyTransistors` pads each column to the
+   tallest in its GROUP, and a subcell's group holds one column — so
+   `xfill_p_in_a_0` and two others simply were not built, and the schematic
+   has them. The netlist is the answer: it NAMES its fills, so
+   `fillDummyTransistors(counts=...)` fills to the declared count and height
+   matching is only the fallback. After this every subcell is a PURE
+   TRANSLATION of its flat placement — verified instance by instance, 20 of
+   20 subcells across both cells.
+3. **`trunkx` is absolute and `stack_key` is deliberately not.** Stage 0 made
+   the fingerprint translation-invariant, which is right for "the same devices
+   in the same arrangement" and blind to a block whose coordinates were
+   resolved in another frame. Three BIAS_IBP blocks were ALREADY stale that
+   way and replaying silently — `p_src` declared a VDD trunk 394400 into a
+   column 80000 wide. `wires_lookup` now checks each trunk against the stack's
+   own span and searches that net afresh, loudly, instead.
+4. **Port position is a floorplan question, and the floorplan is declared.**
+   `addAllPorts` takes the first rect on the net; the copy-out publication
+   took the pin nearest the centroid of the net's pins OUTSIDE the subcell.
+   That centroid is not available before placement, but `rows` is: the net's
+   other owners give a direction (`_portDirections`), and the port is the pin
+   at that end of the column. Without it VD1's port in `n_load_a` moved to the
+   far end of the column and the parent's drop ran the whole column to reach
+   it. Supplies keep their own rule — the bulk column, ground low, power high
+   — which is intrinsic and needs no direction.
+5. **A latent `Path` bug the copy had been hiding.** `Path.route` started its
+   cursor at `(0, 0)`, so a story opening with `trunk` drew a leg from the
+   COORDINATE ORIGIN to the trunk. Copied out of a parent, that leg started
+   outside the copied window and was silently left behind; built from its own
+   origin it lands inside the cell. The cursor is `None` until a step sets it.
+
 ## Stage 6 — the declarative surface
 
 `self.instRegex`, `self.groupName`, `self.addOrder([...])` in `__init__`;

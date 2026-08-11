@@ -1,11 +1,12 @@
 #- --------------------------------------------------------------------
 #- Subcell publication
 #- --------------------------------------------------------------------
-#- How a flat stack layout becomes published subcells: the plan that
-#- names them (plan_subcells / subcell_spec / subcell_membership /
-#- subcell_groups), the netlist each publishes (stack_subckt), their
-#- per-stack pycell hooks (run_stack_pycells), and the writer that
-#- copies the geometry out under each name (write_stack_cells).
+#- What a cell's subcells ARE, read off a placed layout: the plan
+#- that names them (plan_subcells / subcell_spec / subcell_membership
+#- / subcell_groups), the netlist each one publishes (stack_subckt),
+#- and their per-subcell hooks (run_stack_pycells). BUILDING them as
+#- cells is core/hierarchy.py and core/sidecarcell.py, from the
+#- netlist and before any placement.
 #- Routing itself lives in mazerouter.py; this module only imports
 #- from it.
 
@@ -179,7 +180,7 @@ def subcell_groups(layout):
 stack_groups = subcell_groups
 
 
-def run_stack_pycells(layout, log=None):
+def run_stack_pycells(layout, log=None, parent_name=None):
     """Let each stack that ships a `<STACKCELL>.py` route itself.
 
     Called by LayoutCell.layout() between afterPlace and beforeRoute, so
@@ -196,7 +197,7 @@ def run_stack_pycells(layout, log=None):
     log = log or logging.getLogger("MazeRouter")
     handled = set()
     try:
-        plan = plan_subcells(layout)
+        plan = plan_subcells(layout, parent_name)
     except Exception as e:
         log.warning(f"could not plan stack cells: {e}")
         return handled
@@ -561,294 +562,6 @@ def _invoke_stack_hooks(hooks, name, layout, entry, log, cell=None):
     except Exception as e:
         log.error(f"{name}: pycell route() raised: {e}")
         return False
-
-
-def write_stack_cells(layout, design=None, plan=None, log=None):
-    """Register each stack as a real cell so a .mag is written for it.
-
-    Returns [(name, fingerprint, ports)].
-
-    This is the standalone-verification step, and deliberately NOT the
-    restructuring one. The parent keeps its instances; each stack is
-    additionally published as a cell holding the same instances, with
-    its boundary nets as ports. That is enough to get a .mag and a
-    netlist per stack and to LVS each one ALONE -- which is the gate the
-    hierarchy needs -- without disturbing a parent that currently works.
-
-    Turning the parent into a cell that REFERENCES these rather than
-    containing them is a separate change, and it should not be made
-    until the standalone LVS passes: it is the difference between
-    "generate and check" and "generate, check, and rely on".
-    """
-    from cicpy.core.layoutcell import LayoutCell
-    log = log or logging.getLogger("MazeRouter")
-    design = design if design is not None else design_of(layout)
-    if design is None:
-        log.warning("no design reachable from the layout; no stack cells written")
-        return []
-    plan = plan if plan is not None else plan_subcells(layout)
-    made = []
-    for entry in plan:
-        name = entry["name"]
-        if name in getattr(design, "cells", {}):
-            continue
-        cell = LayoutCell()
-        cell.name = name
-        cell.design = design
-        #- Bound from the INSTANCES, not from every rect, so a route
-        #- drawn inside a stack cannot inflate the placement box.
-        #-
-        #- It does NOT explain the size, and that was measured before
-        #- assuming it did. A stack is as wide as the device columns it
-        #- holds plus the library's guard: one column plus its ring,
-        #- and twice that for two columns. The overhang is the guard
-        #- ring a cell carries past its own box so that abutted columns
-        #- MERGE their guards -- shared in the parent, and paid in full
-        #- by a stack standing alone. The size is right; nothing to trim.
-        #-
-        #- NOT normalised to the origin: a cell built out of the
-        #- parent's own instance objects cannot be translated without
-        #- moving them. The parent reads the published box instead.
-        cell.boundaryIgnoreRouting = True
-        #- the bbox check reads ignoreBoundaryRouting (set through
-        #- setBoundaryIgnoreRouting); assigning the attribute above
-        #- shadowed the method and never reached the check
-        cell.setBoundaryIgnoreRouting(True)
-        wanted = set(entry["instances"])
-        for inst in layout.iterInstances():
-            if (getattr(inst, "instanceName", "") or "") in wanted:
-                cell.add(inst)
-        #- The routing that belongs to this stack. Without it the cell
-        #- holds devices and no wires, so its layout extracts as one net
-        #- per terminal: measured on P_IN_A, 7 devices and 22 nets
-        #- against the schematic's 5 -- with the DEVICE count matching
-        #- exactly, which is how it was clear the decomposition was
-        #- right and only the wires were missing.
-        #-
-        #- A stack's routing is the geometry inside its own bounds,
-        #- which is what a stack-level router would produce and what the
-        #- parent currently produces. Copies, not moves: the parent
-        #- still needs its geometry, and this cell is published
-        #- alongside it rather than replacing it.
-        cell.updateBoundingRect()
-        #- ...inside its own bounds PLUS the guard overhang. The ring a
-        #- cell carries past its box is still its own geometry, and a
-        #- route landing on it (a supply hop to the ring stub) was
-        #- silently dropped by the tight test: drawn in the parent,
-        #- cuts and all, and absent from the published cell. 4800 is
-        #- the tiling's shared-guard margin.
-        _g = 4800
-        sx1, sy1, sx2, sy2 = cell.x1 - _g, cell.y1 - _g, cell.x2 + _g, cell.y2 + _g
-        #- The parent's ROUTING, and only that. Not
-        #- _collectPhysicalRects: that flattens instance content too, so
-        #- copying it duplicates every device's own geometry, which the
-        #- instances already bring. Routed wires are not direct children
-        #- either -- they live inside Route objects -- so this walks the
-        #- non-instance children and takes the rects it finds.
-        _seen = set()
-
-        def _routed(node, out, depth=0):
-            if depth > 6:
-                return
-            #- dedup APPENDED leaves only. Marking every visited node
-            #- made the second pass (over layout.routes) return at the
-            #- door for any route already seen as a layout child, and
-            #- its wires were never collected -- the published cells
-            #- lost all their metal, measured.
-            for ch in getattr(node, "children", []) or []:
-                if ch is None or id(ch) in _seen:
-                    continue
-                #- ...except a via, which IS an instance. Skipping every
-                #- instance dropped the cuts and left the wires floating
-                #- over the pins they were supposed to land on: opens in
-                #- LVS and enclosure errors in DRC, from a stack whose
-                #- wires all looked present.
-                if hasattr(ch, "isInstance") and ch.isInstance():
-                    if type(ch).__name__ == "InstanceCut":
-                        _seen.add(id(ch))
-                        out.append(ch)
-                    continue
-                if hasattr(ch, "isPort") and ch.isPort():
-                    continue
-                #- containers answer isRect() too, and appending one
-                #- publishes its BBOX as a layerless rect (a Route's
-                #- landed inside a window after a resize -- 26 DRC
-                #- errors from one blob). Their content arrives by the
-                #- dedicated paths: routes via layout.routes below,
-                #- dummy ties via the group walk.
-                if getattr(ch, "children", None):
-                    continue
-                if hasattr(ch, "isRect") and ch.isRect():
-                    _seen.add(id(ch))
-                    out.append(ch)
-                else:
-                    _routed(ch, out, depth + 1)
-
-        routed = []
-        _routed(layout, routed)
-        #- The dummy supply ties live in stack.children, behind a
-        #- CellGroup that answers isRect() and so ends the walk above.
-        #- Collect exactly them -- and ONLY them: publishing the rest
-        #- of a stack's route children duplicates geometry the parent
-        #- draws itself (its drops land cuts on the same pins), which
-        #- is a partial via overlap in the assembled top, measured.
-        def _dummy_ties(grp):
-            for r in getattr(grp, "dummy_routes", []) or []:
-                if id(r) not in _seen:
-                    _seen.add(id(r))
-                    routed.append(r)
-            for sub in getattr(grp, "stacks", []) or []:
-                _dummy_ties(sub)
-        for grp in getattr(layout, "cellgroups", []) or []:
-            _dummy_ties(grp)
-        #- and the ROUTES, which are not in children. Walking children
-        #- alone found 32 rects in the whole parent -- the li tabs and
-        #- nothing else -- so a stack cell came out with its devices and
-        #- none of the wires between them, and LVS saw six unconnected
-        #- transistors.
-        for r in getattr(layout, "routes", []) or []:
-            _routed(r, routed)
-        added = vias = 0
-        for r in routed:
-            if not (r.x1 >= sx1 and r.x2 <= sx2
-                    and r.y1 >= sy1 and r.y2 <= sy2):
-                continue
-            #- A VIA IS NOT A RECT and getCopy() flattens it into one:
-            #- Rect.getCopy returns a bare Rect, so a copied InstanceCut
-            #- lost its class and its cut cell and the subcell came out
-            #- with wires floating over the pins they land on. Clone it
-            #- as what it is -- the cut cell reference and the position
-            #- are the whole of its state.
-            if type(r).__name__ == "InstanceCut":
-                from cicpy.core.instancecut import InstanceCut
-                c2 = InstanceCut()
-                c2.name = getattr(r, "name", "")
-                c2.cell = getattr(r, "cell", "") or c2.name
-                c2.instanceName = getattr(r, "instanceName", "") or c2.name
-                c2.layer = getattr(r, "layer", "")
-                for attr in ("_cell_obj", "layoutcell", "design"):
-                    if getattr(r, attr, None) is not None:
-                        setattr(c2, attr, getattr(r, attr))
-                c2.setRect(r)
-                cell.add(c2)
-                vias += 1
-                continue
-            rr = r.getCopy()
-            rr.is_routing = True
-            cell.add(rr)
-            added += 1
-        log.info(f"{name}: {added} routed rects and {vias} vias "
-                 f"of {len(routed)} inside")
-
-        #- The boundary nets, as ports -- and WHICH pin becomes the
-        #- port is decided by the rest of the net. Every pin of the net
-        #- OUTSIDE this subcell is an anchor; their centroid is the
-        #- centre of the net's graph; the inside pin NEAREST that
-        #- centre is the port. Before this the first pin found won,
-        #- which put ports wherever iteration order left them -- the
-        #- port is the one thing the parent routes to, and it should
-        #- face the traffic. A net with no outside pins (the parent's
-        #- own IO living wholly in one subcell) keeps the first pin.
-        pins = {}
-        supplies = supply_nets(layout)
-        for net in entry["ports"]:
-            g = layout.nodeGraph.get(net)
-            if g is None:
-                continue
-            inside, anchors, bulks = [], [], []
-            for port in getattr(g, "ports", []):
-                pinst = getattr(port, "parent", None)
-                nm = getattr(pinst, "instanceName", "") if pinst else ""
-                rect = port.get() if hasattr(port, "get") else None
-                if rect is None:
-                    continue
-                (inside if nm in wanted else anchors).append(rect)
-                if nm in wanted and getattr(port, "childName", "") == "B":
-                    bulks.append(rect)
-            if not inside:
-                continue
-            #- A supply port sits on the BULK geometry at the row
-            #- boundary -- ground on the lowest rect, power on the
-            #- highest -- which is the guard column, continuous
-            #- through the tap row. A parent ring then connects with
-            #- a straight stretch through pure guard, and the pin
-            #- layer over the stack stays free.
-            if net in supplies:
-                #- a supply port is a BULK rect when the devices offer
-                #- one: the guard/tap column, which is what a parent
-                #- ring connects through. The strap is a source pin
-                #- and belongs to the device, not the boundary.
-                cands = bulks or inside
-                from .mazerouter import supply_polarity
-                if supply_polarity(net) == "ground":
-                    pr = min(cands, key=lambda r: r.y1)
-                else:
-                    pr = max(cands, key=lambda r: r.y2)
-                #- clipped to the pre-copy box: the bulk columns
-                #- straddle the cell edge, and a port poking past the
-                #- box inflates it, shifting the published origin by
-                #- the overhang -- every parent-tuned track then lands
-                #- 4800 off its pin (measured).
-                pr = pr.getCopy()
-                pr.x1 = max(pr.x1, sx1 + _g)
-                pr.x2 = min(pr.x2, sx2 - _g)
-                pr.y1 = max(pr.y1, sy1 + _g)
-                pr.y2 = min(pr.y2, sy2 - _g)
-                pins[net] = pr
-                continue
-            if anchors:
-                cx = sum(r.centerX() for r in anchors) / len(anchors)
-                cy = sum(r.centerY() for r in anchors) / len(anchors)
-                pins[net] = min(inside,
-                                key=lambda r: (abs(r.centerX() - cx)
-                                               + abs(r.centerY() - cy)))
-            else:
-                pins[net] = inside[0]
-        for net, rect in pins.items():
-            try:
-                cell.addPort(net, rect)
-            except Exception as e:
-                log.warning(f"{name}: could not add port {net}: {e}")
-        cell.updateBoundingRect()
-        #- NOT normalised to the origin, and the reason is structural:
-        #- this cell holds the PARENT'S OWN instance objects, not
-        #- copies, so translating it drags the parent's devices with it
-        #- -- measured, 2 shorts and 23 DRC in a top that was clean.
-        #- Origin-normalisation belongs to the restructuring step where
-        #- the instances genuinely move out of the parent.
-        lines, fp = stack_subckt(layout, entry)
-        cell.cic_subckt = lines
-        cell.cic_fingerprint = fp
-        #- Give the cell a real Subckt, parsed from the generated text.
-        #- Subckt.parse takes spice lines, so the generated netlist and
-        #- the object the printers want are the same thing rather than
-        #- two representations to keep in step.
-        try:
-            from cicspi import Subckt
-            #- the PARENT's parser. A Subckt built without one has no
-            #- instance registry to resolve subcircuit references
-            #- against, and parse() dies on the first device with
-            #- "NoneType has no attribute allinst".
-            parser = getattr(getattr(layout, "ckt", None), "parser", None)
-            if parser is None:
-                parser = getattr(Subckt, "circuits", None)
-            ckt = Subckt(parser)
-            ckt.parse(list(lines), 0)
-            cell.ckt = ckt
-        except Exception as e:
-            log.warning(f"{name}: could not build a subckt: {e}")
-        design.cells[name] = cell
-        if hasattr(design, "cellnames") and name not in design.cellnames:
-            #- ahead of the parent, so it is defined before it is used
-            design.cellnames.insert(0, name)
-        #- The pycell is NOT run here. It used to be, and that made it
-        #- dead: this is afterPaint, route() ran long ago, and any Route
-        #- the pycell added was never drawn. It runs before beforeRoute
-        #- now -- see run_stack_pycells.
-        made.append((name, fp, sorted(pins)))
-        log.info(f"stack cell {name}: {len(wanted)} instances, "
-                 f"{len(pins)} ports, fp={fp}")
-    return made
 
 
 #- Schematics for the stack cells are NOT written from here, and an

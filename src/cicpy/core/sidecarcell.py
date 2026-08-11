@@ -32,6 +32,7 @@ this; cicpy/sidecar.py compiles the module into exactly this dict):
       - {net: VDD_1V8, ring: t, guard_exclude: '^xbs6$', strap: top}
       - {net: VSS, ring: b, strap: bottom, strap_exclude: '...'}
 """
+import os
 import re
 import logging
 
@@ -41,7 +42,7 @@ log = logging.getLogger("SidecarPycell")
 
 
 class SidecarPycell:
-    """The FLAT recipe: the devices placed, routed and published.
+    """The FLAT recipe: the devices placed, routed.
 
     Hooks only -- `self.spec` is the compiled sidecar and the cell is
     `layout`, which for a SidecarCell is the same object (see
@@ -101,10 +102,25 @@ class SidecarPycell:
             if e.get("fill", True):
                 fills.add(gname)
 
+
         for st in stacks.values():
             st.stack()
         #- fill the groups that want it, then taps: a tap goes around
         #- the finished column, dummies included
+        #-
+        #- HOW MANY fills each column wants comes from the NETLIST.
+        #- The schematic names them (xfill_<stack>_<n>) because it
+        #- records the devices the layout has, and height matching --
+        #- the rule that invented them -- has nothing to match against
+        #- once a column is built as a cell of its own. Netlist first,
+        #- height matching for the column the netlist says nothing of.
+        counts = {}
+        for inst in (getattr(getattr(layout, "ckt", None),
+                             "instances", None) or []):
+            m = re.fullmatch(r"xfill_(.+)_(\d+)", getattr(inst, "name", ""))
+            if m:
+                counts[m.group(1)] = max(counts.get(m.group(1), 0),
+                                         int(m.group(2)) + 1)
         for gname in fills:
             #- BOTTOM, not top. A dummy is a supply device now -- its
             #- bars ride VDD/VSS -- and every rail in a column spans
@@ -112,7 +128,8 @@ class SidecarPycell:
             #- blocks the lane (measured: the drain lane fell to an M2
             #- rail whose pads then blocked the gate tabs). Below the
             #- lowest pin it is outside every span.
-            groups[gname].fillDummyTransistors(direction="bottom")
+            groups[gname].fillDummyTransistors(direction="bottom",
+                                               counts=counts)
         for st in stacks.values():
             st.addTaps()
 
@@ -177,63 +194,278 @@ class SidecarPycell:
         layout.log.info(f"stack level: {len(routed)} routed, "
                         f"{len(blocked)} blocked")
 
-    def afterPaint(self, layout):
-        from cicpy.core.subcell import write_stack_cells
-        write_stack_cells(layout, log=layout.log)
 
+class HierPycell:
+    """The ASSEMBLY recipe: a cell made of cells, in one pass.
 
-class HierLayoutCell(LayoutCell):
-    """The ASSEMBLY recipe: the published subcells, as a real cell.
-
-    place() IS the assembly: the published subcells are tiled row by
-    row straight from the sidecar spec, each row keeping its published
-    relative x-offsets -- the published coordinates are the
-    arrangement DRC has already accepted, and the guard rings
-    overhang, so re-spacing columns from bounding boxes would tear the
-    overlap-tiling apart. No framework pre-placement, no post-hoc
-    moveTo correction. route() lays every crossing net from the
+    `hierarchy()` is the whole of the new part. It splits the cell's
+    own netlist by the sidecar's membership regexes, builds a
+    LayoutCell per subcell from its own Subckt -- placed from its own
+    origin, routed and registered in the design -- and leaves the
+    parent holding one instance of each. place() then tiles those
+    instances row by row from the same `rows` declaration the flat
+    recipe uses, and route() lays every crossing net from the
     `hier: routes:` table -- a ChannelRoute per net with
-    addRouteConnection drops -- plus the supply rings, then hands over
-    to the ordinary router.
+    addRouteConnection drops -- plus the supply rings, before handing
+    over to the ordinary router.
 
-    Mixed into SidecarCell, which is what the scaffold cell
-    <CELL>_HIER is built as when the <CELL>.py sidecar declares
-    `routes` and no <CELL>_HIER.py exists. A design that needs more
-    than the declarations overrides place()/route() on ITS OWN class
-    and calls super() -- there is no separate assembly class, because
-    a pass that builds a cell the design does not own is a pass whose
-    hooks the design cannot reach.
+    Mixed into SidecarCell. A cell gets this recipe by DECLARING
+    `routes`; a design that needs more than the declarations
+    overrides place()/route() on its own class and calls super().
     """
 
-    def __init__(self, spec=None):
-        super().__init__()
-        self.spec = spec or {}
-        self.noPowerRoute = True
+    #- ------------------------------------------------------------
+    #- hierarchy: the subcells, built before the parent is placed
+    #- ------------------------------------------------------------
 
-    def place(self):
+    def hierarchy(self):
+        """Split the netlist and build a cell per subcell.
+
+        In memory and in one process: nothing is written to disk and
+        re-parsed, because nothing here needs geometry. Membership
+        and boundary nets are properties of the NETLIST (see
+        core/hierarchy.py), so each part can be built as a cell in
+        its own right and the parent instantiates it -- which is what
+        the two-pass build, a generated <CELL>_HIER.spice and a
+        second process between them used to buy.
+
+        Ordering is the one subtlety: a subcell is registered in
+        design.cells BEFORE the parent places anything, and
+        MagicDesign.getLayoutCell prefers design.cells over the .mag
+        library, so the parent builds against the children built this
+        run rather than last run's files.
+        """
+        spec = self.spec
+        if "hier" not in spec:
+            return
+        from .hierarchy import plan_from_netlist, split_subckt
+
+        specs = [{"name": e["name"], "match": e.get("match", ""),
+                  "type": e.get("type", "stack")}
+                 for e in spec.get("subcells", []) if e.get("match")]
+        plan = plan_from_netlist(self.ckt, specs, self.name)
+        if not plan:
+            self.log.warning(f"{self.name}: declares an assembly but "
+                             f"the split found no subcells")
+            return
+        made = split_subckt(self.ckt, plan)
+        #- the router's paste-ready blocks belong in THIS cell's file,
+        #- where the subcell classes are; cleared here so one run's
+        #- blocks accumulate and the last run's do not survive it
+        try:
+            os.remove(os.path.join(getattr(self, "dirname", "") or "",
+                                   self.name + ".routes.py"))
+        except OSError:
+            pass
+        dirs = self._portDirections(plan)
+        for entry in plan:
+            entry["port_dirs"] = dirs.get(entry["stack"], {})
+            self._buildSubcell(entry, made[entry["stack"]])
+        #- what this run built, for the step that writes their views
+        self.subcells_built = [e["name"] for e in plan]
+
+    def _portDirections(self, plan):
+        """{subcell: {net: (dx, dy)}} -- which way each port faces.
+
+        A port is the one thing the parent routes to, so it should
+        face the traffic: the pin at the end of the column the net
+        LEAVES by. Which end that is is a floorplan question, and the
+        floorplan is declared -- `rows` says which subcells sit above,
+        below and beside this one, so the net's other owners give a
+        direction without any geometry existing yet.
+
+        This is the rule the copy-out publication computed from the
+        placed layout, as the centroid of the net's pins OUTSIDE the
+        subcell. Read off the rows instead, it is available before
+        anything is placed, which is what lets the subcell be built
+        rather than copied. A net with no other owner -- the parent's
+        own IO, living wholly in one column -- gets no direction and
+        keeps whatever pin it lands on.
+        """
+        where = {}
+        for r, row in enumerate(self.spec.get("rows", []) or []):
+            for c, nm in enumerate(row):
+                where[nm] = (c, r)
+        owners = {}
+        for e in plan:
+            for net in e["ports"]:
+                owners.setdefault(net, []).append(e["stack"])
+        out = {}
+        for e in plan:
+            me = where.get(e["stack"])
+            if me is None:
+                continue
+            mine = {}
+            for net in e["ports"]:
+                others = [where[o] for o in owners.get(net, [])
+                          if o != e["stack"] and o in where]
+                if not others:
+                    continue
+                dx = sum(o[0] for o in others) / len(others) - me[0]
+                dy = sum(o[1] for o in others) / len(others) - me[1]
+                #- ACROSS the rows beats along one: the columns are
+                #- tall and thin, so a row hop is the long journey and
+                #- the end of the column is what shortens it
+                if dy:
+                    mine[net] = (0, 1 if dy > 0 else -1)
+                elif dx:
+                    mine[net] = (1 if dx > 0 else -1, 0)
+            out[e["stack"]] = mine
+        return out
+
+    def _subcellSpec(self, entry):
+        """The sidecar spec of ONE subcell, as a cell of its own.
+
+        The same recipe the flat build runs, narrowed to a single
+        subcell in a single row -- so a subcell is placed, filled,
+        tapped and routed exactly as it was as a region of the flat
+        parent, and its `wires` block still applies.
+
+        The supply RING is dropped and everything else kept: a ring
+        belongs to the cell that owns the boundary, which is the
+        parent. The guard connections and the straps are inside the
+        column and belong to the subcell.
+        """
+        spec = self.spec
+        e = next(x for x in spec.get("subcells", [])
+                 if x["name"] == entry["stack"])
+        return {
+            "place": dict(spec.get("place", {})),
+            "subcells": [e],
+            "rows": [[e["name"]]],
+            "supplies": [{k: v for k, v in s.items() if k != "ring"}
+                         for s in spec.get("supplies", [])],
+        }
+
+    def _buildSubcell(self, entry, ckt):
+        name = entry["name"]
+        design = self.parent
+        cell = SubcellLayout(self._subcellSpec(entry), entry,
+                             parent_name=self.name)
+        cell.name = name
+        cell.ckt = ckt
+        cell.subckt = ckt
+        cell.parent = design
+        cell.design = getattr(self, "design", None) or design
+        cell.dirname = getattr(self, "dirname", "")
+        cell.strict_route = getattr(self, "strict_route", False)
+        cell.libpath = getattr(self, "libpath", "")
+        cell.routes_owner = self.name
+        self.log.info(f"{self.name}: building {name} "
+                      f"({len(entry['instances'])} instances, "
+                      f"{len(entry['ports'])} ports)")
+        cell.layout(cell, cell.data)
+
+        self._setAbutmentBox(cell)
+
+        #- the netlist the SCHEMATIC side compares against, amended
+        #- with the fill devices placement invented. They cannot
+        #- change the port set -- every fill terminal rides the
+        #- subcell's own supply, which is already a port -- and that
+        #- is asserted rather than assumed.
+        self._amendSubcellNetlist(cell, entry)
+
+        design.cells[name] = cell
+        if name in getattr(design, "cellnames", []):
+            design.cellnames.remove(name)
+        #- ahead of the parent: defined before it is used
+        design.cellnames.insert(0, name)
+        return cell
+
+    @staticmethod
+    def columnBox(cell):
+        """The cell's COLUMN: its single built stack, else the cell.
+
+        The box a parent abuts, and the box a port is clipped to --
+        one definition, because they are the same box.
+        """
+        groups = getattr(cell, "cellgroups", None) or []
+        stacks = [s for g in groups for s in (getattr(g, "stacks", []) or [])]
+        if len(stacks) == 1:
+            return stacks[0]
+        cell.setBoundaryIgnoreRouting(True)
+        cell.updateBoundingRect()
+        return cell
+
+    def _setAbutmentBox(self, cell):
+        """The box a parent tiles this subcell by: its COLUMN.
+
+        Not the extent of its geometry. A column carries its guard
+        ring past its own column box so that two abutted columns MERGE
+        their guards -- and its trunk rails can stand a lane outside
+        it too. Tiled by the geometry, every seam opens by whatever
+        happened to stick out and the guards stop merging; tiled by
+        the column, the arrangement is the flat build's, which is the
+        one DRC has already accepted.
+
+        This IS the box the flat recipe abutted: `abutRight` works on
+        the built group. So the cell is translated to put that box at
+        the origin -- which makes the model and the painted geometry
+        agree, since an instance maps a child's origin to its own
+        position -- and the box is then stated, not measured.
+        """
+        box = self.columnBox(cell)
+        x1, y1 = int(box.x1), int(box.y1)
+        w, h = int(box.x2) - x1, int(box.y2) - y1
+        cell.translate(-x1, -y1)
+        cell.x1, cell.y1, cell.x2, cell.y2 = 0, 0, w, h
+
+    def _amendSubcellNetlist(self, cell, entry):
+        from .subcell import stack_subckt
+        placed = dict(entry)
+        placed["instances"] = sorted(
+            getattr(i, "instanceName", "") or ""
+            for i in cell.iterInstances())
+        lines, fp = stack_subckt(cell, placed)
+        #- the grouping-drift guard: instance names decide placement
+        #- groups, so a rename silently moves a device to another
+        #- subcell and both sides would then agree, wrongly
+        cell.cic_fingerprint = fp
+        try:
+            from cicspi import Subckt
+            parser = getattr(getattr(self, "ckt", None), "parser", None)
+            ckt = Subckt(parser)
+            ckt.parse(list(lines), 0)
+        except Exception as e:
+            self.log.warning(f"{cell.name}: could not rebuild the "
+                             f"netlist with its fills: {e}")
+            return
+        if sorted(ckt.nodes) != sorted(entry["ports"]):
+            self.log.error(
+                f"{cell.name}: the fills changed the port set "
+                f"{sorted(entry['ports'])} -> {sorted(ckt.nodes)}; "
+                f"the split was decided before they existed")
+        cell.ckt = ckt
+        cell.subckt = ckt
+
+    #- ------------------------------------------------------------
+    #- place: the floorplan, from the same rows the flat build uses
+    #- ------------------------------------------------------------
+
+    def placeHier(self):
         spec = self.spec
         hier = spec.get("hier", {})
         channel = hier.get("channel", 8) * self.um
         rows = [["x" + n for n in row] for row in spec.get("rows", [])]
+        xspace = {"x" + e["name"]: e.get("xspace", 0)
+                  for e in spec.get("subcells", [])}
 
         insts = {}
         for cktInst in self.ckt.orderInstancesByGroup():
             insts[cktInst.name] = cktInst
 
-        #- THE FLOORPLAN FIRST, from the published boxes alone. Within
-        #- a row the cells keep their PUBLISHED relative offsets. A
-        #- published cell's stored box is its FIXED_BBOX in the
-        #- parent's coordinates (the drawn geometry is normalised to
-        #- the origin at load), so the box origin carries the offset
-        #- within the row; addInstance itself carries the load origin
-        #- into the painted reference (xcell = -libshift). The ports
-        #- live on the normalised geometry and land by placement
-        #- alone.
+        #- THE FLOORPLAN FIRST, from the built boxes alone: within a
+        #- row the columns ABUT, left to right, exactly as the flat
+        #- recipe abuts the groups -- a subcell's box IS its column,
+        #- and its guard ring overhangs into the neighbour's, which is
+        #- how two abutted columns share one guard. `xspace` (um)
+        #- opens a gap on a subcell's LEFT for the pair whose edge
+        #- geometry refuses to abut.
         slots = {}
         y = 0
         row_tops = []
         for row in rows:
-            anchor_x, tallest = None, 0
+            x, tallest = 0, 0
             for nm in row:
                 cktInst = insts.get(nm)
                 if cktInst is None:
@@ -242,11 +474,11 @@ class HierLayoutCell(LayoutCell):
                     continue
                 sub = self.parent.getLayoutCell(cktInst.subcktName)
                 if sub is None:
-                    raise ValueError(f"place: no published cell "
+                    raise ValueError(f"place: no built cell "
                                      f"{cktInst.subcktName} for {nm}")
-                if anchor_x is None:
-                    anchor_x = int(sub.x1)
-                slots[nm] = (int(sub.x1) - anchor_x, y)
+                x += int(xspace.get(nm, 0) * self.um)
+                slots[nm] = (x, y)
+                x += int(sub.x2 - sub.x1)
                 tallest = max(tallest, int(sub.y2 - sub.y1))
             row_tops.append(y + tallest)
             y += tallest + channel
@@ -279,7 +511,7 @@ class HierLayoutCell(LayoutCell):
                 self.addRoutingChannel(e["channel"], int(inst.x1),
                                        int(inst.x2), horizontal=False)
 
-    def route(self):
+    def routeHier(self):
         hier = self.spec.get("hier", {})
         for r in hier.get("routes", []):
             net = r["net"]
@@ -339,4 +571,125 @@ class HierLayoutCell(LayoutCell):
                               widthmult=3, spacemult=2)
             self.addPowerConnection(sup["net"], "",
                                     "top" if "t" in side else "bottom")
-        super().route()
+        LayoutCell.route(self)
+
+
+class SubcellLayout(SidecarPycell, LayoutCell):
+    """One subcell, built as a cell of its own.
+
+    The FLAT recipe over a one-subcell spec: the same placement, the
+    same fill and taps, the same stack-level router, from the
+    subcell's own Subckt and from its own origin. There is nothing
+    special about it -- which is the point. A subcell used to be a
+    COPY of a region of its parent's geometry, and everything that
+    made that hard (the parent's absolute coordinates, the guard
+    overhang window, deciding which rects belonged) was an artefact
+    of copying rather than building.
+    """
+
+    def __init__(self, spec, entry, parent_name=""):
+        LayoutCell.__init__(self)
+        self.spec = spec
+        self.entry = entry
+        self.parent_name = parent_name
+        self.noPowerRoute = True
+        self.data = SidecarPycell.recipe_data()
+
+    def afterPorts(self, layout):
+        """Put the supply ports where a parent's ring can reach them.
+
+        addAllPorts takes the FIRST rect it finds on the net, which
+        for a supply is whichever source pin iteration order landed
+        on -- somewhere up the column, behind every other net's pins.
+        A parent then stretches its ring to that pin and the stretch
+        crosses the column: measured, one M1 rect 4.5 um wide and 28
+        um tall through the bias column, shorting VBP, VCP, VDS and
+        VO into VDD_1V8 in one go.
+
+        A supply port belongs on the BULK column -- the guard and tap
+        geometry, which is continuous through the tap row and carries
+        the supply by construction -- at the end of the cell the
+        parent's ring is on: ground at the bottom, power at the top.
+        The ring then reaches it through pure guard, and the pin
+        layer over the devices stays free.
+        """
+        from .mazerouter import supply_nets, supply_polarity
+        supplies = supply_nets(layout)
+        dirs = (self.entry or {}).get("port_dirs", {}) or {}
+        box = HierPycell.columnBox(layout)
+        for net in list(getattr(layout, "ports", {}) or {}):
+            if net not in supplies:
+                #- a signal port faces the traffic: the pin at the end
+                #- of the column the net leaves by (see
+                #- HierPycell._portDirections). Left as addAllPorts
+                #- found it -- the FIRST rect on the net -- a drop from
+                #- the parent's channel lands on whichever pin
+                #- iteration order reached and runs the length of the
+                #- column to get there, through every other net's pin
+                #- stack (measured: VD1 in n_load_a, two met1 spacing
+                #- errors against VBP's drop).
+                d = dirs.get(net)
+                if d is None:
+                    continue
+                rects = self._pinRects(layout, net)
+                if not rects:
+                    continue
+                key = {(0, 1): lambda r: r.y2, (0, -1): lambda r: -r.y1,
+                       (1, 0): lambda r: r.x2, (-1, 0): lambda r: -r.x1}
+                layout.updatePort(net, max(rects, key=key[tuple(d)]))
+                continue
+            g = layout.nodeGraph.get(net)
+            if g is None:
+                continue
+            bulks, allpins = [], []
+            for port in getattr(g, "ports", []):
+                r = port.get() if hasattr(port, "get") else None
+                if r is None:
+                    continue
+                allpins.append(r)
+                if getattr(port, "childName", "") == "B":
+                    bulks.append(r)
+            cands = bulks or allpins
+            if not cands:
+                continue
+            if supply_polarity(net) == "ground":
+                pr = min(cands, key=lambda r: r.y1)
+            else:
+                pr = max(cands, key=lambda r: r.y2)
+            #- clipped to the column: the bulk columns straddle the
+            #- cell edge, and a port poking past the box inflates it,
+            #- which moves the origin every parent track was tuned to
+            pr = pr.getCopy()
+            pr.x1 = max(pr.x1, box.x1)
+            pr.x2 = min(pr.x2, box.x2)
+            pr.y1 = max(pr.y1, box.y1)
+            pr.y2 = min(pr.y2, box.y2)
+            layout.updatePort(net, pr)
+
+    @staticmethod
+    def _pinRects(layout, net):
+        """Every pin rect on this net, from the node graph."""
+        g = layout.nodeGraph.get(net)
+        if g is None:
+            return []
+        out = []
+        for port in getattr(g, "ports", []):
+            r = port.get() if hasattr(port, "get") else None
+            if r is not None:
+                out.append(r)
+        return out
+
+    def _runStackPycells(self):
+        """The subcell's own hooks, found under the name it is BUILT as.
+
+        The plan a fresh walk would produce here names the one stack
+        after this cell -- LELOTEMP_OTAR_P_BIAS_P_BIAS -- and the
+        `<SUBCELLNAME>.py` escape hatch is looked up by that name. The
+        parent's name is what makes it come out right.
+        """
+        from .subcell import run_stack_pycells
+        try:
+            run_stack_pycells(self, log=self.log,
+                              parent_name=self.parent_name or None)
+        except Exception as e:
+            self.log.error(f"stack pycells: {e}")

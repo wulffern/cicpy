@@ -531,12 +531,20 @@ class CellGroup(LayoutCell):
     def moveBelow(self, other, ygap=0):
         return self.abutBottom(other, ygap)
 
-    def fillDummyTransistors(self, direction="top"):
+    def fillDummyTransistors(self, direction="top", counts=None):
+        """Pad every column in the group to the tallest one.
+
+        `counts` -- {stack name: how many} -- overrides that per
+        column, and is what a netlist that already names its fills
+        supplies. See StackGroup.fillDummyTransistors.
+        """
         if not self.stacks:
             return self
         target_height = max(stack.height() for stack in self.stacks)
         for stack in self.stacks:
-            stack.fillDummyTransistors(target_height, direction=direction)
+            stack.fillDummyTransistors(
+                target_height, direction=direction,
+                count=(counts or {}).get(getattr(stack, "name", "")))
         self.updateBoundingRect()
         return self
 
@@ -1405,18 +1413,38 @@ class StackGroup(CellGroup):
             dummy.updateBoundingRect()
         return dummy
 
-    def fillDummyTransistors(self, target_height, direction="top"):
+    def fillDummyTransistors(self, target_height, direction="top",
+                             count=None):
+        """Pad the column with dummy devices.
+
+        Two ways to say how many, and `count` is the stronger one:
+        the NETLIST already names the fills (`xfill_<stack>_<n>`),
+        because a schematic records the devices the layout has. Height
+        matching is the rule that INVENTED them, and it only knows the
+        answer when the column has a taller sibling to match -- which
+        a subcell built as a cell of its own does not have. Told the
+        count, the same column comes out the same whether it is built
+        beside its siblings or alone.
+        """
         if not self.instances:
             return self
         self.sort()
         current_height = self.height()
-        if current_height >= target_height:
+        if count is not None:
+            target_height = None
+        elif current_height >= target_height:
             return self
         base = self.instances[0]
         dummy_index = 0
+
+        def more():
+            if count is not None:
+                return dummy_index < count
+            return current_height < target_height
+
         if direction == "bottom":
             ypos = int(self.bottom())
-            while current_height < target_height:
+            while more():
                 dname = f"xfill_{self.name}_{dummy_index}"
                 dummy = self._get_or_create_dummy(base, dname, int(base.x1), int(ypos - base.height()))
                 if dummy is None:
@@ -1427,7 +1455,7 @@ class StackGroup(CellGroup):
                 dummy_index += 1
         else:
             ypos = int(self.top())
-            while current_height < target_height:
+            while more():
                 dname = f"xfill_{self.name}_{dummy_index}"
                 dummy = self._get_or_create_dummy(base, dname, int(base.x1), ypos)
                 if dummy is None:

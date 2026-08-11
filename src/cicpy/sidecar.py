@@ -54,23 +54,22 @@ shadow. The file-based <SUBCELLNAME>.py escape hatch keeps the old
 no-self contract, legacy `route` included.
 
 The class IS the LayoutCell. SidecarCell subclasses both recipes in
-core/sidecarcell.py -- SidecarPycell, which places the devices, and
-HierLayoutCell, which assembles the published subcells -- so a cell
-that needs more than declarations overrides beforePlace / afterPlace
-/ beforeRoute / afterPaint / place / route and calls super(); the
+core/sidecarcell.py -- SidecarPycell, which places devices, and
+HierPycell, which builds a cell per subcell and assembles them -- so
+a cell that needs more than declarations overrides beforePlace /
+afterPlace / beforeRoute / place / route and calls super(); the
 escape hatch is ordinary inheritance. There is ONE object per build:
 the cell the framework builds is the instance of the design's own
 class, and it is handed to itself as the pycell, so every hook the
-design declares runs. It used to be two -- the declaration was a
-pycell, and the assembled top a separate HierLayoutCell handed over
-as `hier_cell` -- and the assembly pass loaded no pycell at all, so
-every hook on the design's class was silently dead there.
+design declares runs.
 
-Which of the two recipes runs is the cell's ROLE, fixed at
-construction: the flat build (devices, subcells published) is
-`SidecarCell()`, the assembly `SidecarCell(hier=True)`. cic.py picks
-it from the cell name -- <CELL> flat, <CELL>_HIER the assembly --
-and a cell that declares `routes` gets both passes, in that order.
+Which recipe a cell gets is a property of what it DECLARES, not of
+how it was constructed: declare `routes` and the cell is made of
+subcells -- hierarchy() splits its netlist, builds each part as a
+cell and registers it, and place() tiles them -- otherwise it is made
+of devices. One pass, one process, one object; there is no <CELL>_HIER
+scaffold, no generated netlist between two passes, and no role to
+pass to a constructor.
 
 `compile()` turns the class into the spec dict the recipes consume;
 detection in cic.py is by content: a module defining a SidecarCell
@@ -84,7 +83,7 @@ import sys
 
 from cicpy.core.cellgroup import StackGroup
 from cicpy.core.layoutcell import LayoutCell
-from cicpy.core.sidecarcell import SidecarPycell, HierLayoutCell
+from cicpy.core.sidecarcell import SidecarPycell, HierPycell
 
 log = logging.getLogger("Sidecar")
 
@@ -92,7 +91,7 @@ _counter = itertools.count()
 
 #- the declarative keys a subcell class may carry. Only keys the
 #- class actually states reach the spec: presence matters downstream
-#- (HierLayoutCell registers a channel only for a subcell that names
+#- (the assembly registers a channel only for a subcell that names
 #- one).
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill", "xspace",
                  "wires", "wires_key")
@@ -163,25 +162,27 @@ class Mirror(Stack):
                 f"on {type(self).__name__} or retype it")
 
 
-class SidecarCell(SidecarPycell, HierLayoutCell):
+class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
     """Base of a declared cell -- and the cell. Subclass, declare, done.
 
-    Class declarations: `place` (flat-build knobs), nested Subcell
+    Class declarations: `place` (placement knobs), nested Subcell
     classes, `rows` (the floorplan, bottom row first, referencing the
-    classes), `supplies`, and for the assembled top `channel` (um
-    between the rows) and `routes` (one ChannelRoute per crossing
-    net). Declaring `routes` is what makes the cell build in two
-    passes: subcells first, then the parent assembled from them.
+    classes), `supplies`, and for a cell made of subcells `channel`
+    (um between the rows) and `routes` (one ChannelRoute per crossing
+    net).
+
+    WHAT A CELL IS MADE OF is what `routes` decides. Declared, the
+    cell is made of SUBCELLS: hierarchy() splits its netlist, builds
+    each part as a cell of its own and registers it, place() tiles
+    them and route() lays the crossing nets. Undeclared, the cell is
+    made of DEVICES: the flat recipe places, fills, taps and routes
+    them. Either way it is one object, one pass, one process.
 
     An instance IS the LayoutCell the framework builds, and its own
-    pycell -- so beforePlace, afterPlace, beforeRoute, afterPaint,
-    afterPorts and the rest are the cell's methods and run in BOTH
-    passes. `hier` picks which recipe place()/route() are: the flat
-    build (devices, then the subcells published) or the assembly (the
-    published subcells tiled and the channel routes laid). The
-    hook-shaped half of the flat recipe is flat-only; a design's own
-    overrides are not, which is the point -- a cell says where its
-    ports go once, and the pass that publishes them obeys.
+    pycell -- so beforePlace, afterPlace, beforeRoute, afterPorts and
+    the rest are the cell's own methods. The hook-shaped half of the
+    flat recipe belongs to a cell made of devices; a design's own
+    overrides belong to the cell whatever it is made of.
     """
     rows = []
     supplies = []
@@ -198,63 +199,47 @@ class SidecarCell(SidecarPycell, HierLayoutCell):
         if isinstance(knobs, dict):
             cls._place = knobs
             delattr(cls, "place")
-        if "hier_cell" in vars(cls):
-            log.warning(f"{cls.__name__}: hier_cell is gone -- the "
-                        f"cell IS its layout cell now. Move the "
-                        f"class's place()/route() onto {cls.__name__} "
-                        f"itself and delete the declaration.")
 
-    @property
-    def assembled(self):
-        """Is THIS pass the assembly of the published subcells?
-
-        The one thing a design's own override has to ask, because it
-        is the same method on the same class in both passes: a route
-        that reads the assembly's geometry has nothing to read in the
-        flat build, and would draw itself into the subcells about to
-        be published.
-        """
-        return self._hier
-
-    def __init__(self, hier=False):
-        HierLayoutCell.__init__(self, type(self).compile())
-        self._hier = hier
-        if not hier:
-            #- the flat recipe's data-driven half. NOT in the
-            #- assembly: resetOrigins is about the placed devices
+    def __init__(self):
+        LayoutCell.__init__(self)
+        self.spec = type(self).compile()
+        #- MADE OF SUBCELLS, or made of devices. Read off the
+        #- declaration rather than passed in, so there is no way for
+        #- the caller and the file to disagree.
+        self.made_of_subcells = "hier" in self.spec
+        self.noPowerRoute = True
+        if not self.made_of_subcells:
+            #- the flat recipe's data-driven half. resetOrigins is
+            #- about placed devices, which an assembly has none of.
             self.data = SidecarPycell.recipe_data()
 
-    # -- the cell's own methods; the role picks the recipe ----------
+    # -- the cell's own methods; what it is made of picks the recipe
 
     def place(self):
-        if self._hier:
-            HierLayoutCell.place(self)
+        if self.made_of_subcells:
+            HierPycell.placeHier(self)
         else:
             LayoutCell.place(self)
 
     def route(self):
-        if self._hier:
-            HierLayoutCell.route(self)
+        if self.made_of_subcells:
+            HierPycell.routeHier(self)
         else:
             LayoutCell.route(self)
 
-    # -- the flat recipe, which only the flat pass wants. A design
-    # -- override calls super() and gets it in the pass that has it
+    # -- the flat recipe, which a cell made of devices wants. A
+    # -- design override calls super() and gets it when it applies
     def beforePlace(self, layout):
-        if not self._hier:
+        if not self.made_of_subcells:
             SidecarPycell.beforePlace(self, layout)
 
     def afterPlace(self, layout):
-        if not self._hier:
+        if not self.made_of_subcells:
             SidecarPycell.afterPlace(self, layout)
 
     def beforeRoute(self, layout):
-        if not self._hier:
+        if not self.made_of_subcells:
             SidecarPycell.beforeRoute(self, layout)
-
-    def afterPaint(self, layout):
-        if not self._hier:
-            SidecarPycell.afterPaint(self, layout)
 
     @classmethod
     def compile(cls):
@@ -293,7 +278,7 @@ def _name(x):
 
 def _normalize_routes(routes):
     """The top's routes with class refs turned to names: drops accept
-    the classes for the NameError guarantee, HierLayoutCell keys its
+    the classes for the NameError guarantee, the assembly keys its
     overrides by instance name."""
     out = []
     for r in routes:

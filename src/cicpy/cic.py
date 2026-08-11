@@ -276,37 +276,6 @@ def cost(ctx, cicfile, techfile, cell, top):
     click.echo(report(cicfile, cell, um=um, top=top))
 
 
-def _declares_hier(lib, cell, libdir):
-    """Does <CELL>.py declare the assembled top -- a class `routes`?
-
-    Read, not imported: importing a design file to decide how to build
-    it would run its module body before the technology is loaded, and
-    the answer is one attribute on one class. `hier_cell` is the old
-    spelling, when the assembly was a second class; it is gone, but a
-    design still carrying one gets the two-pass build (and a warning
-    from the sidecar) rather than a silently flat one.
-    """
-    path = os.path.join(libdir, lib, cell + ".py")
-    if not os.path.exists(path):
-        return False
-    try:
-        import ast as _ast
-        tree = _ast.parse(open(path).read())
-    except Exception:
-        return False
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.ClassDef):
-            for stmt in node.body:
-                targets = (stmt.targets if isinstance(stmt, _ast.Assign)
-                           else [stmt.target]
-                           if isinstance(stmt, _ast.AnnAssign) else [])
-                for t in targets:
-                    if (isinstance(t, _ast.Name)
-                            and t.id in ("routes", "hier_cell")):
-                        return True
-    return False
-
-
 @cli.command("sch2mag")
 @click.pass_context
 @click.argument("lib")
@@ -318,33 +287,23 @@ def _declares_hier(lib, cell, libdir):
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 @click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
-@click.option("--hier", is_flag=True,
-              help="The top INSTANTIATES its subcells instead of "
-                   "containing their devices. Run sch2subcells first.")
-@click.option("--subcell","subcells",multiple=True,
-              help="Write only this subcell and stop -- do not assemble "
-                   "the parent. Repeatable. Matches the subcell's short "
-                   "name (p_sw) or its cell name (MYCELL_P_SW). For "
-                   "working on one subcell without regenerating the "
-                   "rest. The cell is still PLACED in full, so the "
-                   "subcell is identical to the one a full run writes.")
-def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,hier,subcells):
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
     """Netlist a xschem to spice, and load file to Magic.
 
-    ONE command for every cell. The design file decides what happens:
+    ONE command for every cell, and one pass. The design file decides
+    what the cell is made of:
 
       - a module of plain hooks (beforePlace, afterPlace, ...) is a
-        classic pycell and is placed and routed in one pass
-      - a SidecarCell subclass is a sidecar, placed the same way
-      - a sidecar that also names a ``hier_cell`` is built in TWO
-        passes, because that is what it means: every subcell is
-        written and verifiable on its own first, then the parent is
-        assembled from them
+        classic pycell: devices, placed and routed
+      - a SidecarCell subclass is a sidecar, the same
+      - a sidecar declaring ``routes`` is made of SUBCELLS: it splits
+        its own netlist, builds a cell per part and assembles them,
+        all in this one command (see LayoutCell.hierarchy)
 
-    The two-pass cells used to need `make subcells hier` by hand while
-    every other cell needed `make mag`, with nothing in the cell to
-    say which -- and a hier cell built the flat way SUCCEEDS, writes a
-    .mag, and fails LVS with split nets, which reads as the design
+    A hierarchical cell used to need `make subcells hier` by hand,
+    with a generated <CELL>_HIER.spice and a second process between
+    the two -- and built the flat way instead it SUCCEEDED, wrote a
+    .mag and failed LVS with split nets, which reads as the design
     having broken rather than the command being wrong.
     """
 
@@ -352,92 +311,8 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
     spi = "xsch/" + cell + ".spice"
 
-    if subcells:
-        #- one subcell, and stop: the parent is left as it is
-        print(f"INFO: writing only {', '.join(subcells)} of {cell}")
-        _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,
-                 subcells_only=True,only_subcells=subcells)
-        return
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
 
-    if not hier and _declares_hier(lib, cell, libdir):
-        print(f"INFO: {cell} declares an assembled top: building its "
-              f"subcells first, then assembling the parent from them")
-        #- SEPARATE PROCESSES, deliberately. The two passes share a
-        #- process only if they are called in one, and the caches that
-        #- back a build -- Cut._cuts, the Rules singleton, the Design's
-        #- cell registry -- are global. Run in one process the second
-        #- pass inherits the first one's, and the assembled parent came
-        #- out failing pin matching while the same two passes as two
-        #- commands matched uniquely (measured on LELOTEMP_BIAS_IBP).
-        hspi = os.path.join(libdir, lib, f"{cell}_HIER.spice")
-        opt = ""
-        if check_connectivity:
-            opt += " --check-connectivity"
-        if strict:
-            opt += " --strict"
-        rc = os.system(f"cicpy sch2subcells {lib} {cell} "
-                       f"--libdir {libdir} --techlib {techlib} "
-                       f"--xspace {xspace} --yspace {yspace} "
-                       f"--gbreak {gbreak}")
-        if rc != 0:
-            raise click.ClickException(f"subcell pass failed for {cell}")
-        if not os.path.exists(hspi):
-            raise click.ClickException(
-                f"{cell} declares an assembled top but {hspi} was "
-                f"not written")
-        rc = os.system(f"cicpy spi2mag {hspi} {lib} {cell}_HIER "
-                       f"--libdir {libdir} --techlib {techlib} "
-                       f"--xspace {xspace} --yspace {yspace} "
-                       f"--gbreak {gbreak} --outcell {cell}{opt}")
-        if rc != 0:
-            raise click.ClickException(f"assembly failed for {cell}")
-        return
-
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,
-             hier=hier)
-
-
-
-@cli.command("sch2subcells")
-@click.pass_context
-@click.argument("lib")
-@click.argument("cell")
-@click.option("--libdir",default="../design/",help="Default directory of designs")
-@click.option("--techlib",default="sky130A",help="Technology library")
-@click.option("--xspace",default="0",help="Group X space")
-@click.option("--yspace",default="0",help="Group Y space")
-@click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
-@click.option("--subcell","subcells",multiple=True,
-              help="Write only this subcell. Repeatable. Matches the "
-                   "subcell's short name (p_sw) or its cell name "
-                   "(MYCELL_P_SW).")
-def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,subcells):
-    """Generate a cell per subcell: .mag, .cic, .sch and .sym.
-
-    Step one of two. Place the cell exactly as sch2mag would, then write
-    out each SUBCELL as a cell of its own and stop -- the parent's own
-    .mag is not written and not touched.
-
-    The point is that a subcell becomes a thing on disk that can be
-    verified by itself, before anything is built on top of it. Run this,
-    check each one with drc and lvs, and only then build the parent.
-
-    A subcell is any CellGroup the design marks with ``subcell = True``,
-    and failing that every stack -- a column of devices being the
-    decomposition that needs no thought. Nothing here is confined to
-    stacks: mark a differential pair spread over two columns, or a
-    whole side, and it is published the same way.
-
-    Which cells get written is taken from the plan, BY NAME. The
-    schematics used to come from a second `transpile --xschem` with a
-    negative lookahead over the cell name, which the Makefile had to
-    describe as "not optional" because getting it wrong overwrote the
-    hand-drawn parent schematic with a generated one.
-    """
-    os.system(f"make xsch LIB={lib} CELL={cell}")
-    spi = "xsch/" + cell + ".spice"
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,
-             subcells_only=True,only_subcells=subcells)
 
 
 @cli.command("spi2mag")
@@ -452,19 +327,13 @@ def sch2subcells(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,subcells):
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 @click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
-@click.option("--outcell", default="", help="Write the result under this cell name. "
-              "The build keeps CELL's hooks and netlist; only the published "
-              "name changes -- a hierarchical assembly built as <CELL>_HIER "
-              "publishes as the product cell.")
-def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,outcell):
+def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
     """Translate a SPICE file to Magic"""
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,
-             outcell=outcell)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
 
 
 
-def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,
-             subcells_only=False,only_subcells=(),hier=False,outcell=""):
+def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
@@ -486,19 +355,13 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     #- it is handed to itself as the pycell below, which is what
     #- makes every hook the design declares run.
     #-
-    #- Both passes of a two-pass cell, the flat one under <CELL> and
-    #- the assembly under the scaffold name <CELL>_HIER; `hier` picks
-    #- which recipe place()/route() are. The assembly reads the
-    #- sidecar of the BASE cell, unless a <CELL>_HIER.py shadows it.
+    #- ONE class, one object, one pass: what the cell is made of is
+    #- the class's own business (see SidecarCell).
     dirname = libdir + lib + os.path.sep
-    _hier = cell.endswith("_HIER")
-    _base = cell[:-5] if _hier else cell
-    if not (_hier and os.path.exists(os.path.join(dirname, cell + ".py"))):
-        from cicpy.sidecar import load_sidecar_class
-        _side = load_sidecar_class(dirname, _base)
-        if _side is not None and (not _hier or "hier" in _side.compile()):
-            design.registerLayoutCellClass(
-                cell, lambda: _side(hier=_hier))
+    from cicpy.sidecar import load_sidecar_class
+    _side = load_sidecar_class(dirname, cell)
+    if _side is not None:
+        design.registerLayoutCellClass(cell, _side)
 
     log.info(f"Reading {spi}")
     lcell = design.readFromSpice(spi,cell)
@@ -550,38 +413,18 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
     #- Add cuts after the layout has been routed
     design.addCuts()
 
-    if subcells_only:
-        _write_subcells(design,lcell,libdir,lib,rules,only_subcells)
-        return
-
-    if hier:
-        _hierarchify(design,lcell,log)
-
-    #- publish under the product name: the build ran with CELL's
-    #- hooks and netlist, but the artifact IS the cell -- a top
-    #- assembled as <CELL>_HIER need not keep the scaffold's name
-    if outcell:
-        lcell.name = outcell
-
     obj = cic.MagicPrinter(libdir + lib,rules)
-    #- The parent step does not write subcells. Both commands used to
-    #- write the same eight .mag files and only agreed by luck: the
-    #- parent's copies are made by the design's afterPaint, mid layout,
-    #- while sch2subcells rebuilds them as its own authoritative pass.
-    #- Whichever ran last won, silently. One owner each.
-    #-
-    #- The .cic still carries them, so the parent remains a complete
-    #- description and the route tools can be pointed at either.
-    try:
-        from cicpy.core.subcell import plan_subcells
-        subnames = [e["name"] for e in plan_subcells(lcell)]
-    except Exception:
-        subnames = []
-    if subnames:
-        obj.exclude = "^(?:" + "|".join(re.escape(n) for n in subnames) + ")$"
+    #- EVERY cell the run built, subcells included: the parent holds
+    #- an instance of each, so a .mag that is not written is a
+    #- reference magic cannot resolve. There is one owner now -- this
+    #- step -- where a parent pass and a subcell pass used to write
+    #- the same files from different states and whichever ran last
+    #- won, silently.
     obj.print(design)
     #for m in design.maglib.values():
         #if(m._lay is not None):
+
+    _write_subcell_views(design,lcell,libdir,lib,rules)
 
     cicfile = libdir + lib + os.path.sep + lcell.name + ".cic"
     obj = design.toJson()
@@ -608,178 +451,25 @@ def _keep_only(names):
     return f"^(?!(?:{alts})$).*"
 
 
-def _hierarchify(design,lcell,log):
-    """The top references its subcells instead of containing them.
+def _write_subcell_views(design,lcell,libdir,lib,rules):
+    """The schematic and the .cic of each subcell this run built.
 
-    The restructuring step write_stack_cells deliberately defers: every
-    device instance that belongs to a subcell leaves the top, and one
-    Instance of the subcell arrives in its place. Because a published
-    subcell keeps the parent's absolute coordinates, that Instance sits
-    at the origin with the identity transform and the geometry lands
-    exactly where the flat devices were.
+    The .mag files come out of the parent's own print -- they are
+    ordinary cells of the design now. What still needs saying here is
+    everything that is PER CELL: a .sch and .sym so the generated
+    hierarchy can be opened and netlisted, and a self-contained .cic
+    so the route tools can be pointed at one subcell alone.
 
-    The top's own routing -- rings, straps, inter-subcell routes -- is
-    untouched. Routes whose geometry was COPIED into a subcell stay in
-    the top as well: the copies overlap their originals exactly, on the
-    same net, which costs bytes and nothing else, and removing the
-    originals means proving for each that every rect went along, which
-    is a verification burden this step does not need yet.
+    The parent is excluded by name, never by prefix: a prefix pattern
+    matches the parent too, and the difference between the two is a
+    generated schematic written over the hand-drawn source.
     """
-    from cicpy.core.subcell import plan_subcells
-    from cicpy.core.instance import Instance
-
-    plan = plan_subcells(lcell)
-    if not plan:
-        log.warning(f"{lcell.name}: no subcells; nothing to hierarchify")
+    names = list(getattr(lcell, "subcells_built", []) or [])
+    if not names:
         return
-    missing = [e["name"] for e in plan
-               if e["name"] not in getattr(design, "cells", {})]
-    if missing:
-        log.error(f"{lcell.name}: subcells not registered: "
-                  f"{', '.join(missing)}. Run sch2subcells first; "
-                  f"keeping the flat top.")
-        return
-
-    leaving = set()
-    for entry in plan:
-        leaving.update(entry["instances"])
-
-    def _prune(node):
-        kept = []
-        for ch in getattr(node, "children", []) or []:
-            if ch is None:
-                continue
-            if (hasattr(ch, "isInstance") and ch.isInstance()
-                    and (getattr(ch, "instanceName", "") or "") in leaving):
-                continue
-            if hasattr(ch, "children"):
-                _prune(ch)
-            kept.append(ch)
-        node.children = kept
-
-    _prune(lcell)
-
-    for entry in plan:
-        sub = design.cells[entry["name"]]
-        inst = Instance()
-        inst.design = design
-        #- name too: Cell.isEmpty is "has no name", and printReference
-        #- drops an empty instance without a word
-        inst.name = entry["name"]
-        inst.cell = entry["name"]
-        inst.instanceName = f"x{entry['stack']}"
-        inst.angle = "R0"
-        inst.xcell = 0
-        inst.ycell = 0
-        inst.layoutcell = sub
-        inst._cell_obj = sub
-        #- the subcell keeps the parent's absolute coordinates until
-        #- the restructuring step; xcell cancels x1 so the use maps
-        #- identity
-        inst.setRect(sub)
-        inst.xcell = -int(sub.x1)
-        inst.ycell = -int(sub.y1)
-        lcell.add(inst)
-        log.info(f"{lcell.name}: x{entry['stack']} = {entry['name']}")
-
-
-def _subcell_pycell_template(name, entry):
-    return f'''"""{name}: this subcell's own layout hooks.
-
-Generated once by `cicpy sch2subcells`, then yours: edit and commit.
-
-Both hooks run in the parent, between its afterPlace and beforeRoute,
-with `layout` the parent LayoutCell and `entry` this subcell's plan:
-    entry["instances"]  the instance names in this subcell
-    entry["ports"]      its boundary nets
-    entry["internal"]   nets wholly inside it
-    entry["type"]       stack | diffpair | mirror, from the sidecar
-"""
-
-
-def beforePlace(layout, entry):
-    """Adjust this subcell's placement before anything routes."""
-
-
-def beforeRoute(layout, entry):
-    """Route this subcell's internal nets.
-
-    Return True to claim the subcell as ROUTED -- the built-in stack
-    router will then leave it alone. Return None to let the built-in
-    router handle it, which is the right default.
-    """
-'''
-
-
-def _ensure_subcell_pycells(lcell, plan, log):
-    """A .py per subcell, generated when missing, never overwritten."""
-    import os
-    dirname = getattr(lcell, "dirname", "") or ""
-    made = []
-    for entry in plan:
-        path = os.path.join(dirname, entry["name"] + ".py")
-        if os.path.exists(path):
-            continue
-        with open(path, "w") as fo:
-            fo.write(_subcell_pycell_template(entry["name"], entry))
-        made.append(entry["name"])
-    if made:
-        log.info(f"pycell stubs written (edit and commit them): "
-                 f"{', '.join(made)}")
-
-
-def _write_subcells(design,lcell,libdir,lib,rules,only=()):
-    """Write a cell per subcell and nothing else.
-
-    `only` narrows WHAT IS WRITTEN, never what is built: the cell is
-    placed and routed exactly as it always is, so a subcell taken on its
-    own is the same subcell it would be in a full run. Anything else
-    would make iterating on one a different experiment from the real
-    thing.
-    """
-    from cicpy.core.subcell import plan_subcells, write_stack_cells
-
-    plan = plan_subcells(lcell)
-    if not plan:
-        log.warning(f"{lcell.name}: no subcells found; nothing to write")
-        return
-
-    if only:
-        want = {o.upper() for o in only}
-        chosen = [e for e in plan
-                  if e["name"].upper() in want or e["stack"].upper() in want]
-        if not chosen:
-            have = ", ".join(sorted(e["stack"] for e in plan))
-            raise click.ClickException(
-                f"no subcell matches {', '.join(only)}. This cell has: {have}")
-        plan = chosen
-
-    #- REBUILD, do not reuse. A design's own afterPaint may already have
-    #- published these, from whatever state the layout was in at that
-    #- moment; write_stack_cells then leaves an already registered cell
-    #- alone. Clearing them first is what makes THIS the authoritative
-    #- pass rather than a no-op behind the design's back.
-    for entry in plan:
-        nm = entry["name"]
-        getattr(design,"cells",{}).pop(nm,None)
-        names_list = getattr(design,"cellnames",None)
-        if names_list is not None and nm in names_list:
-            names_list.remove(nm)
-    write_stack_cells(lcell,design=design,plan=plan,log=log)
-
-    #- a sidecar-driven cell keeps its hooks as class methods in the
-    #- one sidecar file; stubs on disk would only shadow them
-    if not getattr(lcell, "_sidecar_spec", None):
-        _ensure_subcell_pycells(lcell, plan, log)
-
-    names = [e["name"] for e in plan]
     keep = _keep_only(names)
     log.info(f"{lcell.name}: writing {len(names)} subcell"
              f"{'s' if len(names) != 1 else ''}")
-
-    obj = cic.MagicPrinter(libdir + lib,rules)
-    obj.exclude = keep
-    obj.print(design)
 
     obj = cic.XschemPrinter(libdir + lib,rules)
     obj.exclude = keep
@@ -788,15 +478,15 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
     #- cell is missing from printer.cells -- no wires, no error, and
     #- the position counter never advances, so the output is a pile of
     #- symbols at one spot that netlists without complaint. It happened
-    #- here because sch2mag's design holds the devices in maglib, not
-    #- in design.cells; their SUBCKTS are in the cicspi registry from
+    #- here because the design holds the devices in maglib, not in
+    #- design.cells; their SUBCKTS are in the cicspi registry from
     #- the netlist that placed them, and that is what the printer
     #- actually reads (instcell.ckt.nodes), so stand-ins carrying the
     #- registry subckt are the whole requirement.
     obj.cells.update(getattr(design, "cells", {}))
     referenced = set()
-    for entry in plan:
-        cellobj = design.cells.get(entry["name"])
+    for name in names:
+        cellobj = design.cells.get(name)
         ckt = getattr(cellobj, "ckt", None)
         for inst in (getattr(ckt, "instances", None) or []):
             nm = getattr(inst, "subcktName", "")
@@ -845,8 +535,7 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
     cuts = {n: c for n, c in getattr(design,"cells",{}).items()
             if isinstance(c, _Cut)}
 
-    for entry in plan:
-        name = entry["name"]
+    for name in names:
         cellobj = design.cells.get(name)
         if cellobj is None:
             continue
@@ -862,28 +551,9 @@ def _write_subcells(design,lcell,libdir,lib,rules,only=()):
                 fo.write(json.dumps(one.toJson(),indent=4))
         except Exception as ex:
             log.warning(f"{name}: could not write {cicfile}: {ex}")
-        log.info(f"  {name}: {' '.join(entry['ports']) or '(no ports)'}")
-
-    #- THE HIERARCHICAL NETLIST: the top as instances of its subcells,
-    #- every connection a parent net name, every subckt the generated
-    #- one. This is what a hierarchical placement flow places from.
-    hier = [f"** generated by cicpy sch2subcells: {lcell.name} as subcells"]
-    for entry in plan:
-        cellobj = design.cells.get(entry["name"])
-        for line in (getattr(cellobj, "cic_subckt", None) or []):
-            hier.append(line)
-        hier.append("")
-    top_ports = list(getattr(getattr(lcell, "ckt", None), "nodes", None)
-                     or [])
-    hier.append(f".subckt {lcell.name}_HIER {' '.join(top_ports)}")
-    for entry in plan:
-        ports = list(entry["ports"])
-        hier.append(f"x{entry['stack']} {' '.join(ports)} {entry['name']}")
-    hier.append(".ends")
-    hierfile = libdir + lib + os.path.sep + lcell.name + "_HIER.spice"
-    with open(hierfile, "w") as fo:
-        fo.write("\n".join(hier) + "\n")
-    log.info(f"  hierarchical netlist: {hierfile}")
+        ports = " ".join(getattr(getattr(cellobj, "ckt", None),
+                                 "nodes", None) or [])
+        log.info(f"  {name}: {ports or '(no ports)'}")
 
     #- Say how to check them. The route tools need the device library
     #- passed in, and working that out from scratch is a papercut every
@@ -896,16 +566,6 @@ def _ensure_default_pycell(dirname, cell):
     pycell_path = os.path.join(dirname, cell + ".py")
     if os.path.exists(pycell_path):
         return
-
-    #- a sidecar that declares the placement IS the pycell: writing a
-    #- template over the scaffold name would shadow the recipe with
-    #- empty hooks. For <BASE>_HIER the sidecar is <BASE>.py.
-    base = cell[:-5] if cell.endswith("_HIER") else cell
-    if base != cell:
-        from cicpy.sidecar import load_sidecar_spec
-        spec = load_sidecar_spec(dirname, base)
-        if spec and ("rows" in spec or "hier" in spec):
-            return
 
     os.makedirs(dirname, exist_ok=True)
     with open(pycell_path, "w") as fo:

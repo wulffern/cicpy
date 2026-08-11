@@ -56,7 +56,7 @@ class Design():
         the class itself, or a closure carrying constructor arguments.
         The framework builds the top cell wherever a netlist is read
         (see MagicDesign.readFromSpice), so a cell that needs its own
-        LayoutCell subclass -- a HierLayoutCell assembling published
+        LayoutCell subclass -- a SidecarCell that builds its own
         subcells, say -- registers here before the read.
         """
         self.layoutcell_factories[name] = factory

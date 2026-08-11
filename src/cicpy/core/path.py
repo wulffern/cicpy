@@ -253,6 +253,9 @@ class End(Step):
             return cur
         x, y, layer = cur
         tx, ty = int(r.centerX()), int(r.centerY())
+        if x is None or y is None:
+            #- nothing to travel from: land on the stop and stop
+            x, y = tx, ty
         if x != tx:
             path.drawSegment(x, y, tx, y, layer)
         if y != ty:
@@ -277,6 +280,12 @@ class Up(Step):
         if target is None or target == layer:
             log.warning(f"{path.net}: no layer {self.direction} of {layer}")
             return cur
+        if x is None or y is None:
+            #- a via needs a place to be; a story that changes layer
+            #- before it has gone anywhere says where first
+            log.warning(f"{path.net}: {self.name} before the path has "
+                        f"a position; no via placed")
+            return (x, y, target)
         path.drawVia(x, y, layer, target)
         return (x, y, target)
 
@@ -305,8 +314,12 @@ class MoveX(Step):
         if c is None:
             return cur
         if self.axis == "x":
+            if y is None:
+                return (c, y, layer)
             path.drawSegment(x, y, c, y, layer)
             return (c, y, layer)
+        if x is None:
+            return (x, c, layer)
         path.drawSegment(x, y, x, c, layer)
         return (x, c, layer)
 
@@ -345,13 +358,13 @@ class Trunk(Step):
         if self.direction == "v":
             lo = min(int(r.y1) for r in rects)
             hi = max(int(r.y2) for r in rects)
-            if c != x:
+            if x is not None and y is not None and c != x:
                 path.drawSegment(x, y, c, y, layer)
             path.drawSegment(c, lo, c, hi, layer, extend=False)
             return (c, y, layer)
         lo = min(int(r.x1) for r in rects)
         hi = max(int(r.x2) for r in rects)
-        if c != y:
+        if x is not None and y is not None and c != y:
             path.drawSegment(x, y, x, c, layer)
         path.drawSegment(lo, c, hi, c, layer)
         return (x, c, layer)
@@ -587,7 +600,17 @@ class Path(Route):
             self.log.warning(f"{self.net}: a path with no steps draws "
                              f"nothing")
             return
-        cur = (0, 0, self.routeLayer)
+        #- NO POSITION YET, which is not the same as the origin. A
+        #- story that opens with a trunk has nothing to travel FROM,
+        #- and (0,0) made it travel from the coordinate origin: a leg
+        #- the width of the whole cell, drawn on the pin layer, at
+        #- y=0. It went unseen while a subcell was COPIED out of a
+        #- parent -- the leg started outside the copied window and was
+        #- left behind -- and appeared the moment subcells were built
+        #- from their own origin, as two li spacing errors in
+        #- LELOTEMP_OTAR_N_LOAD_A. Every step that travels checks for
+        #- it and simply starts where it is told instead.
+        cur = (None, None, self.routeLayer)
         for s in self.steps:
             cur = s.apply(self, cur)
         #- NOT by default. mergeOwnRects removes real redundancy --

@@ -503,6 +503,31 @@ draws exactly what it says. First real user is Stage 3.
 **Gate:** DRC/LVS parity. Geometry is *expected* to change where a net was
 hand-routed; each change gets looked at.
 
+### Stage 3, the emitter half — DONE (2026-08-12)
+
+`trunkAnchorCoords` is module level and shared, so the router can ask
+the inverse question -- given the lane the search chose, which anchor
+would have produced it -- and write the anchor. And the search was
+MISSING them for the reason Stage 1 predicted: its TrackMap grid is
+originned at `min(pin.x1) - margin`, so every miss was 800 or 1000 to the
+LEFT of `trunktab`, all of one sign. Inside half a wire width the two are
+the same lane and the pins win.
+
+The payoff is bigger than the tidiness. Fresh search, no wires blocks:
+**OTAR 128 DRC -> 0, BIAS_IBP 182 -> 8** -- the hand-tuned quality,
+found by preferring the pins over the grid.
+
+Design side: **all 19 coordinates gone**, DRC/LVS/cost identical. Ten
+were exactly an anchor; the rest the same lane within half a wire. A
+coordinate that reaches a sidecar anyway is reported at compile.
+
+STILL OPEN from Stage 3: the 10 polyline-fixable `blocked` entries, the
+`beforeRoute` hooks in p_bias / p_sw / n_load_a / n_load_b / n_mirr that
+rule 1 wants gone, and the round-trip test (search -> emit -> replay ->
+assert identical rects). The fresh-search LVS still fails where the
+declared blocks pass, which is the next thing to look at: the DRC gap
+closed, the connectivity gap did not.
+
 ## Stage 3b — a channel track is one legal lane
 
 Independent, small, and it removes a workaround from every design file.

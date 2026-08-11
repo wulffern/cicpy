@@ -1445,6 +1445,50 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                         continue
                     specs.append(spec)
 
+                def comb_lane():
+                    """A lane clear over the WHOLE span, or None.
+
+                    A comb's trunk runs the full height of the net, so
+                    a lane the search used for one pair proves nothing
+                    -- the search wove precisely because no single
+                    column was free. So look for one: the pins' own
+                    anchors first, since those are where a person puts
+                    it, then a scan across the column at the routing
+                    pitch. A lane is a convention, not a right of way,
+                    and this is the check that earns it.
+                    """
+                    ys = [int(rr.centerY()) for rr in rects]
+                    lo, hi = min(ys), max(ys)
+                    try:
+                        pad = Rules.getInstance().get(tm.pin_layer, "space")
+                    except Exception:
+                        return None
+
+                    def clear(lane):
+                        try:
+                            return (tm.column_blockers(
+                                        net, lane - pad, lane + pad,
+                                        lo, hi) == []
+                                    and tm.column_metal(
+                                        net, tm.pin_layer,
+                                        lane - pad, lane + pad,
+                                        lo, hi) == [])
+                        except Exception:
+                            return False
+
+                    w2 = r.rule(tm.pin_layer, "width") // 2
+                    cands = [min(int(rr.x2) for rr in rects) - w2,
+                             max(int(rr.x1) for rr in rects) + w2]
+                    x1 = min(int(rr.x1) for rr in rects)
+                    x2 = max(int(rr.x2) for rr in rects)
+                    step = max(1, int(getattr(tm, "hpitch", 0)) or 2 * w2)
+                    reach = 4 * step
+                    cands += list(range(x1 - reach, x2 + reach + 1, step))
+                    for lane in cands:
+                        if clear(lane):
+                            return lane
+                    return None
+
                 def draw_as_paths(why):
                     """The searched shape, drawn as it was found.
 
@@ -1452,14 +1496,36 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     addConnectivityRoute covers every rect of a net, so
                     drawing some pairs both ways would double them.
                     """
+                    from .path import _FixedAnchor
                     grp = groups.get(stack)
                     if grp is None:
                         raise Blocked(f"no group object for stack {stack}")
-                    for aa, bb, nodes in searched:
-                        pth = grp.layout.path(net, tm.pin_layer, [aa], [bb])
-                        pth.fromNodes(nodes)
-                    log.info(f"{net}: {why}; drawn as {len(searched)} "
-                             f"path(s) of the searched shape")
+                    #- MORE THAN TWO PINS WANTS ONE STORY, not one per
+                    #- pair: a chain of pair paths reaches every pin and
+                    #- draws the same lane over and over to do it. One
+                    #- trunk with a stub per pin is what a person draws,
+                    #- and what the hand-written hooks these replace are.
+                    #- NOT YET the comb. Its trunk column is checked but
+                    #- its STUBS are not: each runs horizontally from a
+                    #- pin to the trunk, across whatever lies between,
+                    #- and on VD1 that cost 8 DRC and a failed pin match
+                    #- against the chains' 4 and a clean LVS. A comb
+                    #- needs the stubs checked too, which is the router's
+                    #- job and not a lane search's.
+                    lane = None
+                    if lane is not None:
+                        pth = grp.layout.path(net, tm.pin_layer,
+                                              [rects[0]], list(rects[1:]))
+                        pth.comb(_FixedAnchor(lane))
+                        log.info(f"{net}: {why}; drawn as one comb on "
+                                 f"{len(rects)} pins")
+                    else:
+                        for aa, bb, nodes in searched:
+                            pth = grp.layout.path(net, tm.pin_layer,
+                                                  [aa], [bb])
+                            pth.fromNodes(nodes)
+                        log.info(f"{net}: {why}; drawn as {len(searched)} "
+                                 f"path(s) of the searched shape")
                     routed.append((stack, net))
 
                 if unshaped:

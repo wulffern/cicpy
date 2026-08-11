@@ -413,6 +413,9 @@ class Path(Route):
     def trunk(self, at=None, direction="v"):
         return self._add(Trunk(at, direction))
 
+    def comb(self, at=None, direction="v"):
+        return self._add(Comb(at, direction))
+
     #- -- what the steps use ----------------------------------------
     def cell(self):
         if self.layoutcell is not None:
@@ -477,20 +480,32 @@ class Path(Route):
         errors of minimum width, minimum area and via enclosure".
         """
         w = Rules.getInstance().get(layer, self.routeWidthRule)
-        #- half centres the wire on its own centreline, always. ext is
-        #- the corner overlap, and a SPAN ends where it says it ends: a
-        #- trunk reaches the pins it lands on and no further, exactly as
-        #- `||` does. Only a leg that turns into another needs it.
+        #- `half` centres the wire on its own centreline, always.
+        #-
+        #- `ext` fills the CORNER, and only the ARRIVING leg needs it.
+        #- Take a leg coming from the left into a corner P where the
+        #- next leg goes up: the horizontal covers the corner square's
+        #- left half, the vertical covers its top half, and the
+        #- bottom-right quadrant is a notch -- a minimum-width error.
+        #- Extending the arriving leg half a width past P fills exactly
+        #- that. Extending BOTH ends of BOTH legs also fills it, and
+        #- puts metal where the search reserved no clearance: measured
+        #- on VD1, four spacing errors at 0.03um where 0.14 is wanted.
+        #- A span ends where it says it ends, as `||` does.
         half = w // 2
         ext = half if extend else 0
         if y1 == y2 and x1 != x2:
-            lo, hi = (x1, x2) if x1 < x2 else (x2, x1)
-            r = HorizontalRectangleFromTo(layer, lo - ext, hi + ext,
-                                          y1 - half, w)
+            if x2 > x1:
+                lo, hi = x1, x2 + ext
+            else:
+                lo, hi = x2 - ext, x1
+            r = HorizontalRectangleFromTo(layer, lo, hi, y1 - half, w)
         elif x1 == x2 and y1 != y2:
-            lo, hi = (y1, y2) if y1 < y2 else (y2, y1)
-            r = VerticalRectangleFromTo(layer, x1 - half, lo - ext,
-                                        hi + ext, w)
+            if y2 > y1:
+                lo, hi = y1, y2 + ext
+            else:
+                lo, hi = y2 - ext, y1
+            r = VerticalRectangleFromTo(layer, x1 - half, lo, hi, w)
         elif x1 == x2 and y1 == y2:
             return None
         else:
@@ -593,6 +608,56 @@ class Path(Route):
             cur = nxt
         self.end()
         return self
+
+
+@step
+class Comb(Step):
+    """One trunk, and a stub from every pin to it.
+
+    What a person draws for a multi-pin net, and what the hand-written
+    hooks in the designs are: `conn("M1", "^VD1$", "||", "trunkright")`
+    is a trunk on the pins' right edge with a landing on each. A chain
+    of pair-to-pair paths reaches the same nets and draws nine
+    overlapping routes to do it -- measured on VD1, ten pins, nine
+    chains, four DRC errors that the two rails it replaced did not have.
+
+    The trunk needs no pin to sit on, which is the point: it serves
+    pins that share NO common column, where no straight vertical can
+    land and the canned `||` gives up.
+    """
+    name = "comb"
+
+    def __init__(self, at=None, direction="v"):
+        self.at = at
+        self.direction = direction
+
+    def apply(self, path, cur):
+        rects = [r for r in (path.startRects + path.stopRects)
+                 if r is not None]
+        if not rects:
+            return cur
+        c = path.resolveAnchor(self.at) if self.at is not None else None
+        if c is None:
+            return cur
+        layer = path.routeLayer
+        if self.direction == "v":
+            for r in rects:
+                path.drawSegment(int(r.centerX()), int(r.centerY()),
+                                 c, int(r.centerY()), layer)
+            lo = min(int(r.centerY()) for r in rects)
+            hi = max(int(r.centerY()) for r in rects)
+            path.drawSegment(c, lo, c, hi, layer, extend=False)
+            return (c, hi, layer)
+        for r in rects:
+            path.drawSegment(int(r.centerX()), int(r.centerY()),
+                             int(r.centerX()), c, layer)
+        lo = min(int(r.centerX()) for r in rects)
+        hi = max(int(r.centerX()) for r in rects)
+        path.drawSegment(lo, c, hi, c, layer, extend=False)
+        return (hi, c, layer)
+
+    def astuple(self):
+        return (self.name, self.direction, repr(self.at))
 
 
 @step

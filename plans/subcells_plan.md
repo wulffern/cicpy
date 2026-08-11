@@ -521,12 +521,32 @@ Design side: **all 19 coordinates gone**, DRC/LVS/cost identical. Ten
 were exactly an anchor; the rest the same lane within half a wire. A
 coordinate that reaches a sidecar anyway is reported at compile.
 
-STILL OPEN from Stage 3: the 10 polyline-fixable `blocked` entries, the
-`beforeRoute` hooks in p_bias / p_sw / n_load_a / n_load_b / n_mirr that
-rule 1 wants gone, and the round-trip test (search -> emit -> replay ->
-assert identical rects). The fresh-search LVS still fails where the
-declared blocks pass, which is the next thing to look at: the DRC gap
-closed, the connectivity gap did not.
+The round-trip test is in (`tests/unittests/test_trunk_anchor.py`): the
+anchor the router writes is the anchor route.py reads, asserted through
+both code paths, with the exact-match rule pinned so a near miss can
+never silently move a wire.
+
+**The hooks are NOT deletable yet, measured.** Stage 3's last bullet
+says the `beforeRoute` hooks in p_bias / p_sw / n_load_a / n_load_b /
+n_mirr should come out once the previously-blocked nets route. Tried,
+one subcell at a time, each with its `blocked` entries removed so the
+router had to search:
+
+| hook removed | DRC | LVS |
+|---|---|---|
+| n_load_b (VD2, two rails) | 0 -> **6** | still matches |
+| p_bias (VBP, PWRUP_1V8) | 0 -> **28** | **fails pin matching** |
+
+So the router can now REACH these nets -- that is what the anchors and
+the paths bought -- but what it draws is still worse than what the hand
+wrote. Rule 1 is not satisfiable by deletion today; the gap is quality,
+not capability, which is a much better place to be than "abandoned as
+unroutable" but is not done.
+
+The other open item: fresh search still fails LVS where the declared
+blocks pass. The DRC gap closed completely this session (128 -> 0 on
+OTAR); the connectivity gap did not, and that is what stands between
+the router and generating these blocks unattended.
 
 ## Stage 3b — a channel track is one legal lane
 

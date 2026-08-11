@@ -308,7 +308,7 @@ class HierLayoutCell(LayoutCell):
                 #- other net's pin stack on the way (measured)
                 if o.get("skip"):
                     continue
-                self.addRouteConnection(net, f"^{re.escape(nm)}$", "t",
+                self.addRailConnection(net, f"^{re.escape(nm)}$", "t",
                                         o["layer"], align=o["align"],
                                         cuts=o["cuts"],
                                         pin_cut=o["pin_cut"])

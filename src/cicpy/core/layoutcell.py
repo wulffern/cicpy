@@ -2194,11 +2194,20 @@ class LayoutCell(Cell):
                 ring.add(ct)
         return v
 
-    def addRouteConnection(self, name:str, includeInstances:str="",
-                           location:str="t", layer:str="M2",
-                           excludeInstances:str="", align:str="center",
-                           cuts:int=2, key:str=None, pin_cut:bool=True):
+    def addRailConnection(self, name:str, includeInstances:str="",
+                          location:str="t", layer:str="M2",
+                          excludeInstances:str="", align:str="center",
+                          cuts:int=2, key:str=None, pin_cut:bool=True):
         """Drop a net's pins onto its rail -- ChannelRoute or ring.
+
+        NOT addRouteConnection, which is a DIFFERENT method with a
+        different signature (path, includeInstances, layer, location,
+        options) that classic pycells call. This one was named that
+        too, and since Python keeps the second definition of a name it
+        silently shadowed the first: every existing caller had its
+        layer read as a location and its location as a layer, so the
+        drops never landed and the net came out open. LELOTEMP_CMP
+        went from LVS clean to ten split nets on that alone.
 
         The signal sibling of addPowerConnection: where that stretches
         the pin's own rect on the pin layer (right for a supply pin

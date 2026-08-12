@@ -842,14 +842,30 @@ def pin_layer_corridor_clear(tm, router, col, ys, sx1, sx2, log=None):
     is a shape the map cannot attribute -- often a device's own internal
     strap, which is tolerated everywhere else precisely so a via can
     land on a pin at all.
+
+    BOTH TESTS ARE ASKED OVER THE SAME BAND, sx1..sx2. This one asked
+    `column_blockers` at `col, col` -- a column of zero width -- and a
+    track is only reported when `lo <= t.coord <= hi`, so a zero-width
+    query matches a track only when the trunk lands exactly on one and
+    otherwise reports nothing at all. Measured on LELOTEMP_CCMP's
+    IBP_1U<0>: trunk at 309900, tracks at 309800 and 312800, the test
+    returned clear, and the wire drew 0.05 um from a JNWATR_NCH_2C5F0
+    li bar (li.3 wants 0.17, four errors). The same map asked over the
+    band the wire really occupies returns 8 blockers.
+
+    The blocker half is also the ONLY half that can see device metal:
+    since device geometry became "a pin of nobody" it is recorded with
+    `Track.block`, and `column_metal` reads `Track.wires`. A device's
+    own rail therefore never appears as FOREIGN METAL and always
+    appears as a BLOCKER named `!device`.
     """
     log = log or logging.getLogger("MazeRouter")
     try:
-        blockers = tm.column_blockers(router.net, col, col,
+        blockers = tm.column_blockers(router.net, sx1, sx2,
                                       min(ys), max(ys))
         if blockers:
-            log.info(f"{router.net}: li at {int(col)} refused by "
-                     f"BLOCKER {blockers[:2]}")
+            log.info(f"{router.net}: li {int(sx1)}..{int(sx2)} refused "
+                     f"by BLOCKER {blockers[:2]}")
             return False
         metal = tm.column_metal(router.net, tm.pin_layer, sx1, sx2,
                                 min(ys), max(ys))

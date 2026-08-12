@@ -449,7 +449,17 @@ class TrackMap:
         return out
 
     def column_metal(self, net, layer, x1, x2, y1, y2):
-        """Metal in the column that is not `net`'s, INCLUDING unattributed.
+        """Wire in the column that is not `net`'s, including unattributed.
+
+        NOT device metal, and a caller that needs "is anything at all in
+        the way" must ask `column_blockers` as well. This reads
+        `Track.wires`; since device geometry became A PIN OF NOBODY it is
+        recorded with `Track.block`, into `Track.pins`, and only
+        `column_blockers` looks there. Measured on LELOTEMP_CCMP's
+        IBP_1U<0>: over the band the wire occupied this returned 0 while
+        the same band held 8 `!device` blockers, and the wire drew 0.05
+        um from a JNWATR_NCH_2C5F0 li bar. The paragraphs below are the
+        history of why it is strict about "?", which it still is.
 
         `column_blockers` answers with PINS, and a pin is all it can
         answer with: `_collectPhysicalRects` cannot resolve a rect

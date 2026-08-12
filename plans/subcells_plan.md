@@ -175,19 +175,54 @@ changed.
    declared-wires build the `wires` blocks cannot be regenerated
    without a human reading them. An earlier claim that this gap was
    closed was measurement error; see the correction in Stage 3.
-2. **`column_metal` does not report a shape that is really there.**
-   LELOTEMP_CCMP's IBP_1U<0> passes the corridor test and then lands
-   0.05 um from a `JNWATR_NCH_2C5F0` li pin (li.3 wants 0.17).
-   Widening the tested band to full clearance did not change the
-   answer. One klayout probe of that band against what the map
-   returns settles it. Everything about routing on li waits on this.
-3. **A same-layer leg does not extend onto its pin.** A `-|--` reaches
-   its pin through a via; drop it to the pin layer and the via goes
-   but the leg still stops at the trunk's edge. Until route.py extends
-   it, "route on li when the net is column-local" can only apply to a
-   `||` whose trunk lies inside every pin -- which excludes the nets
-   that prompted the rule (LELOTEMP_OTAR's VSS is `-|--`). Prototype
-   behind `CICPY_LI_LOCAL`, default off.
+   Re-measured 2026-08-12 after the corridor fix: unchanged, 18/failed
+   and 66/failed. The fix gates only the li promotion, which is behind
+   a flag, so this number was never going to move -- confirming it did
+   not is what says the fix cost nothing here.
+2. ~~**`column_metal` does not report a shape that is really there.**~~
+   SETTLED 2026-08-12, and the diagnosis was wrong twice over. The
+   corridor test failed open in BOTH halves:
+
+   - `pin_layer_corridor_clear` asked `column_blockers(net, col, col,
+     ...)` -- a column of ZERO WIDTH. A track is reported only when
+     `lo <= t.coord <= hi`, so a zero-width query matches a track only
+     when the trunk lands exactly on one, and otherwise reports
+     nothing whatever is there. Measured: trunk at 309900, tracks at
+     309800 and 312800, "clear".
+   - `column_metal` cannot report device metal AT ALL, and never
+     could since device geometry became "a pin of nobody": `build()`
+     sends it to `Track.block()` (the `pins` dict) and `column_metal`
+     reads `Track.wires`. Its docstring still promised the opposite,
+     which is what sent two rounds of work at the band width.
+
+   Widening the band changed nothing because the band was never the
+   problem -- the half of the test that can see device metal was the
+   half being asked a degenerate question.
+
+   Both halves now ask over the same band. Asked properly the same map
+   returns 8 `!device` blockers, and klayout confirms them: an li bar
+   x 29.54..31.14, y 6.60..7.00 inside `JNWATR_NCH_2C5F0`, straight
+   across the trunk column at x 30.84..31.14. So the route was not
+   0.05 um from a pin by bad luck -- it was crossing a device rail,
+   and the 0.05 um li.3 was the visible corner of that.
+
+   Consequence: `CICPY_LI_LOCAL` now promotes NOTHING across the five
+   cells. Its one promotion was illegal. A real candidate needs a
+   column with no device rail in it, and the tests that stayed dark
+   are the tests that made it look otherwise.
+3. ~~**A same-layer leg does not extend onto its pin.**~~ DOES NOT
+   REPRODUCE, 2026-08-12. Declared directly -- `('VSS', 'M1', '-|--',
+   'trunktab')` in LELOTEMP_OTAR's n_load_a -- the cell builds 0 DRC
+   and LVS "Circuits match uniquely": `routeOne`/`addHorizontalTo`
+   draw the leg from the pin's own `centerX`, and on li it lands. The
+   0.05 um gap that this item was written from was the illegal
+   geometry of item 2, read as a leg that stopped short.
+
+   What is NOT proven is the LI_LOCAL swap path, which takes a route
+   planned for M2 -- trunk column, cut options and all -- and changes
+   the layer late. That is a different path from a route declared on
+   li, and it has no clean candidate to run on until item 2's
+   consequence is dealt with.
 4. **LELOTEMP_BIAS_IBP's 8 DRC**, all one rule, characterised below
    with a two-second reproducer. The layer is li and the shapes are
    known; what is not known is why magic calls it a subcell conflict.
@@ -207,6 +242,13 @@ changed.
 - **Look at geometry, not logs.** Every question that stalled on log
   reading -- which layer, which cells, what is 0.05 um away -- was
   answered in one klayout probe listing shapes and their cells.
+- **A test that says "clear" has to be shown answering "not clear".**
+  Both halves of the li corridor test were structurally incapable of
+  refusing anything, for two different reasons, and both read as a
+  clean pass for weeks. The probe that settled it did not ask "why did
+  this fail" -- it asked the SAME map the same question over four
+  bands and printed what it holds, and the degenerate one stood out at
+  once. Ask a predicate for its evidence, not its verdict.
 
 ---
 

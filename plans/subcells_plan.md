@@ -1173,14 +1173,42 @@ it is NOT what the DRC is asking for.
 
 Clustered and then looked at, they are:
 
-1. **The M5 rails over BIAS_IBP's column tabs** -- met4.5a/b, 24 fires,
-   12 sites, ONE cause. LELOTEMP_BIAS_IBP has wide M5 columns
-   (x 32.400..39.600, y 70.600..108.700) each finished with a 0.06 um
-   tab on top at y 108.700..108.760. LELO_TEMP's own horizontal M5
-   rails run at y 108.950..109.250 and 109.650..109.950 -- 0.19 um
-   above the tabs, where "attached to large metal4" wants 0.40. The
-   columns repeat at 8 um, so the error does too. Move the rail or
-   drop the tab: 12 sites, one edit.
+1. **The S band does not fit in the tile.** met4.5a/b, 24 fires, 12
+   sites, one cause -- and the fix is blocked by 0.04 um.
+
+   `S = lambda j: int(bias.y2) + 1900 + (j - 1) * 7000` puts the first
+   of four horizontal M5 lanes 0.19 um above LELOTEMP_BIAS_IBP's top
+   M5, where "attached to large metal4" wants 0.40. The block's wide
+   M5 columns (7.2 um) repeat at 8 um, so the error repeats with them.
+
+   The 7000 pitch is CORRECT -- 0.30 of wire plus exactly 0.40 of gap,
+   which met4.5b passes. Only the first offset is wrong. But:
+
+       available:  111.520 (tile ceiling) - 108.760 (block top) = 2.760
+       needed:     0.40 + 4 x 0.30 + 3 x 0.40                   = 2.800
+       shortfall                                                  0.040
+
+   MEASURED, not argued: setting the offset to 4000 takes met4.5a from
+   9 fires to 0, met4.5b 15 -> 3, met4.2 141 -> 102, and the cell from
+   87 DRC to 80. It also grows the cell to 111.71 -- 0.19 um over the
+   161 x 111.52 tile budget -- because `ptop = S(4) + 4500` carries the
+   PWRUP_1V8 port pin to the top edge and rises with the band. So the
+   change is real and cannot be taken as it stands.
+
+   Four ways to find 0.04 um, none of them mine to choose:
+   - `ptop = S(4) + 4500`: the margin is against nothing. The pin is
+     M4, S(4) is M5, and there is no spacing rule between them. 2400
+     would hold the ceiling exactly where it is today.
+   - the 0.06 um tab itself: it is BIAS_IBP's port riser standing above
+     that block's own strap (y 108.700..108.760). Reclaim it and the
+     band starts 0.06 lower, which is more than enough.
+   - three S lanes instead of four, freeing 0.70 um. All four are used
+     (one per IBP_1U bar), so one net would move to another band.
+   - move the blocks down. There is ~1.36 um between the bottom ring
+     and the blocks' base.
+
+   The first is the smallest and looks free. It is still a tapeout tile,
+   so it wants an owner's yes.
 2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
    LELO_TEMP draws two M4 risers at x 98.500..98.800 and
    99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum

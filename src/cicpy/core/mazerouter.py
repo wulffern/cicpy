@@ -968,6 +968,16 @@ def _preferPinAnchor(opts, trunk, rects, layer, tm, net, log):
         return opts, trunk
     log.info(f"{net}: trunk {x} -> {name} ({coord}), "
              f"{abs(coord - x)} inside half a wire")
+    #- KEEP THE SHAPE OF `trunk`. It is a bare lane for some shapes and
+    #- a (lane, lo, hi) tuple for the edge lane, and `claimed` holds
+    #- tuples -- handing back a bare int put an int in that set, and the
+    #- next net to SEARCH unpacked it and died. Every net replaying its
+    #- declared wires hid it, so the crash only appeared on a fresh
+    #- search, where it took the build down mid-cell and left half the
+    #- subcells on disk from the previous run.
+    if isinstance(trunk, (list, tuple)) and trunk:
+        return (re.sub(r"trunkx=-?[0-9.]+", name, opts),
+                (coord,) + tuple(trunk[1:]))
     return re.sub(r"trunkx=-?[0-9.]+", name, opts), coord
 
 
@@ -1951,7 +1961,15 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 opts, trunk = _preferPinAnchor(opts, trunk, rects, layer,
                                                tm, net, log)
                 if trunk is not None:
-                    claimed.add(trunk)
+                    #- `claimed` holds (x, y0, y1) spans, so a bare lane
+                    #- gets its span from the pins rather than going in
+                    #- as an int among tuples
+                    if isinstance(trunk, (list, tuple)):
+                        claimed.add(tuple(trunk))
+                    elif rects:
+                        claimed.add((int(trunk),
+                                     min(int(rr.y1) for rr in rects),
+                                     max(int(rr.y2) for rr in rects)))
                 grp = groups.get(stack)
                 if grp is None:
                     raise Blocked(f"no group object for stack {stack}")

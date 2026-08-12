@@ -1332,30 +1332,46 @@ LELOTEMP_BIAS_IBP's subcell-overlap rule, inherited; those went with
 that cell's fix, which is the whole of 95 -> 87 and why the remaining
 errors are all LELO_TEMP's own geometry.
 
-### The router already beats the lane plan (measured 2026-08-12)
+### The router does NOT beat the lane plan -- and why (2026-08-12)
 
 `AUTOROUTE=1 make mag CELL=LELO_TEMP` hands every top net to the maze
-router -- one `addConnectivityRoute` per net in the node graph, no
-guidance at all, the hand-drawn PORT pins kept because they are the
-cell's interface rather than routing.
+router, one `addConnectivityRoute` per net, nothing else.
 
-                      lane plan (778 lines)   router
-    DRC                      72                 66
-    shorts                   13                  6
-    opens                    13                  8
-    time                      -                3.3 s
+A first pass reported the router winning. That was wrong, and the way
+it was wrong is worth more than the result: **it counted short
+COMPONENTS.** One component can hold thirty nets, so a build that
+merges everything into a single blob scores beautifully. Count the nets
+caught in a short instead:
 
-Neither passes LVS -- the hand build says "Netlists do not match", the
-router's says "failed pin matching", and `matchports --apply` does not
-move it, so it is the opens and not port order.
+                             shorts  nets shorted  worst
+      lane plan (778 lines)     13         24       8 nets
+      router, all on M5          6         29      24 nets
+      router, M3/M4/M5           4         32      29 nets
+      router, M4/M5 only         5         37      33 nets
 
-**This is the first direct measurement of the Goal on the cell that was
-never converted, and it says the conversion is the cheaper path.** The
-778 lines are not buying anything: from a standing start, with no lane
-plan, no channel budget and no hand geometry, the router produces half
-the shorts and fewer opens in three seconds. Every hour spent moving
-those literal offsets around is an hour spent making the worse of two
-options slightly less bad.
+DRC follows the same shape and is equally misleading on its own: 72,
+66, 59, 86.
+
+Every router variant collapses into one giant component, and the
+bridges say why. **The top level does not know which layers the BLOCKS
+own.** Routed on M3 it runs straight into LELOTEMP_CMP's own VBP2;
+confined to M4/M5 it has two layers for twenty nets and they cross each
+other. And giving every net the same layer, which the first run did, is
+not a test of a router at all.
+
+That is precisely what the 778 lines encode -- a lane budget, and a
+layer reservation per band. **So converting this cell is not deleting
+them.** It is saying the same thing declaratively, as channels and
+track indices, so the search has the constraints the hand plan carries
+in its head. `addRoutingChannel`/`channelTrackCoord` already exist for
+this (Stage 3b, and "the technology-independent anchor already exists"
+above); nothing here needs new machinery, only the bands written down.
+
+Two lessons to keep:
+
+- **Count nets caught in a short, never short components.** The
+  metric that flattered the router is the one a merged blob wins.
+- **A router with no layer budget is not a router being tested.**
 
 ### The conversion is still a stage of its own
 

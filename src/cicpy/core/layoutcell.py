@@ -2881,6 +2881,11 @@ class LayoutCell(Cell):
         decided. The parameter says what it means now; an explicit
         `<N>cuts` in the options still wins, because that is the
         narrower statement.
+
+        `cuts=0` says NOTHING and leaves route.py's default alone. The
+        router's own calls use it: they were written to pass 1 when the
+        parameter was dead, and a live 1 is a lone via -- exactly the
+        rule-2 violation the parameter was made honest to prevent.
         """
         if not cuts or re.search(r"\d+cuts", options or ""):
             return options

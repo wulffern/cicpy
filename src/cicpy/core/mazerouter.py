@@ -738,6 +738,49 @@ def pins_by_stack(layout, layer=None):
     return out
 
 
+def lanes_over_pins(rects, half_width):
+    """The FEWEST vertical lanes that land on every pin.
+
+    A straight vertical needs one column all its pins share. When they
+    share none, the net is not unroutable -- it is not ONE RAIL. The
+    designs say so themselves, in the hooks that exist for exactly this
+    case: "VD1 mixes two pin shapes the stack router declines: the wide
+    D bars and the right-lane gate tabs. No single vertical lands on
+    all of them, so two do."
+
+    That is a minimum piercing problem over the pins' legal intervals,
+    and greedy is optimal on intervals: take the leftmost interval that
+    is still unpierced, put a lane at its RIGHT end (the rightmost
+    position that still lies on it, so the lane serves as many later
+    pins as possible), claim everything that lane lands on, repeat.
+
+    Returns [(lane_x, [rect, ...]), ...], one entry per rail, or []
+    when some pin is too narrow to hold the wire at all.
+
+    A pin wide enough to hold two lanes ends up in both groups, and
+    that is the point: it is the device whose own metal joins the two
+    rails, which is why the hand-written version needs no wire between
+    them.
+    """
+    spans = []
+    for rr in rects:
+        lo, hi = int(rr.x1) + half_width, int(rr.x2) - half_width
+        if hi < lo:
+            return []
+        spans.append((hi, lo, rr))
+    #- by the interval alone: a tuple sort falls through to the Rect
+    spans.sort(key=lambda t: (t[0], t[1]))
+    lanes = []
+    unpierced = list(spans)
+    while unpierced:
+        hi, lo, _ = unpierced[0]
+        lane = hi
+        group = [rr for h, l, rr in spans if l <= lane <= h]
+        lanes.append((lane, group))
+        unpierced = [t for t in unpierced if not (t[1] <= lane <= t[0])]
+    return lanes
+
+
 def _terminal_lane(rects, layer, rtype):
     """A trunkx for a net that lives on one kind of terminal, or None.
 
@@ -1468,7 +1511,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                         wopts = anchored
                     grp.addConnectivityRoute(wlayer,
                                              f"^{re.escape(net)}$",
-                                             wtype, wopts, 1)
+                                             wtype, wopts, 0)
                     if pin_layer_guess is None:
                         from .trackmap import TrackMap as _TM
                         pin_layer_guess = _TM(layout).pin_layer
@@ -1520,7 +1563,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                 f"no group object for stack {stack}")
                         grp.addConnectivityRoute(
                             tm.pin_layer, f"^{re.escape(net)}$", "||",
-                            f"trunkx={lane0}", 1)
+                            f"trunkx={lane0}", 0)
                         claimed.add((lane0, min(ys0), max(ys0)))
                         routed.append((stack, net))
                         captured_by_stack.setdefault(stack, []).append(
@@ -1645,8 +1688,95 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                  f"leg(s) of the searched shape")
                     routed.append((stack, net))
 
+                def try_split(why):
+                    """One rail is the wrong question -- how many?
+
+                    Pins of two shapes (wide drain bars, narrow gate
+                    tabs) share no column between them, and each shape
+                    shares one. Every hook left in these designs is
+                    here for exactly that, and says so.
+                    """
+                    w2 = r.rule(tm.pin_layer, "width") // 2
+                    lanes = lanes_over_pins(rects, w2)
+                    joined = (len(lanes) > 1 and
+                              any(sum(1 for _, g in lanes if rr in g) > 1
+                                  for rr in rects))
+                    if joined:
+                        for lane, group in lanes:
+                            names = sorted({getattr(g, "instName", "")
+                                        for g in group} - {""})
+                            scope = ("^(" + "|".join(re.escape(n)
+                                                 for n in names)
+                                     + ")$") if names else ""
+                            #- THE PINS NAME THE LANE HERE TOO.
+                            #- The greedy puts a rail at the right
+                            #- end of the first interval it has to
+                            #- pierce, which is a position with no
+                            #- meaning; each group's own anchors
+                            #- have one, and a group is exactly the
+                            #- set of pins that share a column, so
+                            #- an anchor of that group lands on all
+                            #- of them by construction. Take the
+                            #- anchor when it stays inside the
+                            #- group's overlap.
+                            glo = max(int(g.x1) for g in group) + w2
+                            ghi = min(int(g.x2) for g in group) - w2
+                            try:
+                                from cicpy.core.route import (
+                                    trunkAnchorCoords)
+                                ganch = trunkAnchorCoords(
+                                    group, tm.pin_layer)
+                            except Exception:
+                                ganch = {}
+                            #- a group holding NARROW rects is the
+                            #- tab lane and wants trunktab; a group
+                            #- of bars wants the overlap's right
+                            #- edge. Same narrow test the anchors
+                            #- themselves use.
+                            _order = (("trunktab", "trunkright",
+                                       "trunkleft")
+                                      if any(int(g.x2 - g.x1) <= 4000
+                                         for g in group)
+                                      else ("trunkright", "trunktab",
+                                        "trunkleft"))
+                            for _nm in _order:
+                                _c = ganch.get(_nm)
+                                if _c is not None and glo <= _c <= ghi:
+                                    lane = int(_c)
+                                    break
+                            lopts = anchored_options(
+                                f"trunkx={lane}", group,
+                                tm.pin_layer, net, log)
+                            grp2 = groups.get(stack)
+                            if grp2 is None:
+                                break
+                            #- ON THE PINS' OWN LAYER. `layer` was
+                            #- chosen for one rail that had to
+                            #- escape the column; a rail that lies
+                            #- along its pins needs no via at all,
+                            #- and every via it does place is a pad
+                            #- on a pin that did not need one.
+                            grp2.layout.addConnectivityRoute(
+                                tm.pin_layer, f"^{re.escape(net)}$",
+                                "||", lopts, 0, "", scope)
+                            claimed.add((lane,
+                                         min(int(g.y1) for g in group),
+                                         max(int(g.y2) for g in group)))
+                        else:
+                            log.info(
+                                f"{net}: {why}, so no single vertical "
+                                f"lands; drawn as {len(lanes)} rails, "
+                                f"joined through the pins they share")
+                            routed.append((stack, net))
+                            return True
+                    return False
+
                 if unshaped:
-                    draw_as_paths("no canned shape fits")
+                    #- the same question, asked where the search found
+                    #- no canned shape at all rather than a straight
+                    #- vertical that will not land
+                    if not try_split("no canned shape fits"):
+                        draw_as_paths("no canned shape fits")
                     continue
                 #- one command per net: route.py finds the net's own
                 #- rects, so a repeated spec would redraw the same thing
@@ -1733,6 +1863,9 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     #- where a straight one cannot. So draw what was
                     #- found instead of abandoning the net.
                     if ox2 - ox1 < 2 * w2:
+                        if try_split(f"pins share only "
+                                     f"{ox2 - ox1} of column"):
+                            continue
                         draw_as_paths(
                             f"pins share only {ox2 - ox1} of column, so no "
                             f"straight vertical lands")
@@ -1819,7 +1952,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                 if grp is None:
                     raise Blocked(f"no group object for stack {stack}")
                 grp.addConnectivityRoute(layer, f"^{re.escape(net)}$",
-                                         rtype, opts, 1)
+                                         rtype, opts, 0)
                 #- CLAIM THE LANDINGS, not only the trunk. A routed net
                 #- will drop a via pad somewhere on each of its pins,
                 #- and none of it is drawn until the phase ends, so the

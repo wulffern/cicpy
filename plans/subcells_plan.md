@@ -1232,7 +1232,34 @@ Clustered and then looked at, they are:
        87 DRC -> 75, LVS unchanged (the VR1 artefact), cell 111.520
 
    Left in this cell: met3.2 98 fires, met2.2 48, met1.2 30, met4.2 94,
-   met4.5b 3 -- patterns 2, 3 and 4 of the census, untouched.
+   met4.5b 3.
+
+2. **ONE PITCH FOR EVERY LANE FAMILY, and it is only right for half of
+   them.** This is patterns 2 and 4 of the census and most of what is
+   left. Measured off the GDS:
+
+       M4->M5 cut pad  0.54 um wide, on a 0.30 lane -> 0.12 over each side
+       M2->M3 cut pad  0.44 um wide, on a 0.30 lane -> 0.07 over each side
+
+       M4/M5 lanes, met4.2/met3.2 want 0.30 -> pitch >= 0.54 + 0.30 = 0.84
+       M2/M3 columns, met1.2 wants 0.14     -> pitch >= 0.44 + 0.14 = 0.58
+
+   `L`, `B`, `MY`, `D` and `COL` all use 6000. That is right for the
+   M2/M3 families and **short by 0.24 um for every M4/M5 one**. The
+   file's own comment on `COL` does this arithmetic correctly for the
+   M2-M3 pad and then the same 6000 was carried to the lane families
+   whose pads are 0.10 wider and whose rule is twice as strict.
+
+   The biggest met4.2 site is the shape of it exactly: an M5 riser at
+   x 100.300..100.600 with a horizontal route's via pads 0.06 away on
+   BOTH sides (99.700..100.240 and 100.660..101.140). The wires are
+   legal; the pads are not.
+
+   Widening is not free -- the L band is 8 lanes in a 5 um gap and the
+   ccmp-dig corridor is no roomier -- so this is a choice between
+   fewer lanes, a wider band, or STAGGERING the pads in y so no two
+   neighbouring lanes carry one at the same height. The third is the
+   only one that costs no area, and it is what a router would do.
 2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
    LELO_TEMP draws two M4 risers at x 98.500..98.800 and
    99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum

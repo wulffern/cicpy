@@ -218,16 +218,31 @@ class LayoutCell(Cell):
         return remove_from(self)
 
     def iterJsonChildren(self):
-        """Yield flat physical children for legacy .cic JSON readers."""
+        """Yield flat physical children for legacy .cic JSON readers.
+
+        A group is TRANSPARENT here: the reader wants the geometry, so a
+        group yields what is inside it and not itself.
+
+        ISINSTANCE, NOT THE CLASS NAME. This matched
+        {"CellGroup", "StackGroup", "RouteBundle"} by name, and then a
+        declared subcell class became the group -- `class p_cc(Stack)`
+        is a StackGroup whose `__class__.__name__` is "p_cc". Every one
+        of those fell through as an ordinary child, and a group's own
+        toJson is a DESCRIPTOR: bbox, ports, and its members BY NAME. So
+        the group went into the file as a stub and everything inside it
+        went nowhere. Measured on LELOTEMP_BIAS_IBP: all eleven subcells
+        wrote zero Instance children, 74 instances missing from the
+        .cic, and the reader dropped the stubs too ("Unkown class
+        StackGroup") -- which is what emptied the GUI's hierarchy.
+        """
+        from .cellgroup import CellGroup, RouteBundle
         seen = set()
-        group_classes = {"CellGroup", "StackGroup", "RouteBundle"}
 
         def visit(children):
             for child in children:
                 if child is None:
                     continue
-                class_name = child.__class__.__name__
-                if class_name in group_classes:
+                if isinstance(child, (CellGroup, RouteBundle)):
                     yield from visit(getattr(child, "children", []))
                     continue
                 oid = id(child)

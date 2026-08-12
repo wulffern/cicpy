@@ -45,6 +45,54 @@ import inspect
 from collections import defaultdict
 
 
+
+def readJsonChildren(parent, o):
+    """Rebuild a cell's children from its .cic form.
+
+    SHARED, because more than one thing has children. It lived inside
+    LayoutCell.fromJson, so a Path -- which is a Route, which is a Cell,
+    and not a LayoutCell -- read its own metal through Cell.fromJson,
+    which reads no children at all. Measured: LELO_TEMP_BIAS came back
+    19 shapes short once Path stopped being read as a LayoutCell, and
+    the connectivity check still called its LPI loop open.
+    """
+    from .path import Path
+    for child in o.get("children") or []:
+
+        c = None
+        cl = child["class"]
+        if(cl == "Rect"):
+            c = Rect()
+        elif(cl == "Port"):
+            c  = Port()
+        elif(cl == "Text"):
+            c  = Text()
+        elif(cl == "Instance"):
+            c  = Instance()
+        elif(cl == "InstanceCut"):
+            from .instancecut import InstanceCut
+            c = InstanceCut()
+        elif(cl == "Path"):
+            #- a `~` story rebuilds as a Path, steps and all, so a
+            #- tool reading the .cic sees the reasoning and not
+            #- only the metal it produced
+            from .path import Path
+            c = Path("", "")
+        elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+            c = LayoutCell()
+        else:
+            parent.log.warning(f"Unkown class {cl}")
+
+        if(c is not None):
+            c.design = parent.design
+            c.fromJson(child)
+            # Add instances to node graph after loading from JSON
+            if(cl == "Instance"):
+                parent.addToNodeGraph(c)
+            parent.add(c)
+
+
+
 class LayoutCell(Cell):
 
     def __init__(self):
@@ -2658,40 +2706,7 @@ class LayoutCell(Cell):
         if("graph" in o):
             self.graph = o["graph"]
 
-        for child in o["children"]:
-
-            c = None
-            cl = child["class"]
-            if(cl == "Rect"):
-                c = Rect()
-            elif(cl == "Port"):
-                c  = Port()
-            elif(cl == "Text"):
-                c  = Text()
-            elif(cl == "Instance"):
-                c  = Instance()
-            elif(cl == "InstanceCut"):
-                from .instancecut import InstanceCut
-                c = InstanceCut()
-            elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "Path", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
-                #- "Path" BELONGS HERE. A `~` story serialises as class
-                #- Path, and without a case it was dropped on read with
-                #- "Unkown class Path" -- so every tool that works from
-                #- the .cic could not see it. Measured: checkroutes
-                #- called LELO_TEMP_BIAS's LPI open while netgen called
-                #- the same cell a unique match, because the wire was in
-                #- the .mag and not in the .cic the checker read.
-                c = LayoutCell()
-            else:
-                self.log.warning(f"Unkown class {cl}")
-
-            if(c is not None):
-                c.design = self.design
-                c.fromJson(child)
-                # Add instances to node graph after loading from JSON
-                if(cl == "Instance"):
-                    self.addToNodeGraph(c)
-                self.add(c)
+        readJsonChildren(self, o)
 
     def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances, includeGroups=""):
         #- named channels work here too. They did not, and the failure

@@ -25,6 +25,7 @@ import json
 import os
 import re
 import subprocess
+import logging
 import tempfile
 
 #- The MCP Python SDK renamed FastMCP to MCPServer in 2.0 and moved it out of
@@ -35,6 +36,9 @@ try:
     from mcp.server.mcpserver import Image, MCPServer as _Server  # SDK >= 2.0
 except ImportError:  # pragma: no cover - depends on the installed SDK
     from mcp.server.fastmcp import FastMCP as _Server, Image  # SDK 1.x
+
+
+log = logging.getLogger("cicpy.mcp")
 
 mcp = _Server(
     "cicpy",
@@ -255,6 +259,7 @@ def render(
     includes: list[str] | None = None,
     height: int = 1200,
     flightlines: list[str] | None = None,
+    auto_libs: bool = True,
 ) -> Image:
     """Render a cell to an image and return it inline.
 
@@ -270,6 +275,12 @@ def render(
             which is usually the top.
         includes: Other .cic files the design references (--I).
         height: Raster height in pixels.
+        auto_libs: Find the design's other .cic libraries by itself, the
+            way the GUI does -- walk up to config.yaml, then take each
+            dependency's design/*.cic, plus the .cic beside this one.
+            A cell that instantiates finished blocks needs them all or
+            the render dies on the first unresolved reference; set
+            False to pass `includes` alone.
         flightlines: Nets to draw FLIGHTLINES for -- each net's pins
             boxed and joined by a dashed line, over the layout that may
             or may not connect them. Pass the nets `checkroutes` calls
@@ -287,6 +298,8 @@ def render(
     cicfile = os.path.abspath(cicfile)
     techfile = os.path.abspath(techfile)
     includes = [os.path.abspath(i) for i in (includes or [])]
+    if auto_libs:
+        includes = _auto_libs(cicfile) + includes
 
     cwd = os.getcwd()
     tmpdir = tempfile.mkdtemp(prefix="cicpy_mcp_")
@@ -330,6 +343,37 @@ def render(
     finally:
         os.chdir(cwd)
     return Image(data=data, format="png")
+
+
+def _auto_libs(cicfile):
+    """Every other .cic this design might reference.
+
+    The GUI already does this -- walk up to config.yaml and take each
+    dependency's `design/*.cic` -- and a render that dies on the first
+    unresolved cell is the same problem seen from the other end. The
+    cell's own directory is added too, because a hierarchical build
+    writes its subcells beside it in `design/<LIB>/`, one level below
+    where a ciccreator library publishes.
+    """
+    from .gui.app import discover_libraries
+    out = []
+    try:
+        out += discover_libraries(cicfile)
+    except Exception as exc:
+        log.warning(f"auto_libs: {exc}")
+    here = os.path.dirname(os.path.abspath(cicfile))
+    for pat in (os.path.join(here, "*.cic"),
+                os.path.join(os.path.dirname(here), "*", "*.cic")):
+        for f in sorted(glob.glob(pat)):
+            if os.path.abspath(f) != os.path.abspath(cicfile):
+                out.append(f)
+    seen, uniq = set(), []
+    for f in out:
+        a = os.path.abspath(f)
+        if a not in seen:
+            seen.add(a)
+            uniq.append(a)
+    return uniq
 
 
 def _all_multi_pin_nets(design, cellname):

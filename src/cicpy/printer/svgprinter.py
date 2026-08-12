@@ -29,9 +29,12 @@ import sys
 import svgwrite
 import numpy as np
 from os import path
+import logging
 import os
 import re
 
+
+log = logging.getLogger("SvgPrinter")
 
 svgcells = dict()
 
@@ -132,6 +135,16 @@ class SvgCell(svgwrite.Drawing):
             print(f"Rotation {rotation} not implemented yet")
         
         if(inst.name not in self.refs):
+            if(inst.name not in svgcells):
+                #- A DANGLING REFERENCE IS NOT A CRASH. An instance can
+                #- name a cell no file defines -- measured,
+                #- rey_tr_sky130a's library references "REYTR_", which
+                #- exists nowhere -- and one of those took the whole
+                #- render down with a KeyError. Draw the rest and say
+                #- what is missing; a picture with a hole in it is more
+                #- use than no picture.
+                log.warning(f"no cell {inst.name!r} to draw; skipped")
+                return
             gr = svgcells[inst.name]
             grg = svgwrite.container.Group(id=inst.name + "_inst",opacity=0)
             grg.add(gr)

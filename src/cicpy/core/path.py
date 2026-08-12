@@ -75,6 +75,17 @@ class Unit:
     def __neg__(self):
         return self._scaled(-1)
 
+    def toJson(self):
+        return {"rule": self.rule, "count": self.count}
+
+    @staticmethod
+    def fromJson(o):
+        if not o:
+            return None
+        u = Unit(o.get("rule", "pitch"))
+        u.count = o.get("count", 1)
+        return u
+
     def resolve(self, layer):
         rules = Rules.getInstance()
         if self.rule == "pitch":
@@ -116,8 +127,48 @@ class Anchor:
             c += self.offset.resolve(path.routeLayer)
         return int(c)
 
+    #- ROUND TRIP. `astuple` renders an anchor with repr() for a human
+    #- to read in a wires block; that is not a form anything can read
+    #- back, so a path written to a .cic came home as geometry with no
+    #- story. These two are the machine form.
+    anchor_kind = ""
+
+    def toJson(self):
+        o = {"kind": self.anchor_kind, "axis": self.axis}
+        if self.offset is not None:
+            o["offset"] = self.offset.toJson()
+        o.update(self._json())
+        return o
+
+    def _json(self):
+        return {}
+
+    @staticmethod
+    def fromJson(o):
+        if not o:
+            return None
+        cls = ANCHORS.get(o.get("kind", ""))
+        if cls is None:
+            log.error(f"unknown anchor {o.get('kind')!r} in a path")
+            return None
+        a = cls._make(o)
+        if a is None:
+            return None
+        a.axis = o.get("axis", a.axis)
+        a.offset = Unit.fromJson(o.get("offset"))
+        return a
+
 
 class _PinAnchor(Anchor):
+    anchor_kind = "pin"
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("instance", ""), o.get("terminal", ""), o.get("axis", "x"))
+
+    def _json(self):
+        return {"instance": self.instance, "terminal": self.terminal}
+
     """The centre of one instance's terminal. The pin IS the spec."""
 
     def __init__(self, instance, terminal, axis="x"):
@@ -135,7 +186,19 @@ class _PinAnchor(Anchor):
         return r.centerX() if self.axis == "x" else r.centerY()
 
 
+    def __repr__(self):
+        return f"pin({self.instance}.{self.terminal}.{self.axis})"
+
 class _LandingAnchor(Anchor):
+    anchor_kind = "landing"
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("axis", "y"))
+
+    def _json(self):
+        return {}
+
     """Where this path ENDS, on either axis.
 
     `end()` lands on the stop rect, so a story that has to arrive on a
@@ -158,7 +221,19 @@ class _LandingAnchor(Anchor):
         return r.centerX() if self.axis == "x" else r.centerY()
 
 
+    def __repr__(self):
+        return f"landing({self.axis})"
+
 class _TrunkAnchor(Anchor):
+    anchor_kind = "trunk"
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("trunk", ""))
+
+    def _json(self):
+        return {"trunk": self.kind}
+
     """One of the pin-derived lanes route.py already resolves:
     `trunktab`, `trunkright`, `trunkleft` (see Route.trunkAnchors)."""
 
@@ -170,7 +245,19 @@ class _TrunkAnchor(Anchor):
         return path.trunkAnchors().get(self.kind)
 
 
+    def __repr__(self):
+        return f"{self.kind}"
+
 class _FixedAnchor(Anchor):
+    anchor_kind = "fixed"
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("value", 0), o.get("axis", "x"))
+
+    def _json(self):
+        return {"value": self.value}
+
     """A resolved coordinate. THE TOOLS' FORM, never a design's.
 
     route.py has said it for years: "trunkx is the resolved form and
@@ -195,6 +282,15 @@ class _FixedAnchor(Anchor):
 
 
 class _TrackAnchor(Anchor):
+    anchor_kind = "track"
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("channel", ""), o.get("index", 0))
+
+    def _json(self):
+        return {"channel": self.channel, "index": self.index}
+
     """A track inside a named routing channel. The fallback for when no
     pin anchor says it -- an index means the same relative position
     whatever the technology makes the pitch."""
@@ -211,6 +307,15 @@ class _TrackAnchor(Anchor):
             return None
         return cell.channelTrackCoord(self.channel, self.index)
 
+    def __repr__(self):
+        return f"track({self.channel},{self.index})"
+
+
+#- every anchor by its tag, so a serialised one can be rebuilt
+ANCHORS = {c.anchor_kind: c for c in
+           (_PinAnchor, _LandingAnchor, _TrunkAnchor, _FixedAnchor,
+            _TrackAnchor)}
+
 
 #- ------------------------------------------------------------------
 #- steps: given the run so far, extend it
@@ -226,6 +331,9 @@ def step(cls):
     return cls
 
 
+    def __repr__(self):
+        return f"track({self.channel},{self.index})"
+
 class Step:
     name = ""
 
@@ -235,6 +343,18 @@ class Step:
 
     def astuple(self):
         return (self.name,)
+
+    def toJson(self):
+        o = {"step": self.name}
+        o.update(self._json())
+        return o
+
+    def _json(self):
+        return {}
+
+    @classmethod
+    def _make(cls, o):
+        return cls()
 
 
 @step
@@ -297,6 +417,13 @@ class Up(Step):
     def __init__(self, layer=None):
         self.layer = layer
 
+    def _json(self):
+        return {"layer": self.layer}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("layer"))
+
     def apply(self, path, cur):
         x, y, layer = cur
         target = self.layer or path.neighbourLayer(layer, self.direction)
@@ -346,6 +473,14 @@ class MoveX(Step):
         path.drawSegment(x, y, x, c, layer)
         return (x, c, layer)
 
+    def _json(self):
+        return {"anchor": self.anchor.toJson()
+                if isinstance(self.anchor, Anchor) else None}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(Anchor.fromJson(o.get("anchor")))
+
     def astuple(self):
         return (self.name, repr(self.anchor))
 
@@ -391,6 +526,14 @@ class Trunk(Step):
             path.drawSegment(x, y, x, c, layer)
         path.drawSegment(lo, c, hi, c, layer)
         return (x, c, layer)
+
+    def _json(self):
+        return {"direction": self.direction,
+                "at": self.at.toJson() if isinstance(self.at, Anchor) else None}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(Anchor.fromJson(o.get("at")), o.get("direction", "v"))
 
     def astuple(self):
         return (self.name, self.direction, repr(self.at))
@@ -730,6 +873,46 @@ class Path(Route):
         """The story as the serialised form the router emits."""
         return [s.astuple() for s in self.steps]
 
+    def toJson(self):
+        """The drawn geometry AND the story that made it.
+
+        A path used to serialise as its children alone, so a .cic held
+        the wire and not the reasoning -- and the reader had no case for
+        the class at all, which meant even the wire was dropped. Both
+        halves belong in the file: the steps are what a tool regenerates
+        or re-reads, the children are what a viewer draws.
+        """
+        o = super().toJson()
+        o["class"] = "Path"
+        o["net"] = self.net
+        o["routeLayer"] = self.routeLayer
+        o["options"] = self.options
+        o["steps"] = [st.toJson() for st in self.steps]
+        return o
+
+    def fromJson(self, o):
+        super().fromJson(o)
+        #- Cell.fromJson reads no children, so a Path read its own
+        #- metal as nothing. The dispatch that LayoutCell uses is
+        #- shared for exactly this.
+        from .layoutcell import readJsonChildren
+        readJsonChildren(self, o)
+        self.net = o.get("net", self.net)
+        self.routeLayer = o.get("routeLayer", self.routeLayer)
+        self.options = o.get("options", self.options)
+        self.routeType = "POLYLINE"
+        self.route_ = "~"
+        self.steps = []
+        for so in o.get("steps") or []:
+            cls = STEPS.get(so.get("step", ""))
+            if cls is None:
+                log.error(f"{self.net}: unknown step {so.get('step')!r}")
+                continue
+            st = cls._make(so)
+            if st is not None:
+                self.steps.append(st)
+        return self
+
     def isResolved(self):
         """Does any step still carry a coordinate?
 
@@ -818,6 +1001,14 @@ class Merge(Step):
             path.drawSegment(x, y, c, y, layer)
         return (c, cur[1], layer)
 
+    def _json(self):
+        return {"direction": self.direction,
+                "at": self.at.toJson() if isinstance(self.at, Anchor) else None}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(Anchor.fromJson(o.get("at")), o.get("direction", "v"))
+
     def astuple(self):
         return (self.name, self.direction, repr(self.at))
 
@@ -867,6 +1058,14 @@ class Comb(Step):
         path.drawSegment(lo, c, hi, c, layer, extend=False)
         return (hi, c, layer)
 
+    def _json(self):
+        return {"direction": self.direction,
+                "at": self.at.toJson() if isinstance(self.at, Anchor) else None}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(Anchor.fromJson(o.get("at")), o.get("direction", "v"))
+
     def astuple(self):
         return (self.name, self.direction, repr(self.at))
 
@@ -886,6 +1085,13 @@ class _LayerTo(Step):
             return cur
         path.drawVia(x, y, layer, self.layer)
         return (x, y, self.layer)
+
+    def _json(self):
+        return {"layer": self.layer}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("layer"))
 
     def astuple(self):
         return (self.name, self.layer)

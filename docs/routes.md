@@ -207,10 +207,27 @@ The demo uses shared net `D` and collects `M1` device access before routing on `
 
 `options` is a comma-separated string. Current `Route` parsing in `cicpy` supports these names.
 
+### Naming, and one trap in it
+
+Two option families have nearly the same names and nothing to do with
+each other. Read this before using either.
+
+| option | what it names | what it does |
+|---|---|---|
+| `startLayer=<L>`, `stopLayer=<L>` | the route's two ENDS | relabels the copied start/stop rectangles onto layer `L` before routing |
+| `startStopLayer<L>`, `endStopLayer<L>` | where the VIA STACK at that end lands | truncates the stack, so it stops at `L` instead of driving down to the pin's own layer |
+
+"stop" means the far end of the route in the first family and the end
+of the via stack in the second. Only the second is about vias.
+
 ### Working options
 
 - `onTopB`, `onTopT`, `onTopL`, `onTopR`
-  Used mainly by `addRouteConnection(...)` to choose which rectangle becomes the start rectangle.
+  Chooses which rectangle sorts to the front and becomes the start
+  rectangle. `onTopTop`, `onTopBottom`, `onTopLeft`, `onTopRight` are a
+  different setting -- they set the ANCHOR MODE of an orthogonal route.
+- `left`, `right`, `center` / `balanced`
+  Which way an orthogonal route counts its track offsets.
 - `offsethigh`, `offsetlow`
   Offsets the start-side horizontal stub by one route width.
 - `offsethighend`, `offsetlowend`
@@ -223,14 +240,23 @@ The demo uses shared net `D` and collects `M1` device access before routing on `
   Moves orthogonal route branches to an alternate horizontal track. Signed
   values are supported, for example `horizontaltrack-2`. `branchtrackN` is kept
   as a backward-compatible alias.
+- `trunktab`, `trunkright`, `trunkleft`
+  WHERE THE TRUNK GOES, named from the pins instead of measured. `trunktab`
+  is the centre of the rightmost narrow pin, `trunkright` the right edge of
+  the pins' common overlap, `trunkleft` its left edge. These are what a
+  design should say: each survives a resize and a change of technology.
+  The router emits these, never a coordinate.
 - `routeWidth=<rule>`
   Uses another width rule from the technology file instead of `width`.
 - `startLayer=<layer>`, `stopLayer=<layer>`
-  Forces the copied start/stop rectangles onto a specific layer before route generation.
+  Forces the copied start/stop rectangles onto a specific layer before route
+  generation. Not about vias -- see the table above.
 - `trimstartleft`, `trimstartright`, `trimendleft`, `trimendright`
   Trims the source rectangles before building left/right routes.
 - `leftdownleftup`, `leftupleftdown`
   Selects the specialized detour routes shown above.
+- `straight`
+  Only meaningful on `-|-`, which carries no alignment of its own.
 - `strap`
   Uses strap routing instead of the normal left/right/straight logic.
 - `vertical`
@@ -239,27 +265,60 @@ The demo uses shared net `D` and collects `M1` device access before routing on `
   Removes the default space between the source geometry and the left/right trunk.
 - `novert`
   Disables the trunk segment in left/right routes.
-- `fillhcut`
-  Forces horizontal `2x1` cuts on horizontal access rectangles.
-- `fillvcut`
-  Forces vertical `1x2` cuts on vertical access rectangles.
 - `antenna`
   Promotes tall vertical routes two layers up when legal.
 - `nolabel`
   Suppresses route net-name text in the output.
+- `avoidblocks`, `avoidboundaries` / `blockboundaries`,
+  `avoidkeepouts` / `blockkeepouts`, `keepout=<name>`
+  Treats blocks, cell boundaries or named keepouts as obstacles.
 
-### Classic cut options
+### Cut options
 
-- `nostartcut`, `noendcut`
-- `startoffsetcuthigh`, `startoffsetcutlow`
-- `endoffsetcuthigh`, `endoffsetcutlow`
-- `<N>startcuts`, `<N>startvcuts`
-- `<N>endcuts`, `<N>endvcuts`
-- `<N>cuts`, `<N>vcuts`
+- `<N>cuts`, `<N>vcuts` -- the array, horizontally and vertically.
+- `<N>startcuts`, `<N>startvcuts`, `<N>endcuts`, `<N>endvcuts` -- one end only.
+- `nostartcut`, `noendcut` -- no cut at that end at all.
+- `startoffsetcuthigh` / `startoffsetcutlow`,
+  `endoffsetcuthigh` / `endoffsetcutlow` -- shifts that end's cut by half its
+  height, and the rect with it.
+- `fillhcut`, `fillvcut`
+  Forces `2x1` on a horizontal access rect, `1x2` on a vertical one. These
+  REINFORCE the aspect heuristic; they cannot overrule it.
+- `cutv`, `cuth`, and the per-end `startcutv` / `startcuth` /
+  `endcutv` / `endcuth`
+  Forces the array's DIRECTION regardless of the rect's aspect. Use when the
+  heuristic itself is wrong -- on a wide pin it makes a pad several times the
+  width of the wire, and the pad is what collides with the neighbour.
+- `cutalignright`, `cutaligncenter`
+  Where the landing pad sits on a pin wider than the cut. Left is the
+  default. Centre is right when the trunk meets the pin in its middle and
+  wrong when a neighbour runs there.
+- `startStopLayer<L>`, `endStopLayer<L>` (an `=` is optional)
+  **Meet the pin on the metal it has already been brought up to.** A pin
+  normally arrives with its own via under it -- a li pin has an mcon, a MiM
+  plate has its stack, and a SUBCELL's own route may have taken its port one
+  layer up. A route that drives all the way down to the pin's layer then
+  lands a second via on the first: two contacts of one type, partially
+  overlapping, which magic reports as
+
+      This layer can't abut or partially overlap between subcells
+
+  Naming the layer the pin is already carried to leaves one via and one set
+  of pads. `promoteInstancePort(..., stopLayer="M2")` is the same option on
+  a riser stack, and `Cut.getCutsForRects(..., stopLayer=)` is the same word
+  one level down.
 
 Current constraint:
 - all generated cuts are normalized to `1x2` or `2x1`
 - `1x1` is not used
+
+### Options a design should NOT write
+
+- `trunkx=<n>`, `bandy=<n>`
+  Absolute coordinates. They exist only as the resolved form of
+  `vchannel`/`hchannel`, which is what a pycell writes. A coordinate
+  survives neither a resize nor another technology -- use a trunk anchor
+  above, or a channel and a track index.
 
 ## Lower-level escape hatch
 

@@ -1087,6 +1087,57 @@ this session, and the search that found the second one was reading
 `route.py` for what the option vocabulary already had, not writing
 anything new.
 
+### The option vocabulary, reviewed
+
+Prompted by "would not endStopLayer work" -- it did, and the reason it
+was not reached for is that it is not written down anywhere.
+
+**Completeness.** `docs/routes.md` listed 20 options; `route.py` parses
+34. Undocumented were the ones this project depends on most: the trunk
+ANCHORS (`trunktab`/`trunkright`/`trunkleft`), the whole
+`startStopLayer`/`endStopLayer` family, `cutv`/`cuth` and their
+per-end forms, `cutalignright`/`cutaligncenter`, the keepout family,
+and the `left`/`right`/`center` track direction. Now documented, with
+`trunkx`/`bandy` listed under "options a design should NOT write".
+
+**Cleanliness -- one real collision.** Two families are named almost
+identically and are unrelated:
+
+    startLayer=<L> / stopLayer=<L>          relabel the END rectangles
+    startStopLayer<L> / endStopLayer<L>     truncate the VIA STACK
+
+"stop" means the far end of the route in one and the end of the stack
+in the other. Renaming would break designs; the table at the top of
+the options section states it instead.
+
+**Symmetry.** `promoteInstancePort`'s new argument was called
+`startLayer` for a day, which was wrong twice over -- it collides with
+the relabel option, and what it does is exactly what `stopLayer` means
+in `Cut.getCutsForRects` and in `endStopLayer<L>`. Renamed to
+`stopLayer`: one concept, one word, in three places.
+
+As for a `StartLayer<L>` for routes: both ends are ALREADY covered, by
+`startStopLayer<L>` and `endStopLayer<L>`. A stack's other end is the
+route layer, which is where the wire is -- truncating there would
+disconnect the wire from its own via. Nothing to add; the gap was in
+the documentation, not the API.
+
+**Can the router emit it? Not yet, and the blocker is worth naming.**
+The detection is sound on paper -- a subcell's CUT sitting on the pin
+is proof the net was carried up, and needs no net attribution, which
+matters because the track map cannot attribute a subcell's metal to a
+net at all. Built and measured, it fired on the wrong pin (an M3 one,
+changing behaviour and taking BIAS_IBP 0 -> 3) and missed the right
+one, because `_cutRectsOf` does not reach LELOTEMP_OTAR_P_BIAS's via
+even though every instance in the walk resolves. Reverted.
+
+That unreached cut is the same one that survived `_alignCutsToSubcellCuts`
+before `stopLayer` made it moot. It is now blocking two things, so it
+is worth an hour: something inside a subcell read from `.mag` is
+either not an instance or not a cut-material layer by the time the
+walk sees it. Suspect the magic layer ALIASES (`viali`, `locali`)
+surviving the read.
+
 Worth knowing: klayout on the flattened GDS (`make kdrc`) reports a
 DIFFERENT set -- ct.2 x12, psdm.1 x10, ct.1, via2.1a, 24 total -- so
 the magic rule and the sign-off deck disagree about this cell, and

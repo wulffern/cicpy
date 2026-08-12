@@ -584,6 +584,24 @@ Two facts that fall out of it and are worth carrying:
   full height M2 rails, and at the overlap pitch neighbouring cells
   merge them, which shorts a ladder end to end. DRC does not see it,
   the connectivity check does.
+- **Meet a pin on the metal it has already been brought up to.** A pin
+  usually arrives with its own via under it, and a SUBCELL's route may
+  have taken its port a layer higher still. Drive a stack all the way
+  down to the pin's layer and it lands a second via on the first --
+  concentric but not identical, tens of nanometres apart, which magic
+  reports as
+
+      This layer can't abut or partially overlap between subcells
+
+  and which no amount of moving the ROUTE will fix, because the route
+  is not what is wrong. Say where the stack lands:
+  `endStopLayerM2` in a route's options,
+  `promoteInstancePort(..., stopLayer="M2")` on a riser. Measured on
+  LELOTEMP_BIAS_IBP: 8 errors to 0, and one via and one pad fewer.
+
+  A hint on where to look: when magic complains and klayout's deck does
+  not, suspect a HIERARCHY rule like this one rather than a spacing
+  rule, and go straight to the cut layers.
 
 ## Verification beyond DRC
 
@@ -602,6 +620,39 @@ design, not a defect.
   meaningless.
 - DRC cannot see shorts. Restored or added metal that crosses another
   net is invisible to DRC and only LVS catches it.
+
+### Finding out WHAT a DRC error is standing on
+
+magic names the rule and not the geometry, and its own queries are no
+help without a display: `what`, `what -list` and `select area` all
+return nothing under `-dnull`. Two commands answer it anyway, and
+neither needs a screen.
+
+Ask magic for the error BOXES:
+
+    load ../design/<LIB>/<CELL>.mag
+    box values <bbox> ; expand ; expand
+    drc style drc(full) ; drc catchup
+    drc listall why        # {rule {box box ...}}
+
+then ask klayout what is inside each box, WITH THE CELL EACH SHAPE
+COMES FROM -- which is the part that actually identifies the error:
+
+    it = top.begin_shapes_rec_touching(layer_index, box)
+    # ... it.cell().name and it.shape() transformed by it.trans()
+
+The originating cell is the whole answer for any hierarchy rule: two
+shapes at the same place mean nothing until you know that one belongs
+to the parent and the other to a subcell. Coordinates in a `.mag` file
+are cicpy/50; `drc` reports internal units, 0.005 um each in sky130.
+
+And when a rule fires, check the clean cells for the same pattern
+before believing your explanation. The first diagnosis of the cut
+overlap above was "contacts overlap across cells" -- which happens
+~100 times in each of three cells that are 0 DRC. Only the same-LAYER
+overlaps tracked the errors. One sweep over four cells cost a minute
+and killed a wrong theory that would have moved a hundred innocent
+vias.
 
 ## Worked example
 

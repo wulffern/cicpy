@@ -3085,7 +3085,7 @@ class LayoutCell(Cell):
             p.set(rp)
 
     def promoteInstancePort(self, node, instanceRegex, location, layer,
-                            excludeInstances="", startLayer=""):
+                            excludeInstances="", stopLayer=""):
         """Carry a SUBCELL's port out to this cell's edge, as a pin.
 
         `addPortOnEdge` does this for a net that is already one of this
@@ -3112,8 +3112,10 @@ class LayoutCell(Cell):
         "bottom", "left", "right"), and the rect at the edge becomes
         this cell's port for `node`.
 
-        `startLayer` is the bottom of the stack, when the SUBCELL
-        ALREADY CARRIES THE PORT UP. Its own route put a via on the pin
+        `stopLayer` is where the stack LANDS, when the SUBCELL ALREADY
+        CARRIES THE PORT UP. One concept, one word: it is the same
+        `stopLayer` as `Cut.getCutsForRects`'s and the same as a
+        route's `endStopLayer<L>`. Its own route put a via on the pin
         and a pad above it; driving a second stack down to the pin
         layer then lands a second via beside the first, tens of
         nanometres off, and magic cannot represent two contacts of one
@@ -3172,7 +3174,7 @@ class LayoutCell(Cell):
 
             #- the bottom of the stack: the pin's own layer, unless the
             #- subcell has already brought the net up and said so
-            base = startLayer or r.layer
+            base = stopLayer or r.layer
             if base != r.layer:
                 rb = r.getCopy()
                 rb.layer = base

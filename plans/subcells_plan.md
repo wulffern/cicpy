@@ -1283,8 +1283,29 @@ Clustered and then looked at, they are:
    cross on M3, where the pitch already works.
 
    Swapping PWRUP_N onto L(8) so it never crosses PWRUP_B does not
-   help: PWRUP_B then has to go east twice, to both comparators'
-   drops, and inherits the same hops.
+   help, and it was tried properly once the pins moved east: PWRUP_N
+   on the outer lane with all three hops deleted gives **72 DRC -> 66**
+   and a SHORT --
+
+       BRIDGE PWRUP_B_1V8|PWRUP_N_1V8
+       M5 (95.25..100.60, 73.72..74.02) touches M5 (99.70..100.00, 1.85..77.02)
+
+   -- because PWRUP_N's pin is WEST of the band, so entering it has to
+   cross whatever holds the inner lane. `checkroutes` counts 13 shorts
+   before and 14 after; reverted.
+
+   The general statement is worth keeping: **any M5 landing inside this
+   band is illegal** (0.54 pad, 0.60 pitch), so a net that must both run
+   vertically in the band and leave it eastward several times cannot be
+   made legal by choosing lanes. Either it crosses on M3 and only comes
+   up to M5 east of x 101.17, or the band carries fewer lanes.
+
+   **And the LVS failure here is not one artefact.** `cicpy checkroutes`
+   on LELO_TEMP reports **13 shorts and 13 opens** -- LPO/VD2, VD1/VIN,
+   a six-net component on LPI, IBP_1U<3>, PWRUP_1V8 split three ways.
+   The plan has been calling this "the VR1 artefact" and it is a good
+   deal more than that. That number, not the DRC, is what says this
+   cell is unfinished.
 2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
    LELO_TEMP draws two M4 risers at x 98.500..98.800 and
    99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum

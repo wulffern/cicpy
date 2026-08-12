@@ -1373,6 +1373,49 @@ Two lessons to keep:
   metric that flattered the router is the one a merged blob wins.
 - **A router with no layer budget is not a router being tested.**
 
+### The conversion, started 2026-08-12
+
+Six nets are stories now -- VC, LPI, RST_A, RST_B, CMPO_A, CMPO_B --
+and the five bands are `addRoutingChannel` declarations made in
+`afterPlace`, so a route aims at "lband track 1" rather than
+`960000 + 1000 + (i-1)*6000`.
+
+    against the hand baseline      DRC   opens   worst   nets shorted
+      hand                          72     13    8 nets       24
+      six nets converted            54     11    6 nets       24
+      wire()/stk() calls            66 -> 45
+
+Two cicpy bugs fell out of the first net, both in the `~` path:
+
+- `p.track(channel, index)` -- the one anchor that names a channel
+  lane -- raised "'int' object is not callable". `Route.__init__` sets
+  `self.track = 0` and the instance attribute shadows the method, so
+  it had never worked and nothing in the tree used it.
+- A path could draw off the technology grid: `Start` opens at the start
+  rect's CENTRE, and a pin of odd width has a centre that is not on a
+  grid step. LELO_TEMP's VC pin, 84550..960000, centre 522275, which
+  the magic writer refuses outright.
+
+And one design-side trap: `pp.up()` appends a STEP, so `pp.routeLayer`
+does not move while the path is being built. `while pp.routeLayer !=
+"M5": pp.up()` appends Up forever.
+
+**What the conversion is really buying** is visible in the lane
+sweeps. RST_B's column at track 3 gives 66 DRC, 4 gives 70, 5 gives 68,
+6 gives 73 -- so the choice is a small integer to sweep rather than a
+literal to re-derive, and a bad one is one character to change.
+
+**Where it stopped.** net1/net2 close two opens and cost sixteen DRC,
+on either layer and at every lane swept. The strip has constraints the
+channel does not carry: the JNWTR cells put an M1-M4 cut stack in their
+AVSS and AVDD columns, 31500..40300 and 58500..67300 from the strip's
+left edge, and a column landing on one ties every pin it passes to a
+supply. That is the next thing to write down -- a channel needs to know
+its own forbidden lanes, which is the same want as "which layers does
+this band own" from the router experiment above.
+
+Still hand-drawn: ibp, misc, pwrn, pwrb, net1, net2 -- 45 calls.
+
 ### The conversion is still a stage of its own
 
 Separate from the DRC, and unchanged by the census: LELO_TEMP is the

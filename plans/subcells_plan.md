@@ -1332,6 +1332,31 @@ LELOTEMP_BIAS_IBP's subcell-overlap rule, inherited; those went with
 that cell's fix, which is the whole of 95 -> 87 and why the remaining
 errors are all LELO_TEMP's own geometry.
 
+### The router already beats the lane plan (measured 2026-08-12)
+
+`AUTOROUTE=1 make mag CELL=LELO_TEMP` hands every top net to the maze
+router -- one `addConnectivityRoute` per net in the node graph, no
+guidance at all, the hand-drawn PORT pins kept because they are the
+cell's interface rather than routing.
+
+                      lane plan (778 lines)   router
+    DRC                      72                 66
+    shorts                   13                  6
+    opens                    13                  8
+    time                      -                3.3 s
+
+Neither passes LVS -- the hand build says "Netlists do not match", the
+router's says "failed pin matching", and `matchports --apply` does not
+move it, so it is the opens and not port order.
+
+**This is the first direct measurement of the Goal on the cell that was
+never converted, and it says the conversion is the cheaper path.** The
+778 lines are not buying anything: from a standing start, with no lane
+plan, no channel budget and no hand geometry, the router produces half
+the shorts and fewer opens in three seconds. Every hour spent moving
+those literal offsets around is an hour spent making the worse of two
+options slightly less bad.
+
 ### The conversion is still a stage of its own
 
 Separate from the DRC, and unchanged by the census: LELO_TEMP is the

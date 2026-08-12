@@ -564,12 +564,23 @@ them, so two do". The router draws one rail and collides; the hook
 draws two, scoped by instance regex, and is clean. Same for n_load_a,
 n_mirr and p_cas.
 
-So the next router capability is **splitting a net by pin shape**:
-when the pins fall into groups whose common overlap is empty, route
-each group on its own rail and let the devices' own metal join them.
-That is a decomposition the search never attempts -- it looks for one
-path -- and it is the whole of what stands between these five hooks
-and deletion.
+**SHIPPED (2026-08-12).** `lanes_over_pins` is the minimum piercing of
+the pins' legal intervals -- greedy, which is optimal on intervals --
+and a pin wide enough for two lanes lands in both groups, which is the
+join. Three things separate "connected" from "clean", each measured:
+the rails go on the pins' own layer (M2 instead: 52 DRC and a failed
+pin match), each rail takes its GROUP'S anchor rather than the greedy's
+lane (arbitrary lanes: 80 DRC), and a group holding narrow rects wants
+trunktab where a group of bars wants trunkright.
+
+Asked to route n_load_b it emits the hook beside it verbatim, both
+scopes included. **n_load_a and n_load_b now have no beforeRoute at
+all** and LELOTEMP_OTAR is still 0 DRC / matches uniquely.
+
+Left: p_bias (VBP on M4, a corner rather than a rail), p_sw (claims its
+whole subcell) and n_mirr. n_mirr is the closest -- retyped from Mirror
+to Stack its VD3 splits cleanly and DRC stays 0, but VCP is left open
+and LVS fails, so it wants one more capability, not this one.
 
 ## Stage 3b — a channel track is one legal lane
 

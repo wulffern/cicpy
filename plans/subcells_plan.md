@@ -223,10 +223,14 @@ changed.
    the layer late. That is a different path from a route declared on
    li, and it has no clean candidate to run on until item 2's
    consequence is dealt with.
-4. **LELOTEMP_BIAS_IBP's 8 DRC**, all one rule, characterised below
-   with a two-second reproducer. The layer is li and the shapes are
-   known; what is not known is why magic calls it a subcell conflict.
-5. **LELO_TEMP's 95 DRC** -- 778 lines of hand-drawn `wire()`/`stk()`
+4. **LELOTEMP_BIAS_IBP: 8 DRC -> 3**, 2026-08-12. The layer was the
+   CUT layers, not li: the parent and a subcell each contacting the
+   same port and landing tens of nanometres apart, which magic cannot
+   represent as one tile. `_alignCutsToSubcellCuts` snaps them
+   together. LELO_TEMP fell 95 -> 90 with it. The remaining 3 are all
+   one site and one cause -- a subcell's via that the parent's
+   collection never sees. Characterised at the end of this file.
+5. **LELO_TEMP's 90 DRC** -- 778 lines of hand-drawn `wire()`/`stk()`
    with literal offsets. A conversion, not a bug fix. Scope it first.
 6. **Three `beforeRoute` hooks left**: p_bias (VBP is a corner on M4),
    p_sw (claims its whole subcell), n_mirr (retyped to Stack its VD3
@@ -1005,17 +1009,56 @@ adding one line to LELOTEMP_OTAR.afterPorts --
 BIAS_IBP from 8 to 6. So one `addPortOnEdge` on a gate tab reproduces it
 in a cell that is otherwise clean, in about two seconds per build.
 
-**What the next attempt should do first:** open the cell in magic
-INTERACTIVELY and look. Every scripted query returned empty --
-`what`, `what -list` and `select area` all produce nothing under
-`-dnull`, whether or not the cells are expanded, so the layer involved
-was never identified. Interactively:
+**ANSWERED 2026-08-12, and no display was needed.** The layer is the
+CUT layers, and the shape is a via. `drc listall why` gives the error
+boxes; klayout then lists every shape in each box WITH ITS ORIGINATING
+CELL, which is what magic's own `what` refused to do:
 
-    magic -T sky130A ../design/LELO_TEMP_SKY130A/LELOTEMP_BIAS_IBP.mag
-    box values 1100 11820 1200 11960 ; expand ; select area ; what
+    VIA3 [LELOTEMP_BIAS_IBP]  x 61.280..61.480  y 70.060..70.260
+    VIA3 [LELOTEMP_OTAR]      x 61.370..61.570  y 70.080..70.280
 
-The one unanswered question is WHICH LAYER, and it is one command away
-from someone with a display. Everything else above is already narrowed.
+The parent and the child are both contacting the same port, each
+centring on its own copy of it, and landing tens of nanometres apart.
+A contact in magic is ONE tile spanning both metals, so two of them
+half over each other have no legal form -- hence the wording about
+subcells.
+
+**The first hypothesis was wrong and the falsification is the useful
+part.** "Contacts overlapping across cells" is not it: a router via
+over a device's own CO happens ~100 times in each of LELOTEMP_CMP,
+LELOTEMP_CCMP and LELOTEMP_OTAR, all 0 DRC. Only overlaps on the SAME
+cut layer track the errors -- 0, 0, 0 against 2 in BIAS_IBP. A pass
+built on the loose criterion would have moved a hundred innocent vias
+per cell. One klayout sweep over four cells cost a minute and killed
+it.
+
+**Fixed** by `LayoutCell._alignCutsToSubcellCuts`, a pass after
+`route()`: a cut of this cell that partially overlaps a SAME-LAYER,
+SAME-SIZE cut of a subcell, by no more than its own size, is snapped
+onto it exactly. Anything else is left alone and logged -- a cut that
+would have to move further is not the same contact seen twice.
+
+    BIAS_IBP  8 -> 3      LELO_TEMP  95 -> 90
+    CMP/CCMP/OTAR 0, all five LVS unchanged, cost unchanged
+
+Two traps it cost to find, both about how a cut is placed:
+
+- An `InstanceCut` has NO children. The geometry is in the `Cut` cell
+  it references, and that cell is CACHED and SHARED, so the shift is
+  `instance.x1 - cell.x1`, not `instance.x1`.
+- The same applies when collecting a SUBCELL's cuts, and getting it
+  wrong there is silent: the vias land somewhere else in the
+  collection and the cut that needed alignment is simply never
+  offered one.
+
+**Still open: the last 3, all at one site** -- x 15772..15829,
+y 17144..17200 in file units, `VIA1 [LELOTEMP_BIAS_IBP]` at
+78.905,85.765 against `VIA1 [LELOTEMP_OTAR_P_BIAS]` at 78.945,85.805.
+The parent's stack is collected correctly; the P_BIAS via never
+appears in the subcell collection at all, while LELOTEMP_OTAR's own
+vias one level up do. So the walk stops somewhere between OTAR and its
+subcell -- an unresolved cell in `design.cells`, most likely. That is
+the next thing to instrument, and it is the whole of the remaining 3.
 
 Worth knowing: klayout on the flattened GDS (`make kdrc`) reports a
 DIFFERENT set -- ct.2 x12, psdm.1 x10, ct.1, via2.1a, 24 total -- so

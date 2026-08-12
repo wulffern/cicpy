@@ -36,6 +36,7 @@ from .routering import RouteRing
 from .routegroup import RouteGroup
 from .guard import Guard
 from .cut import Cut
+from .layer import Layer
 import cicspi as spi
 import math
 import re
@@ -3275,6 +3276,199 @@ class LayoutCell(Cell):
         """
         return None
 
+    def _cutRectsOf(self, obj, dx=0, dy=0, out=None, active=None):
+        """Every cut-material rect under `obj`, in this cell's frame."""
+        rules = Rules.getInstance()
+        if out is None:
+            out = []
+        if active is None:
+            active = set()
+        if id(obj) in active:
+            return out
+        active.add(id(obj))
+        for child in getattr(obj, "children", []) or []:
+            if child is None:
+                continue
+            if hasattr(child, "isPort") and child.isPort():
+                continue
+            if hasattr(child, "isInstancePort") and child.isInstancePort():
+                continue
+            if child.isInstance():
+                cell = (getattr(child, "layoutcell", None)
+                        or getattr(child, "_cell_obj", None))
+                if cell is None:
+                    name = getattr(child, "cell", "")
+                    design = getattr(self, "design", None)
+                    if name and design is not None:
+                        cell = design.cells.get(name)
+                if cell is not None:
+                    #- A CUT INSTANCE IS PLACED DIFFERENTLY. An ordinary
+                    #- cell's geometry is relative to its origin, so the
+                    #- shift is the instance's own x1; a Cut cell is
+                    #- shared and cached with whatever origin it was
+                    #- built at, and the shift is the difference. Using
+                    #- x1 alone puts a subcell's vias somewhere else
+                    #- entirely -- measured, the one at site D vanished
+                    #- from this collection and its cut was never
+                    #- offered the alignment.
+                    ox, oy = 0, 0
+                    if hasattr(child, "isCut") and child.isCut():
+                        ox, oy = int(cell.x1), int(cell.y1)
+                    self._cutRectsOf(cell, dx + child.x1 - ox,
+                                     dy + child.y1 - oy, out, active)
+                continue
+            if child.isCell():
+                self._cutRectsOf(child, dx, dy, out, active)
+                continue
+            if child.isRect():
+                try:
+                    material = rules.getLayer(child.layer).material
+                except Exception:
+                    continue
+                if material == Layer.cut:
+                    out.append((child.layer,
+                                int(child.x1 + dx), int(child.y1 + dy),
+                                int(child.x2 + dx), int(child.y2 + dy)))
+        active.remove(id(obj))
+        return out
+
+    def _ownCuts(self, obj=None, dx=0, dy=0, out=None, active=None):
+        """This cell's own cut INSTANCES, with their rects placed.
+
+        Its own, meaning not inside a subcell: a cut dropped by a route
+        of this cell, wherever the route sits in the child tree.
+        """
+        if out is None:
+            out = []
+        if active is None:
+            active = set()
+        if obj is None:
+            obj = self
+        if id(obj) in active:
+            return out
+        active.add(id(obj))
+        for child in getattr(obj, "children", []) or []:
+            if child is None:
+                continue
+            if hasattr(child, "isCut") and child.isCut():
+                #- an InstanceCut has no children of its own: the
+                #- geometry is in the Cut CELL it references, in that
+                #- cell's frame, so the shift is instance origin minus
+                #- cell origin and not the instance origin alone
+                cell = (getattr(child, "_cell_obj", None)
+                        or getattr(child, "layoutcell", None))
+                if cell is None:
+                    out.append((child, self._cutRectsOf(child)))
+                    continue
+                out.append((child,
+                            self._cutRectsOf(cell,
+                                             int(child.x1) - int(cell.x1),
+                                             int(child.y1) - int(cell.y1))))
+                continue
+            if child.isInstance():
+                continue
+            if child.isCell():
+                self._ownCuts(child, dx, dy, out, active)
+        active.remove(id(obj))
+        return out
+
+    def _alignCutsToSubcellCuts(self):
+        """Snap a cut onto the identical cut a subcell already has there.
+
+        Magic cannot represent two contacts of the same type that
+        PARTIALLY overlap across a cell boundary -- a contact is one
+        tile spanning both metals, and two tiles half on top of each
+        other have no legal form. It says so as
+
+            "This layer can't abut or partially overlap between subcells"
+
+        and it is the whole of LELOTEMP_BIAS_IBP's 8 errors.
+
+        The overlap is not a mistake in placement, it is the parent and
+        the child both contacting the same port and each centring on its
+        own copy of it: measured, a VIA3 the parent put at 61.280,70.060
+        against the one LELOTEMP_OTAR had at 61.370,70.080, and a VIA1
+        0.04 um off its twin in LELOTEMP_OTAR_P_BIAS. Tens of
+        nanometres, from rounding, twice in a 7842 cut cell.
+
+        WHAT DOES *NOT* MATTER, measured before this was written:
+        contacts of DIFFERENT types overlapping across cells. A router
+        via over a device's own CO happens ~100 times in each of
+        LELOTEMP_CMP, LELOTEMP_CCMP and LELOTEMP_OTAR and all three are
+        0 DRC. Only same-layer partial overlaps track the errors: 0, 0,
+        0 against 2 in BIAS_IBP. A pass that chased every overlap would
+        move a hundred innocent vias per cell.
+
+        So: same layer, same size, partially overlapping, and the shift
+        no larger than the cut itself. Anything else is left alone and
+        logged -- a cut that would have to move further is not the same
+        contact seen twice, and moving it would be a guess.
+        """
+        #- BELOW is the SUBCELLS' cuts only. Collecting every cut in the
+        #- cell would compare this cell's own cuts against each other,
+        #- and two cuts of one cell partially overlapping is not this
+        #- rule -- magic resolves those into one tile without complaint.
+        below = []
+        for child in self.children:
+            if child is None or not child.isInstance():
+                continue
+            if hasattr(child, "isCut") and child.isCut():
+                continue
+            cell = (getattr(child, "layoutcell", None)
+                    or getattr(child, "_cell_obj", None))
+            if cell is None:
+                name = getattr(child, "cell", "")
+                design = getattr(self, "design", None)
+                if name and design is not None:
+                    cell = design.cells.get(name)
+            if cell is not None:
+                self._cutRectsOf(cell, int(child.x1), int(child.y1), below)
+        own = self._ownCuts()
+        if not below or not own:
+            return
+        byLayer = {}
+        for layer, x1, y1, x2, y2 in below:
+            byLayer.setdefault(layer, []).append((x1, y1, x2, y2))
+        moved = 0
+        for cut, rects in own:
+            delta = None
+            for layer, ax1, ay1, ax2, ay2 in rects:
+                for bx1, by1, bx2, by2 in byLayer.get(layer, ()):
+                    ox1, oy1 = max(ax1, bx1), max(ay1, by1)
+                    ox2, oy2 = min(ax2, bx2), min(ay2, by2)
+                    if ox1 >= ox2 or oy1 >= oy2:
+                        continue
+                    #- identical, or one wholly inside the other: legal
+                    if ((ox1, oy1, ox2, oy2) == (ax1, ay1, ax2, ay2)
+                            or (ox1, oy1, ox2, oy2) == (bx1, by1, bx2, by2)):
+                        continue
+                    w, h = ax2 - ax1, ay2 - ay1
+                    if (bx2 - bx1, by2 - by1) != (w, h):
+                        self.log.warning(
+                            f"{self.name}: {layer} cut at {ax1},{ay1} "
+                            f"partially overlaps a DIFFERENT SIZED cut at "
+                            f"{bx1},{by1}; left alone, magic will report it")
+                        continue
+                    dx, dy = bx1 - ax1, by1 - ay1
+                    if abs(dx) > w or abs(dy) > h:
+                        self.log.warning(
+                            f"{self.name}: {layer} cut at {ax1},{ay1} "
+                            f"partially overlaps one at {bx1},{by1}, too far "
+                            f"to be the same contact; left alone")
+                        continue
+                    delta = (dx, dy)
+                    break
+                if delta:
+                    break
+            if delta:
+                cut.translate(delta[0], delta[1])
+                moved += 1
+                self.log.info(
+                    f"{self.name}: cut moved {delta[0]},{delta[1]} onto the "
+                    f"identical cut a subcell already has there")
+        if moved:
+            self.updateBoundingRect()
+
     def layout(self,pycell=None,data=None):
         self.ignoreBoundaryRouting = False
         self.log.info(f"Assembling layout....")
@@ -3314,6 +3508,8 @@ class LayoutCell(Cell):
         self.route()
 
         self._runMethod(pycell,data,"afterRoute")
+
+        self._alignCutsToSubcellCuts()
 
         self._runMethod(pycell,data,"beforePaint")
 

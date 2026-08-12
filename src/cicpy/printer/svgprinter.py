@@ -62,6 +62,39 @@ class SvgCell(svgwrite.Drawing):
         self.save()
 
 
+    def addFlight(self, rects, color, label):
+        """Box each pin of a net and join them with a dashed line.
+
+        WHAT SHOULD BE CONNECTED, drawn on top of what is. A net that
+        the router has not closed looks exactly like one it has until
+        someone traces it by hand; a flightline says "these two belong
+        together" and the picture then shows whether any metal does it.
+
+        This is the loop that got LELO_TEMP_BIAS's LPI written: draw
+        the overlay, look, write the story, repeat.
+        """
+        pts = []
+        for r in rects:
+            x1, x2 = self.translate(r.x1), self.translate(r.x2)
+            y1, y2 = self.translate(r.y1), self.translate(r.y2)
+            self.gr.add(self.rect(insert=(x1, y1),
+                                  size=(max(x2 - x1, 0.4), max(y2 - y1, 0.4)),
+                                  fill="none", stroke=color,
+                                  stroke_width=0.6))
+            pts.append(((x1 + x2) / 2, (y1 + y2) / 2))
+        for p in pts[1:]:
+            self.gr.add(self.line(start=pts[0], end=p, stroke=color,
+                                  stroke_width=0.7,
+                                  stroke_dasharray="2,1.4"))
+        if pts:
+            #- the label is drawn flipped, because the raster is flipped
+            #- back by the caller so that y points up
+            t = self.text(label, insert=(pts[0][0] + 1, pts[0][1]),
+                          fill=color, font_size=4)
+            t.rotate(180, center=(pts[0][0] + 1, pts[0][1]))
+            t.scale(-1, 1)
+            self.gr.add(t)
+
     def addRect(self,r,color,fill):
         x1 = self.translate(r.x1)
         x2 = self.translate(r.x2)
@@ -113,12 +146,16 @@ class SvgCell(svgwrite.Drawing):
 
 class SvgPrinter(DesignPrinter):
 
-    def __init__(self,filename,rules,scale,x,y):
+    def __init__(self,filename,rules,scale,x,y,flightnets=None):
         super().__init__(filename,rules)
         self.x = x
         self.y = y
         self.scale = scale
         self.files = list()
+        #- nets to draw FLIGHTLINES for: the pins that belong together,
+        #- boxed and joined, over the layout that may or may not join
+        #- them. None draws none; a list names them.
+        self.flightnets = list(flightnets or [])
 
     def startLib(self,name):
         self.libname = name + "_svg"
@@ -129,6 +166,49 @@ class SvgPrinter(DesignPrinter):
         pass
 
 
+    FLIGHT_COLOURS = ["#ff0000", "#00c000", "#ff00ff", "#0088ff",
+                      "#ff8800", "#8800ff", "#00aaaa", "#aa0044"]
+
+    def _drawFlightlines(self, cell):
+        """Pins that share a net, from the CHILDREN's published ports.
+
+        A cell's own instance ports are not in the .cic, so the honest
+        source is each child cell's ports placed by the instance that
+        holds it. That is exact for an assembly of finished blocks --
+        which is where flightlines are wanted -- and it is why the
+        grouping is by PORT NAME: at this level the block publishes the
+        net's own name.
+        """
+        design = getattr(self, "design", None)
+        bynet = {}
+        for child in getattr(cell, "children", []) or []:
+            if not (hasattr(child, "isInstance") and child.isInstance()):
+                continue
+            sub = (getattr(child, "layoutcell", None)
+                   or getattr(child, "_cell_obj", None))
+            if sub is None and design is not None:
+                sub = design.cells.get(getattr(child, "cell", ""))
+            if sub is None:
+                continue
+            for c in getattr(sub, "children", []) or []:
+                if not (hasattr(c, "isPort") and c.isPort()):
+                    continue
+                r = c.get() if hasattr(c, "get") else None
+                if r is None:
+                    continue
+                rr = r.getCopy()
+                rr.translate(child.x1, child.y1)
+                bynet.setdefault(getattr(c, "name", ""), []).append(rr)
+        n = 0
+        for net in self.flightnets:
+            rects = bynet.get(net) or []
+            if len(rects) < 2:
+                continue
+            self.svgcell.addFlight(rects,
+                                   self.FLIGHT_COLOURS[n % len(self.FLIGHT_COLOURS)],
+                                   net)
+            n += 1
+
     def startCell(self,cell):
         file_name_cell = self.libname + os.path.sep + cell.name + ".svg"
         print("INFO: %s" % file_name_cell)
@@ -137,6 +217,8 @@ class SvgPrinter(DesignPrinter):
 
 
     def endCell(self,cell):
+        if(self.svgcell is not None and self.flightnets):
+            self._drawFlightlines(cell)
         if(self.svgcell is not None):
             self.svgcell.closeAndSave()
             self.svgcell = None

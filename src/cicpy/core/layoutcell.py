@@ -2673,7 +2673,14 @@ class LayoutCell(Cell):
             elif(cl == "InstanceCut"):
                 from .instancecut import InstanceCut
                 c = InstanceCut()
-            elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+            elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "Path", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+                #- "Path" BELONGS HERE. A `~` story serialises as class
+                #- Path, and without a case it was dropped on read with
+                #- "Unkown class Path" -- so every tool that works from
+                #- the .cic could not see it. Measured: checkroutes
+                #- called LELO_TEMP_BIAS's LPI open while netgen called
+                #- the same cell a unique match, because the wire was in
+                #- the .mag and not in the .cic the checker read.
                 c = LayoutCell()
             else:
                 self.log.warning(f"Unkown class {cl}")

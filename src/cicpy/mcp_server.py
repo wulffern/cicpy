@@ -254,6 +254,7 @@ def render(
     cell: str | None = None,
     includes: list[str] | None = None,
     height: int = 1200,
+    flightlines: list[str] | None = None,
 ) -> Image:
     """Render a cell to an image and return it inline.
 
@@ -269,6 +270,11 @@ def render(
             which is usually the top.
         includes: Other .cic files the design references (--I).
         height: Raster height in pixels.
+        flightlines: Nets to draw FLIGHTLINES for -- each net's pins
+            boxed and joined by a dashed line, over the layout that may
+            or may not connect them. Pass the nets `checkroutes` calls
+            open and the picture shows what has to be drawn and what is
+            in the way. Pass ["*"] for every net with more than one pin.
     """
     from . import cic as ciclib
 
@@ -289,7 +295,11 @@ def render(
         rules = ciclib.Rules(techfile)
         design = ciclib.Design()
         design.fromJsonFilesWithDependencies(cicfile, includes)
-        printer = ciclib.SvgPrinter(library, rules, 10, 100, 100)
+        nets = list(flightlines or [])
+        if nets == ["*"]:
+            nets = _all_multi_pin_nets(design, cell)
+        printer = ciclib.SvgPrinter(library, rules, 10, 100, 100,
+                                    flightnets=nets)
         printer.print(design)
         matches = glob.glob(os.path.join(tmpdir, "*_svg", cell + ".svg"))
         if not matches:
@@ -320,6 +330,26 @@ def render(
     finally:
         os.chdir(cwd)
     return Image(data=data, format="png")
+
+
+def _all_multi_pin_nets(design, cellname):
+    """Every net with more than one pin in `cellname`, by port name."""
+    cell = design.cells.get(cellname)
+    if cell is None:
+        return []
+    seen = {}
+    for child in getattr(cell, "children", []) or []:
+        if not (hasattr(child, "isInstance") and child.isInstance()):
+            continue
+        sub = (getattr(child, "layoutcell", None)
+               or getattr(child, "_cell_obj", None)
+               or design.cells.get(getattr(child, "cell", "")))
+        if sub is None:
+            continue
+        for c in getattr(sub, "children", []) or []:
+            if hasattr(c, "isPort") and c.isPort():
+                seen[c.name] = seen.get(c.name, 0) + 1
+    return sorted(n for n, k in seen.items() if k > 1)
 
 
 def _tech_layers(techfile):

@@ -1195,20 +1195,35 @@ Clustered and then looked at, they are:
    PWRUP_1V8 port pin to the top edge and rises with the band. So the
    change is real and cannot be taken as it stands.
 
-   Four ways to find 0.04 um, none of them mine to choose:
-   - `ptop = S(4) + 4500`: the margin is against nothing. The pin is
-     M4, S(4) is M5, and there is no spacing rule between them. 2400
-     would hold the ceiling exactly where it is today.
-   - the 0.06 um tab itself: it is BIAS_IBP's port riser standing above
-     that block's own strap (y 108.700..108.760). Reclaim it and the
-     band starts 0.06 lower, which is more than enough.
-   - three S lanes instead of four, freeing 0.70 um. All four are used
-     (one per IBP_1U bar), so one net would move to another band.
-   - move the blocks down. There is ~1.36 um between the bottom ring
-     and the blocks' base.
+   **`ptop` was tried, and the shortfall is 0.13 um, not 0.04.** The
+   first arithmetic missed a term. Above S(4) sits the M4->M5 via at
+   the top of the x 99 riser, whose M5 enclosure stands 0.09 um proud
+   of the lane (x 99.010..99.490, y 111.560..111.650 in the shifted
+   build). So:
 
-   The first is the smallest and looks free. It is still a tapeout tile,
-   so it wants an owner's yes.
+       needed  0.40 + 4 x 0.30 + 3 x 0.40 + 0.09 (via cap) = 2.890
+       available                                             2.760
+       shortfall                                             0.130
+
+   Measured with `S` offset 4000 and `ptop = S(4) + 3000`: DRC 80, cell
+   111.65. `ptop` did what it was expected to do -- it took 0.06 off
+   (111.71 -> 111.65) and it is no longer the limiter, the via cap is
+   -- but it cannot close 0.13 on its own, and 4500 -> 3000 is not
+   worth taking alone: without the band moving it drops the PWRUP_1V8
+   port pin 0.09 below the cell's own top edge, which is where a tile's
+   pin has to be.
+
+   What is left, now that the number is right:
+   - **three S lanes instead of four**, freeing 0.70 um -- the only
+     option with room to spare. All four are used, one per IBP_1U bar,
+     so one net moves to another band.
+   - **shorten BIAS_IBP's M5 supply columns by 0.13 um.** They stop at
+     108.700 inside a block whose bbox top is 108.760, and that block
+     is 0 DRC with room. This is the smallest edit that fits.
+   - **move the blocks down 0.13 um** -- there is ~1.36 um between the
+     bottom ring and the blocks' base.
+
+   All three are floorplan changes to a tapeout tile. None is mine.
 2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
    LELO_TEMP draws two M4 risers at x 98.500..98.800 and
    99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum

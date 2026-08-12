@@ -1743,22 +1743,59 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             f"overlap {ox1}..{ox2}")
                         continue
                     #- and if the route needs a VIA at each pin, the
-                    #- smallest cut must FIT the narrowest pin. A 3800
-                    #- pad on a 3200 gate tab overhangs 300 a side
-                    #- whatever the placement -- measured, six li
-                    #- spacing errors that no shifting can remove.
+                    #- pad must have somewhere to go. The smallest pad
+                    #- is WIDER than a minimum gate tab in this
+                    #- technology -- 4000 against 3200 -- so requiring
+                    #- it to fit refuses every tab there is, and the
+                    #- hand-written hooks that route exactly these nets
+                    #- are DRC clean, which is the measurement that
+                    #- says the rule was wrong.
+                    #-
+                    #- What overhanging costs is SPACE, and space is a
+                    #- question about the neighbours, which via_is_free
+                    #- already answers at the candidate's own size. So
+                    #- ask it, per pin, instead of asking the pin's
+                    #- width. A net is blocked when a pad would land on
+                    #- something, not when it is bigger than its pin.
                     if layer != tm.pin_layer:
-                        try:
-                            w_cut = r.via_extent(tm.pin_layer, layer)[0]
-                        except Exception:
-                            w_cut = 0
-                        narrow = min(int(rr.x2 - rr.x1) for rr in rects)
-                        if w_cut and narrow < w_cut:
+                        #- ...and it must say WHICH pad it checked.
+                        #- Asking via_is_free at the single-cut size and
+                        #- letting route.py draw its 2x1 default
+                        #- validates one via and draws another: measured,
+                        #- 71 DRC errors from a rail whose landings had
+                        #- all been declared free at half the width they
+                        #- were drawn at. So the largest array that fits
+                        #- EVERY pin is chosen here and written into the
+                        #- options, which is also rule 2 -- two cuts
+                        #- wherever two cuts fit, one only where the
+                        #- design would have written 1cuts by hand.
+                        from cicpy.core.cut import Cut as _Cut
+                        picked = None
+                        for hc, vc in ((2, 1), (1, 2), (1, 1)):
+                            ct = _Cut.getInstance(tm.pin_layer, layer,
+                                                  hc, vc)
+                            if ct is None:
+                                continue
+                            wh = (int(ct.width()), int(ct.height()))
+                            if all(r.via_is_free(int((rr.x1 + rr.x2) // 2),
+                                                 int((rr.y1 + rr.y2) // 2),
+                                                 tm.pin_layer, layer,
+                                                 cut_wh=wh)
+                                   for rr in rects):
+                                picked = (hc, vc)
+                                break
+                        if picked is None:
                             raise Blocked(
-                                f"{net}: narrowest pin is {narrow} and "
-                                f"the smallest {tm.pin_layer}-{layer} "
-                                f"pad is {w_cut}; it overhangs whatever "
-                                f"the placement")
+                                f"{net}: no {tm.pin_layer}-{layer} pad "
+                                f"lands clear on every pin; the "
+                                f"narrowest is "
+                                f"{min(int(rr.x2 - rr.x1) for rr in rects)}"
+                                f" wide")
+                        if not re.search(r"\d+cuts", opts or ""):
+                            opts = ((opts + "," if opts else "")
+                                    + f"{picked[0]}cuts")
+                            if picked[1] != 1:
+                                opts += f",{picked[1]}vcuts"
                 #- THE PINS ARE THE SPECIFICATION. The search works on
                 #- its own TrackMap grid, whose origin is
                 #- min(pin.x1) - margin -- a number from the map, not

@@ -395,6 +395,16 @@ class Path(Route):
         self.routeType = "POLYLINE"
         self.steps = []
         self.layoutcell = None
+        #- `Route.__init__` sets `self.track = 0` for the `trackN`
+        #- option, and an instance attribute SHADOWS the class method
+        #- of the same name -- so `p.track(channel, index)`, the one
+        #- anchor that names a channel lane, raised "'int' object is
+        #- not callable" and had never worked. Every read of
+        #- Route.track is inside routeOne/routeVertical/routeU, which a
+        #- POLYLINE never enters (Path overrides route()), so dropping
+        #- the attribute costs nothing and gives the anchor back.
+        if not self.hasTrack:
+            del self.track
 
     #- units, on the path so a design imports one name
     PITCH = Unit("pitch")
@@ -533,6 +543,15 @@ class Path(Route):
         #- puts metal where the search reserved no clearance: measured
         #- on VD1, four spacing errors at 0.03um where 0.14 is wanted.
         #- A span ends where it says it ends, as `||` does.
+        #- ON GRID BEFORE ANYTHING IS BUILT. An anchor may land between
+        #- grid steps through no fault of its own: `Start` opens at the
+        #- start rect's CENTRE, and a pin whose width is not an even
+        #- number of steps has a centre that is not on one. Measured --
+        #- LELO_TEMP's VC pin, 84550..960000, centre 522275, which the
+        #- magic writer rejects outright ("not a multiple of 50
+        #- database units"). Snapping here covers every step at once,
+        #- because every step ends up drawing through this.
+        x1, x2, y1, y2 = (self._snap(v) for v in (x1, x2, y1, y2))
         half = w // 2
         ext = half if extend else 0
         if y1 == y2 and x1 != x2:
@@ -556,6 +575,24 @@ class Path(Route):
         r.setNet(self.net)
         self.add(r)
         return r
+
+    def _snap(self, v):
+        """A coordinate on the technology's own grid step.
+
+        The step comes from the tech file, never from a constant here:
+        a design that writes 5 nm and one that writes 1 nm are the same
+        code. A tech with no grid to answer to snaps to nothing.
+        """
+        if v is None:
+            return v
+        try:
+            from .gridcheck import gridFromRules
+            g = gridFromRules(Rules.getInstance())
+        except Exception:
+            g = 0
+        if not g:
+            return int(v)
+        return int(round(float(v) / g) * g)
 
     def viaArray(self, fromLayer, toLayer):
         """The cut array to use between two layers.

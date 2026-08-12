@@ -127,12 +127,23 @@ class SvgCell(svgwrite.Drawing):
         transform = f"translate({x},{y})"
 
         rotation = inst.angle
+        #- The mirrors are the ones a matched pair uses, and they say
+        #- the same thing here as in Instance.calcBoundingRect: MY
+        #- flips x about the cell point, MX flips y. MX used to fall
+        #- through to a print() and be drawn UNMIRRORED on top of the
+        #- neighbour it was mirrored away from -- measured on
+        #- LELO_TEMP_CCMP, where the upper comparator vanished.
         if(rotation == "MY"):
             transform = transform + " scale(-1,1) "
-        elif(rotation == ""):
+        elif(rotation == "MX"):
+            transform = transform + " scale(1,-1) "
+        elif(rotation == "R180"):
+            transform = transform + " scale(-1,-1) "
+        elif(rotation in ("", "R0")):
             pass
         else:
-            print(f"Rotation {rotation} not implemented yet")
+            log.warning(f"instance rotation {rotation!r} not implemented; "
+                        f"{inst.name} drawn unrotated")
         
         if(inst.name not in self.refs):
             if(inst.name not in svgcells):
@@ -158,6 +169,10 @@ class SvgCell(svgwrite.Drawing):
 
 
 class SvgPrinter(DesignPrinter):
+
+    #- an SVG <use> can only name a group that has already been
+    #- written, so the cells have to come out bottom up
+    orderByDependency = True
 
     def __init__(self,filename,rules,scale,x,y,flightnets=None):
         super().__init__(filename,rules)

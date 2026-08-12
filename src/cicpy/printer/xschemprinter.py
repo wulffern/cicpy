@@ -394,6 +394,27 @@ E {}
         self.endCell(c)
 
 
+    @staticmethod
+    def _busPortFor(sym, portName):
+        """The symbol's BUS pin a scalar node belongs to, or None.
+
+        `IBP_1U<2>` belongs to a pin declared `IBP_1U[3:0]`. Both
+        delimiters are accepted on the member because a design writes
+        one and a netlister the other.
+        """
+        m = re.match(r"^(.*?)[<\[](\d+)[>\]]$", portName or "")
+        if not m:
+            return None
+        base, idx = m.group(1), int(m.group(2))
+        for name in getattr(sym, "ports", {}):
+            b = re.match(r"^(.*?)\[(\d+):(\d+)\]$", name)
+            if not b or b.group(1) != base:
+                continue
+            hi, lo = int(b.group(2)), int(b.group(3))
+            if min(hi, lo) <= idx <= max(hi, lo):
+                return name
+        return None
+
     def printInstance(self,o):
         _libname = ""
         if(o.isCktInstance() and o.subcktName in self.cells):
@@ -442,13 +463,29 @@ E {}
       \tcell {instcell.ckt.name}:\t{intNodes}""")
 
 
+        emitted_buses = set()
         for z in range(len(nodes)):
             netName = nodes[z]
             portName = intNodes[z]
 
             if(portName not in instsym.ports):
-                print(f"Could not find {portName} in {symbolName}")
-                continue
+                #- A BUS PIN IS ONE PIN. The symbol declares
+                #- `IBP_1U[3:0]` while the netlist speaks of
+                #- IBP_1U<0>..<3>, so every member missed this lookup,
+                #- no wire was drawn, and xschem named the four
+                #- unattached nets net1<3:0> -- which is what
+                #- LELO_TEMP_BIAS failed pin matching on: the layout
+                #- published IBP_1U<n> and the schematic said net1<n>.
+                #- One wire carrying the bus's own name is what the
+                #- hand-drawn schematics of this design do.
+                bus = self._busPortFor(instsym, portName)
+                if bus is None:
+                    print(f"Could not find {portName} in {symbolName}")
+                    continue
+                if bus in emitted_buses:
+                    continue
+                emitted_buses.add(bus)
+                portName, netName = bus, bus
 
             side = instsym.ports[portName].side
             r = instsym.ports[portName].rect.getCopy()

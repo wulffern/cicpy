@@ -21,6 +21,7 @@ See plans/router_plan.md.
 """
 import heapq
 import logging
+import os
 import re
 
 from .rules import Rules
@@ -825,6 +826,41 @@ def _terminal_lane(rects, layer, rtype):
     if ox2 - ox1 < w:
         return None
     return (ox1 + ox2) // 2
+
+
+def pin_layer_corridor_clear(tm, router, col, ys, sx1, sx2, log=None):
+    """Is the pin layer free for a wire at `col` over `ys`?
+
+    The corridor question on its own, so it can be asked of a net whose
+    SEARCH left the pin layer -- `_pin_layer_if_clear` asks it only when
+    the searched path began and ended there, which is the right caution
+    for "did the search stay local" and the wrong one for "are all this
+    net's pins in one column".
+
+    Reports WHICH of the two tests refused, because they mean different
+    things: a blocker is another net's pin in the way, and foreign metal
+    is a shape the map cannot attribute -- often a device's own internal
+    strap, which is tolerated everywhere else precisely so a via can
+    land on a pin at all.
+    """
+    log = log or logging.getLogger("MazeRouter")
+    try:
+        blockers = tm.column_blockers(router.net, col, col,
+                                      min(ys), max(ys))
+        if blockers:
+            log.info(f"{router.net}: li at {int(col)} refused by "
+                     f"BLOCKER {blockers[:2]}")
+            return False
+        metal = tm.column_metal(router.net, tm.pin_layer, sx1, sx2,
+                                min(ys), max(ys))
+        if metal:
+            log.info(f"{router.net}: li {int(sx1)}..{int(sx2)} refused "
+                     f"by FOREIGN METAL {metal[:2]}")
+            return False
+        return True
+    except Exception as e:
+        log.info(f"{router.net}: li corridor not testable: {e}")
+        return False
 
 
 def _pin_layer_if_clear(path, tm, router, pins, trunk, extent_rects=None):
@@ -1851,6 +1887,60 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             clear = False
                         if clear:
                             layer = tm.pin_layer
+                #- ALL THIS NET'S PINS ARE IN THIS COLUMN, so the hop
+                #- is local and belongs on the PINS' OWN LAYER: no via,
+                #- no landing pad on every pin, no track spent on a
+                #- layer the level above wants for crossing the cell.
+                #- Behind CICPY_LI_LOCAL while the corridor test is
+                #- being made accurate enough to trust.
+                #- A STRAIGHT VERTICAL ONLY. On the pins' own layer a
+                #- `||` lands on every pin by construction -- the trunk
+                #- lies inside all of them, which is the test just
+                #- below. A shape with a CORNER does not: its leg is
+                #- drawn to the trunk's edge and, one layer up, reaches
+                #- the pin through a via. Moved down to li that via
+                #- disappears and the leg stops short -- measured on
+                #- LELOTEMP_CCMP's IBP_1U<0>, a 0.05 um gap between the
+                #- leg and the pin it was supposed to land on, which is
+                #- an li notch and four errors. Extending a same-layer
+                #- leg onto its pin is route.py's job and it does not do
+                #- it yet, so this asks only for the shape that needs
+                #- nothing.
+                if (os.environ.get("CICPY_LI_LOCAL") and rtype == "||"
+                        and layer != tm.pin_layer and tm.pin_layer
+                        and rects):
+                    _col = None
+                    if isinstance(trunk, (list, tuple)) and trunk:
+                        _col = int(trunk[0])
+                    elif isinstance(trunk, (int, float)):
+                        _col = int(trunk)
+                    else:
+                        _m = re.search(r"trunk(tab|right|left)", opts or "")
+                        try:
+                            from cicpy.core.route import trunkAnchorCoords
+                            _a = trunkAnchorCoords(rects, tm.pin_layer)
+                        except Exception:
+                            _a = {}
+                        if _m and _a:
+                            _col = _a.get("trunk" + _m.group(1))
+                    #- THE BAND IS THE WIRE PLUS ITS SPACING, not the
+                    #- wire. Tested at half a width the corridor read
+                    #- clear and the wire landed 0.1 um from its
+                    #- neighbour: li spacing is a rule about the GAP, so
+                    #- the question is whether anything sits within
+                    #- clearance of where the wire would go. Measured on
+                    #- LELOTEMP_CCMP's IBP_1U<0>, 4 errors from one net
+                    #- the test had waved through.
+                    _reach = r.clearance(tm.pin_layer)
+                    _ys = [int(v) for rr in rects for v in (rr.y1, rr.y2)]
+                    if _col is not None and pin_layer_corridor_clear(
+                            tm, r, int(_col), _ys,
+                            int(_col) - _reach, int(_col) + _reach, log):
+                        log.info(f"{net}: column-local and li is clear; "
+                                 f"{layer} -> {tm.pin_layer}, no vias")
+                        layer = tm.pin_layer
+                        opts = re.sub(r",?\d+v?cuts", "", opts or "")
+
                 #- A STRAIGHT VERTICAL'S TRUNK LIES INSIDE EVERY PIN IT
                 #- LANDS ON. route.py drops each landing pad at the
                 #- trunk's x; a trunk outside a pin's span slides the

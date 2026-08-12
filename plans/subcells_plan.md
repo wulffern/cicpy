@@ -526,27 +526,50 @@ anchor the router writes is the anchor route.py reads, asserted through
 both code paths, with the exact-match rule pinned so a near miss can
 never silently move a wire.
 
+**THE CONNECTIVITY GAP IS CLOSED (2026-08-12).** The stack router
+refused any via whose pad is wider than the narrowest pin it lands on,
+and the smallest li-to-metal pad here is 4000 against a 3200 gate tab
+-- so it refused every gate tab there is, and those nets were simply
+left open. What overhanging costs is SPACE, which `via_is_free` already
+answers at the candidate's own size; and the router must state WHICH
+pad it checked, because asking at the single-cut size while route.py
+draws its 2x1 default validates one via and draws another (71 DRC
+errors, measured). Fresh search, no declared wires at all:
+
+    OTAR      0 DRC, Circuits match uniquely   (was 0 DRC, LVS FAILED)
+    BIAS_IBP  8 DRC, Circuits match uniquely   (was 8 DRC, LVS FAILED)
+
+Both identical to the hand-tuned blocks. **The router now reaches the
+same answer unattended as the design reaches by hand** -- asked for
+PWRUP_1V8 it emits ('PWRUP_1V8', 'M2', '||', 'trunktab'), which is what
+the hook beside it says in longhand. That is the plan's Goal, on these
+two cells.
+
 **The hooks are NOT deletable yet, measured.** Stage 3's last bullet
 says the `beforeRoute` hooks in p_bias / p_sw / n_load_a / n_load_b /
 n_mirr should come out once the previously-blocked nets route. Tried,
 one subcell at a time, each with its `blocked` entries removed so the
 router had to search:
 
-| hook removed | DRC | LVS |
+| hook removed | DRC before the pad fix | after |
 |---|---|---|
-| n_load_b (VD2, two rails) | 0 -> **6** | still matches |
-| p_bias (VBP, PWRUP_1V8) | 0 -> **28** | **fails pin matching** |
+| n_load_b (VD2) | 0 -> 6 | 0 -> **4**, LVS still matches |
+| p_bias (VBP, PWRUP_1V8) | 0 -> 28, LVS fails | PWRUP_1V8 now the router's |
 
-So the router can now REACH these nets -- that is what the anchors and
-the paths bought -- but what it draws is still worse than what the hand
-wrote. Rule 1 is not satisfiable by deletion today; the gap is quality,
-not capability, which is a much better place to be than "abandoned as
-unroutable" but is not done.
+**What the last hooks are actually for is now known**, and it is one
+missing capability rather than general quality. n_load_b's VD2 mixes
+two pin SHAPES -- wide drain bars and narrow gate tabs -- and the
+design says so in its own comment: "no single vertical lands on all of
+them, so two do". The router draws one rail and collides; the hook
+draws two, scoped by instance regex, and is clean. Same for n_load_a,
+n_mirr and p_cas.
 
-The other open item: fresh search still fails LVS where the declared
-blocks pass. The DRC gap closed completely this session (128 -> 0 on
-OTAR); the connectivity gap did not, and that is what stands between
-the router and generating these blocks unattended.
+So the next router capability is **splitting a net by pin shape**:
+when the pins fall into groups whose common overlap is empty, route
+each group on its own rail and let the devices' own metal join them.
+That is a decomposition the search never attempts -- it looks for one
+path -- and it is the whole of what stands between these five hooks
+and deletion.
 
 ## Stage 3b — a channel track is one legal lane
 

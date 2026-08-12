@@ -135,6 +135,29 @@ class _PinAnchor(Anchor):
         return r.centerX() if self.axis == "x" else r.centerY()
 
 
+class _LandingAnchor(Anchor):
+    """Where this path ENDS, on either axis.
+
+    `end()` lands on the stop rect, so a story that has to arrive on a
+    row before it travels along it needs to name that row -- and the
+    only honest name for it is the landing itself. A pin anchor cannot
+    serve: `instanceTerminalRect` keys on the NET, so a net with two
+    pins on one instance (a loop: LPO back to LPI) resolves to
+    whichever the port dict happens to hold.
+    """
+
+    def __init__(self, axis="y"):
+        super().__init__()
+        self.axis = axis
+
+    def coord(self, path):
+        r = path.anchorRect(path.stopRects)
+        if r is None:
+            log.error(f"{path.net}: a landing anchor needs stop rects")
+            return None
+        return r.centerX() if self.axis == "x" else r.centerY()
+
+
 class _TrunkAnchor(Anchor):
     """One of the pin-derived lanes route.py already resolves:
     `trunktab`, `trunkright`, `trunkleft` (see Route.trunkAnchors)."""
@@ -425,6 +448,9 @@ class Path(Route):
 
     def track(self, channel, index):
         return _TrackAnchor(channel, index)
+
+    def landing(self, axis="y"):
+        return _LandingAnchor(axis)
 
     #- -- steps -----------------------------------------------------
     def _add(self, s):

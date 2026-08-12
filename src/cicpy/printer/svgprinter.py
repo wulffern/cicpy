@@ -202,10 +202,6 @@ class SvgCell(svgwrite.Drawing):
 
 class SvgPrinter(DesignPrinter):
 
-    #- an SVG <use> can only name a group that has already been
-    #- written, so the cells have to come out bottom up
-    orderByDependency = True
-
     def __init__(self,filename,rules,scale,x,y,flightnets=None):
         super().__init__(filename,rules)
         self.x = x

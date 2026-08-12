@@ -194,7 +194,7 @@ class Design():
     def toJson(self):
         obj = dict()
         obj["cells"] = list()
-        for cname in self.cellnames:
+        for cname in self.cellNames():
             c = self.cells[cname]
             obj["cells"].append(c.toJson())
 
@@ -210,8 +210,49 @@ class Design():
             self.cellnames.append(c.name)
 
     def cellNames(self):
+        """Every cell, LOWER LEVELS FIRST.
+
+        A design is a hierarchy, so a cell can only be understood after
+        the cells it holds -- and every consumer that writes a
+        definition before its uses depends on that: the .cic this
+        design writes back, the SVG whose <use> can only name a group
+        already emitted, a GUI listing the tree.
+
+        Load order does not give it. Cells arrive one file at a time
+        and merge by name, so two files decide the order between them
+        by which was named first: LELOTEMP_CCMP.cic sorts ahead of
+        LELOTEMP_CMP.cic and put a cell before its own contents. The
+        dependency loop below is worse than alphabetical -- it loads a
+        MISSING cell after everything that referenced it, by
+        construction.
+
+        This is where cuts have always been inserted at the front
+        "like C++", one symptom patched at its own source. Sort the
+        whole list instead, in place, so a caller holding an index into
+        `cellnames` still agrees with it.
+        """
+        order, done, active = [], set(), set()
+
+        def visit(name):
+            if name in done or name in active or name not in self.cells:
+                return
+            active.add(name)
+            refs = set()
+            self._collectInstanceCells(self.cells[name], refs)
+            for r in sorted(refs):
+                visit(r)
+            active.discard(name)
+            done.add(name)
+            order.append(name)
+
+        for name in list(self.cellnames):
+            visit(name)
+        #- a name with no cell behind it is not ours to drop
+        order += [n for n in self.cellnames if n not in done]
+        self.cellnames[:] = order
         return self.cellnames
-    
+
+
     def getCell(self,name):
         return self.cells[name]
 

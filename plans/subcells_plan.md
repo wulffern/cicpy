@@ -1255,11 +1255,36 @@ Clustered and then looked at, they are:
    BOTH sides (99.700..100.240 and 100.660..101.140). The wires are
    legal; the pads are not.
 
-   Widening is not free -- the L band is 8 lanes in a 5 um gap and the
-   ccmp-dig corridor is no roomier -- so this is a choice between
-   fewer lanes, a wider band, or STAGGERING the pads in y so no two
-   neighbouring lanes carry one at the same height. The third is the
-   only one that costs no area, and it is what a router would do.
+   **Tried, and it made things worse -- which is the useful part.**
+   The 22-fire site is PWRUP_N_1V8 hopping over PWRUP_B_1V8's riser on
+   M4. Placing the hop's vias by clearance instead of on the lane edge
+   took the cell 75 -> 78: the pad simply changed which neighbour it
+   violated. Then the lanes either side, at that row:
+
+       L(5)  98.50..98.80   IBP_1U<1>  M4, y 50.2..110.8  full height
+       L(6)  99.10..99.40   IBP_1U<0>  M4, y 40.4..111.5  full height
+       L(7)  99.70..100.00  PWRUP_N    M5   <- the hop needs a via here
+       L(8) 100.30..100.60  PWRUP_B    M5, y  1.9.. 93.7  full height
+
+       an M4-M5 pad is 0.54 and wants 0.30 clear each side
+       required 0.30 + 0.54 + 0.30 = 1.14 um      available 0.60 um
+
+   So there is **no legal position for an M4-M5 via anywhere on L(7)**
+   while both neighbours run. This is not a site to nudge; it is
+   structural. PWRUP_N makes three such hops (the 22-fire site and the
+   two 8-fire ones at y 56 and y 15), which is ~38 of the 94 met4.2
+   fires on its own.
+
+   Note what the same arithmetic says about M2/M3: pad 0.44, met2.2
+   wants 0.14, so 0.58 -- and the band is 0.60. **A via in this band is
+   legal on M3 and illegal on M5.** Two ways out follow: give the
+   via-carrying lanes a 0.84 pitch (8 lanes then need 6.7 um against
+   the gap's 5, so it means fewer lanes), or run the nets that must
+   cross on M3, where the pitch already works.
+
+   Swapping PWRUP_N onto L(8) so it never crosses PWRUP_B does not
+   help: PWRUP_B then has to go east twice, to both comparators'
+   drops, and inherits the same hops.
 2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
    LELO_TEMP draws two M4 risers at x 98.500..98.800 and
    99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum

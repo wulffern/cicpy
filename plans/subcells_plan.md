@@ -1213,17 +1213,26 @@ Clustered and then looked at, they are:
    port pin 0.09 below the cell's own top edge, which is where a tile's
    pin has to be.
 
-   What is left, now that the number is right:
-   - **three S lanes instead of four**, freeing 0.70 um -- the only
-     option with room to spare. All four are used, one per IBP_1U bar,
-     so one net moves to another band.
-   - **shorten BIAS_IBP's M5 supply columns by 0.13 um.** They stop at
-     108.700 inside a block whose bbox top is 108.760, and that block
-     is 0 DRC with room. This is the smallest edit that fits.
-   - **move the blocks down 0.13 um** -- there is ~1.36 um between the
-     bottom ring and the blocks' base.
+   **DONE: the blocks moved down 0.13 um.** 87 DRC -> 75, and the cell
+   lands on 111.520 exactly -- the tile budget, to the nanometre.
 
-   All three are floorplan changes to a tapeout tile. None is mine.
+   I had talked myself out of this one by reading `beforeRoute`: the
+   rings are laid on the INSTANCES' bbox, so blocks and rings move
+   together and the height looked like it could not change. Measured,
+   it does -- the move alone takes the cell to 111.370 and DRC to 82,
+   because the band beneath the rings absorbs it. The reading was
+   wrong and one build said so in thirty seconds.
+
+       afterPlace: every block down 1300
+       S:          offset 1900 -> 4000   (the rule, not a tuning)
+       ptop:       S(4) + 4500 -> 3900   (hold the ceiling)
+
+       met4.5a  9 fires -> 0      via3.2  2 -> 0
+       met4.5b 15 -> 3            met4.2  141 -> 94
+       87 DRC -> 75, LVS unchanged (the VR1 artefact), cell 111.520
+
+   Left in this cell: met3.2 98 fires, met2.2 48, met1.2 30, met4.2 94,
+   met4.5b 3 -- patterns 2, 3 and 4 of the census, untouched.
 2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
    LELO_TEMP draws two M4 risers at x 98.500..98.800 and
    99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum

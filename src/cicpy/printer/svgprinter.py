@@ -37,6 +37,9 @@ import re
 log = logging.getLogger("SvgPrinter")
 
 svgcells = dict()
+#- which cells each cell draws, so a definition can bring its own
+#- subtree along
+svgdeps = dict()
 
 class SvgCell(svgwrite.Drawing):
 
@@ -118,8 +121,22 @@ class SvgCell(svgwrite.Drawing):
         txt = self.text(t.name, insert=(x, y), fill=color, font_size=8)
         self.gr.add(txt)
 
+    @staticmethod
+    def _defsFor(name, seen=None):
+        """`name` and every cell it draws, deepest first."""
+        seen = seen if seen is not None else set()
+        if name in seen:
+            return []
+        seen.add(name)
+        out = []
+        for dep in sorted(svgdeps.get(name, ())):
+            out += SvgCell._defsFor(dep, seen)
+        out.append(name)
+        return out
+
     def addRef(self,inst):
 
+        svgdeps.setdefault(self.cell.name, set()).add(inst.name)
         p = inst.getCellPoint()
         x = self.translate(p.x)
         y = self.translate(p.y)
@@ -156,11 +173,26 @@ class SvgCell(svgwrite.Drawing):
                 #- use than no picture.
                 log.warning(f"no cell {inst.name!r} to draw; skipped")
                 return
-            gr = svgcells[inst.name]
-            grg = svgwrite.container.Group(id=inst.name + "_inst",opacity=0)
-            grg.add(gr)
-            self.add(grg)
-            self.refs[inst.name] = grg
+            #- REFERENCE THE CELL'S GROUP, not the whole drawing it
+            #- lives in. Embedding the other SvgCell put a nested
+            #- <svg>, viewBox and all, between the definition and the
+            #- <use> -- and a viewport of its own is a transform of its
+            #- own: rsvg drew the mirrored comparator of LELO_TEMP_CCMP
+            #- correctly, cairosvg dropped the scale and placed it a
+            #- whole cell height too high. A <g> in <defs> is what
+            #- <use> is specified against, and both agree on it.
+            #-
+            #- The nested drawing carried the whole subtree with it,
+            #- so a group alone leaves its own <use>s pointing at
+            #- nothing: every cell BELOW this one has to be defined
+            #- here too.
+            for dep in self._defsFor(inst.name):
+                if dep in self.refs or dep not in svgcells:
+                    continue
+                g = svgwrite.container.Group(id=dep + "_inst", opacity=0)
+                g.add(svgcells[dep].gr)
+                self.defs.add(g)
+                self.refs[dep] = g
 
 
         use = svgwrite.container.Use("#"+inst.name,transform=transform )
@@ -186,6 +218,14 @@ class SvgPrinter(DesignPrinter):
         self.flightnets = list(flightnets or [])
 
     def startLib(self,name):
+        #- START FROM NOTHING. svgcells/svgdeps are module globals, and
+        #- a long-lived process -- the MCP server is one -- otherwise
+        #- carries the previous design's cells into this one, where a
+        #- name that exists in both resolves to the older drawing. The
+        #- symptom is a render that disagrees with the same file
+        #- rendered from a fresh process.
+        svgcells.clear()
+        svgdeps.clear()
         self.libname = name + "_svg"
         if(not path.isdir(self.libname)):
             os.mkdir(self.libname)

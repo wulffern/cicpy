@@ -415,6 +415,40 @@ E {}
                 return name
         return None
 
+    @staticmethod
+    def _busNets(bus, nodes, intNodes):
+        """The label for a bus pin: the nets the instance hangs on.
+
+        Bit order is the SYMBOL's -- `IBP_1U[1:0]` is bit 1 first --
+        and the nets are found by matching each bit against the cell's
+        own port list. A contiguous run of one base name collapses back
+        to `base[hi:lo]`; anything else is written out comma separated,
+        which xschem reads as a bus just the same.
+        """
+        b = re.match(r"^(.*?)\[(\d+):(\d+)\]$", bus)
+        if not b:
+            return bus
+        base, hi, lo = b.group(1), int(b.group(2)), int(b.group(3))
+        bits = (list(range(hi, lo - 1, -1)) if hi >= lo
+                else list(range(hi, lo + 1)))
+        wanted = {}
+        for i, port in enumerate(intNodes):
+            m = re.match(r"^(.*?)[<\[](\d+)[>\]]$", port or "")
+            if m and m.group(1) == base and i < len(nodes):
+                wanted[int(m.group(2))] = nodes[i]
+        nets = [wanted.get(i) for i in bits]
+        if any(n is None for n in nets):
+            return bus
+        #- one base name and a run of indices in the same direction is
+        #- the common case, and it reads better as a range
+        parts = [re.match(r"^(.*?)[<\[](\d+)[>\]]$", n) for n in nets]
+        if all(parts) and len({p.group(1) for p in parts}) == 1:
+            idx = [int(p.group(2)) for p in parts]
+            step = -1 if len(idx) > 1 and idx[1] < idx[0] else 1
+            if all(idx[k + 1] - idx[k] == step for k in range(len(idx) - 1)):
+                return f"{parts[0].group(1)}[{idx[0]}:{idx[-1]}]"
+        return ",".join(nets)
+
     def printInstance(self,o):
         _libname = ""
         if(o.isCktInstance() and o.subcktName in self.cells):
@@ -485,7 +519,15 @@ E {}
                 if bus in emitted_buses:
                     continue
                 emitted_buses.add(bus)
-                portName, netName = bus, bus
+                #- THE WIRE CARRIES THE NETS, NOT THE PIN NAME. Naming
+                #- it after the symbol's own bus was right only while
+                #- the two agreed: LELO_TEMP's x2_ccmp hangs on
+                #- IBP_1U<3:2> and x3_ccmp on <1:0>, and both came out
+                #- labelled IBP_1U[1:0] -- one comparator's bias
+                #- branch wired to the other's, <3:2> left floating,
+                #- and LVS reading two nets fewer than the layout has.
+                portName, netName = bus, self._busNets(bus, nodes,
+                                                       intNodes)
 
             side = instsym.ports[portName].side
             r = instsym.ports[portName].rect.getCopy()

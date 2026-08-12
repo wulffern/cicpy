@@ -3085,7 +3085,7 @@ class LayoutCell(Cell):
             p.set(rp)
 
     def promoteInstancePort(self, node, instanceRegex, location, layer,
-                            excludeInstances=""):
+                            excludeInstances="", startLayer=""):
         """Carry a SUBCELL's port out to this cell's edge, as a pin.
 
         `addPortOnEdge` does this for a net that is already one of this
@@ -3111,6 +3111,22 @@ class LayoutCell(Cell):
         The riser runs on `layer` from the pin to `location` ("top",
         "bottom", "left", "right"), and the rect at the edge becomes
         this cell's port for `node`.
+
+        `startLayer` is the bottom of the stack, when the SUBCELL
+        ALREADY CARRIES THE PORT UP. Its own route put a via on the pin
+        and a pad above it; driving a second stack down to the pin
+        layer then lands a second via beside the first, tens of
+        nanometres off, and magic cannot represent two contacts of one
+        type half over each other -- "This layer can't abut or
+        partially overlap between subcells". Measured on
+        LELOTEMP_BIAS_IBP: `VIA1` at 78.905,85.765 against
+        LELOTEMP_OTAR_P_BIAS's at 78.945,85.805, with that subcell's
+        M2 already over the pin.
+
+        It is the same thought as `endStopLayer` on a route, which the
+        one design that needs this already uses a few lines away: meet
+        the pin on the metal it has been brought up to, and leave one
+        via where there were two.
         """
         from .cut import Cut
         from .rect import Rect
@@ -3154,9 +3170,19 @@ class LayoutCell(Cell):
             riser.setNet(node)
             self.add(riser)
 
-            ct = (self._fittedCut(r, layer)
-                  or Cut.getInstance(r.layer, layer, 1, 1)
-                  or Cut.getInstance(layer, r.layer, 1, 1))
+            #- the bottom of the stack: the pin's own layer, unless the
+            #- subcell has already brought the net up and said so
+            base = startLayer or r.layer
+            if base != r.layer:
+                rb = r.getCopy()
+                rb.layer = base
+                ct = (self._fittedCut(rb, layer)
+                      or Cut.getInstance(base, layer, 1, 1)
+                      or Cut.getInstance(layer, base, 1, 1))
+            else:
+                ct = (self._fittedCut(r, layer)
+                      or Cut.getInstance(r.layer, layer, 1, 1)
+                      or Cut.getInstance(layer, r.layer, 1, 1))
             if ct is not None:
                 ct.moveCenter(cx, cy)
                 self.add(ct)
@@ -3169,8 +3195,11 @@ class LayoutCell(Cell):
             #- hanging over the subcell's edge -- which is the partial
             #- overlap, one step out. The cover is the union of the pin
             #- and the via, so the subcell's shape is wholly inside it.
-            if ct is not None and (r.layer == layer
-                                   or r.layer == self._pinLayer()):
+            #- ...and NOT when the stack starts above the pin: this cell
+            #- then paints nothing on the pin's layer, so there is
+            #- nothing of its own to make wholly cover the subcell's
+            if ct is not None and base == r.layer and (
+                    r.layer == layer or r.layer == self._pinLayer()):
                 ux1 = min(int(r.x1), int(ct.x1))
                 uy1 = min(int(r.y1), int(ct.y1))
                 ux2 = max(int(r.x2), int(ct.x2))
@@ -3181,7 +3210,7 @@ class LayoutCell(Cell):
             #- the intermediate layers' own pads: a via stack leaves a
             #- cut-sized shape on each, and a cut-sized shape is under
             #- the minimum area every one of them asks for
-            for mid in self._layersBetween(r.layer, layer):
+            for mid in self._layersBetween(base, layer):
                 p = self._minAreaPad(mid)
                 mp = Rect(mid, cx - p, cy - p, 2 * p, 2 * p)
                 mp.setNet(node)

@@ -163,7 +163,7 @@ changed.
 **The gate, with declared wires, on every build:**
 
     CMP 0/match   CCMP 0/match   OTAR 0/match
-    BIAS_IBP 8/match   LELO_TEMP 95/"Netlists do not match" (VR1 artefact)
+    BIAS_IBP 0/match   LELO_TEMP 87/"Netlists do not match" (VR1 artefact)
 
 90 unit tests, ten integration suites.
 
@@ -223,14 +223,14 @@ changed.
    the layer late. That is a different path from a route declared on
    li, and it has no clean candidate to run on until item 2's
    consequence is dealt with.
-4. **LELOTEMP_BIAS_IBP: 8 DRC -> 3**, 2026-08-12. The layer was the
-   CUT layers, not li: the parent and a subcell each contacting the
-   same port and landing tens of nanometres apart, which magic cannot
-   represent as one tile. `_alignCutsToSubcellCuts` snaps them
-   together. LELO_TEMP fell 95 -> 90 with it. The remaining 3 are all
-   one site and one cause -- a subcell's via that the parent's
-   collection never sees. Characterised at the end of this file.
-5. **LELO_TEMP's 90 DRC** -- 778 lines of hand-drawn `wire()`/`stk()`
+4. ~~**LELOTEMP_BIAS_IBP's 8 DRC**~~ **DONE, 0 DRC / LVS match**,
+   2026-08-12. The layer was the CUT layers, not li: the parent and a
+   subcell each contacting the same port and landing tens of
+   nanometres apart, which magic cannot represent as one tile. Two
+   fixes, and the second is the better one -- see the end of this
+   file. LELO_TEMP fell 95 -> 87 with them. **All four prototype
+   cells are now 0 DRC and LVS clean; only LELO_TEMP is left.**
+5. **LELO_TEMP's 87 DRC** -- 778 lines of hand-drawn `wire()`/`stk()`
    with literal offsets. A conversion, not a bug fix. Scope it first.
 6. **Three `beforeRoute` hooks left**: p_bias (VBP is a corner on M4),
    p_sw (claims its whole subcell), n_mirr (retyped to Stack its VD3
@@ -1051,14 +1051,41 @@ Two traps it cost to find, both about how a cut is placed:
   collection and the cut that needed alignment is simply never
   offered one.
 
-**Still open: the last 3, all at one site** -- x 15772..15829,
-y 17144..17200 in file units, `VIA1 [LELOTEMP_BIAS_IBP]` at
-78.905,85.765 against `VIA1 [LELOTEMP_OTAR_P_BIAS]` at 78.945,85.805.
-The parent's stack is collected correctly; the P_BIAS via never
-appears in the subcell collection at all, while LELOTEMP_OTAR's own
-vias one level up do. So the walk stops somewhere between OTAR and its
-subcell -- an unresolved cell in `design.cells`, most likely. That is
-the next thing to instrument, and it is the whole of the remaining 3.
+**The last 3 went a better way, and the idea was Carsten's:
+`endStopLayer`.**
+
+The remaining site was `promoteInstancePort` building its riser stack
+from the PIN'S OWN LAYER, M1, when LELOTEMP_OTAR_P_BIAS had already
+put a via on that pin and carried the net to M2:
+
+    M1  [LELOTEMP_OTAR_P_BIAS]  78.840..79.220
+    VIA1[LELOTEMP_OTAR_P_BIAS]  78.945,85.805
+    M2  [LELOTEMP_OTAR_P_BIAS]  78.840..79.240   <- already there
+    VIA1[LELOTEMP_BIAS_IBP]     78.905,85.765    <- a second one
+
+`addConnectivityRoute` has had the answer all along -- `_stopLayer`,
+spelled `endStopLayerM2`, "a pin normally arrives with its own via
+under it, so a route that drives down to the pin's layer stacks a
+second via on the first". The same design uses it a few lines above.
+`promoteInstancePort` simply had no way to say it, so it was given a
+`startLayer`, and the design now says
+
+    self.promoteInstancePort(net, r"^xota$", "top", "M5",
+                             startLayer="M2")
+
+    BIAS_IBP  3 -> 0 DRC, LVS match, cost 765.10 -> 764.62, cuts 60 -> 59
+
+MEET THE PIN ON THE METAL IT HAS BEEN BROUGHT UP TO. That is the rule,
+and it is better than the alignment pass on the same geometry: one via
+instead of two nudged into one, a via fewer and a pad fewer, and
+nothing to snap. `_alignCutsToSubcellCuts` stays as the backstop for
+the cases nobody declared -- it is what took 8 to 3 and LELO_TEMP 95 to
+90 -- but where the design can name the layer, naming it is the fix.
+
+Worth carrying forward: BOTH remedies existed in the codebase before
+this session, and the search that found the second one was reading
+`route.py` for what the option vocabulary already had, not writing
+anything new.
 
 Worth knowing: klayout on the flattened GDS (`make kdrc`) reports a
 DIFFERENT set -- ct.2 x12, psdm.1 x10, ct.1, via2.1a, 24 total -- so

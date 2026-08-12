@@ -526,7 +526,24 @@ anchor the router writes is the anchor route.py reads, asserted through
 both code paths, with the exact-match rule pinned so a near miss can
 never silently move a wire.
 
-**THE CONNECTIVITY GAP IS CLOSED (2026-08-12).** The stack router
+**CORRECTED 2026-08-12: THE CONNECTIVITY GAP IS *NOT* CLOSED.** The
+fresh-search numbers below were read off a build that had CRASHED
+partway through the cell -- `_preferPinAnchor` returned a bare int
+where a (lane, lo, hi) tuple was expected, it went into `claimed`, and
+the next net to search unpacked it. Only a fresh search hits it, since
+a replayed wire never searches, and `make drc` happily read the
+half-new, half-stale files left behind. With the crash fixed and the
+build completing: **OTAR 18 DRC / failed pin matching, BIAS_IBP 66 /
+failed**. The declared-wires build was never affected and is still
+0/0/0/8/95, every cell matching.
+
+The pad guard below is still right and still worth having -- a width
+test refuses every gate tab in this technology -- but it did not close
+the gap, and the claim that it did was measurement error. The lesson
+is cheap and was learned twice in one night: CHECK THE BUILD EXIT
+STATUS. `make drc` reads whatever is on disk.
+
+**(superseded) THE CONNECTIVITY GAP IS CLOSED (2026-08-12).** The stack router
 refused any via whose pad is wider than the narrowest pin it lands on,
 and the smallest li-to-metal pad here is 4000 against a 3200 gate tab
 -- so it refused every gate tab there is, and those nets were simply

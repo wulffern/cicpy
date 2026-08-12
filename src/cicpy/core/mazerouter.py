@@ -1763,10 +1763,14 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                          min(int(g.y1) for g in group),
                                          max(int(g.y2) for g in group)))
                         else:
+                            _sh = sorted({getattr(rr, "instName", "")
+                                          for rr in rects
+                                          if sum(1 for _, g in lanes
+                                                 if rr in g) > 1})
                             log.info(
                                 f"{net}: {why}, so no single vertical "
                                 f"lands; drawn as {len(lanes)} rails, "
-                                f"joined through the pins they share")
+                                f"joined through {', '.join(_sh)}")
                             routed.append((stack, net))
                             return True
                     return False

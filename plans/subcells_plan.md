@@ -142,6 +142,74 @@ I want AI to most of the time write the top.py, however, I do want it to be easy
 for a human to understand and modify. Speed of generation is also important. 
 
 
+# WHERE THIS STANDS (2026-08-12)
+
+Read this first; the stage sections below are the working record and
+several of them describe decisions that were later measured and
+changed.
+
+## Shipped and verified
+
+| stage | what |
+|---|---|
+| 0-2 | fingerprint, the `~` path, `Path` as a `Route` |
+| 3 (emitter half) | the router writes an ANCHOR, not a coordinate; all 19 gone from the design files |
+| 3b | a channel track is one legal lane (`width + space`) |
+| 4, 5 | the hierarchy, in memory: `hierarchy()` splits the netlist and builds a cell per subcell, one pass, one process |
+| 7 | `cuts` made honest, framework defaults 2, the maze router's lone-via last resort gone |
+| 8 | `promoteInstancePort`; the last typed geometry out of LELOTEMP_BIAS_IBP |
+| — | the router splits a net onto two rails when its pins have two shapes; n_load_a and n_load_b need no `beforeRoute` |
+
+**The gate, with declared wires, on every build:**
+
+    CMP 0/match   CCMP 0/match   OTAR 0/match
+    BIAS_IBP 8/match   LELO_TEMP 95/"Netlists do not match" (VR1 artefact)
+
+90 unit tests, ten integration suites.
+
+## Open, in the order I would take them
+
+1. **Fresh search is 18 DRC / failed pin matching on OTAR, 66 / failed
+   on BIAS_IBP.** This is the number that matters for the Goal -- it is
+   what the router produces unattended, and until it approaches the
+   declared-wires build the `wires` blocks cannot be regenerated
+   without a human reading them. An earlier claim that this gap was
+   closed was measurement error; see the correction in Stage 3.
+2. **`column_metal` does not report a shape that is really there.**
+   LELOTEMP_CCMP's IBP_1U<0> passes the corridor test and then lands
+   0.05 um from a `JNWATR_NCH_2C5F0` li pin (li.3 wants 0.17).
+   Widening the tested band to full clearance did not change the
+   answer. One klayout probe of that band against what the map
+   returns settles it. Everything about routing on li waits on this.
+3. **A same-layer leg does not extend onto its pin.** A `-|--` reaches
+   its pin through a via; drop it to the pin layer and the via goes
+   but the leg still stops at the trunk's edge. Until route.py extends
+   it, "route on li when the net is column-local" can only apply to a
+   `||` whose trunk lies inside every pin -- which excludes the nets
+   that prompted the rule (LELOTEMP_OTAR's VSS is `-|--`). Prototype
+   behind `CICPY_LI_LOCAL`, default off.
+4. **LELOTEMP_BIAS_IBP's 8 DRC**, all one rule, characterised below
+   with a two-second reproducer. The layer is li and the shapes are
+   known; what is not known is why magic calls it a subcell conflict.
+5. **LELO_TEMP's 95 DRC** -- 778 lines of hand-drawn `wire()`/`stk()`
+   with literal offsets. A conversion, not a bug fix. Scope it first.
+6. **Three `beforeRoute` hooks left**: p_bias (VBP is a corner on M4),
+   p_sw (claims its whole subcell), n_mirr (retyped to Stack its VD3
+   splits cleanly and DRC stays 0, but VCP is left open).
+
+## Two process rules this cost real time to learn
+
+- **CHECK THE BUILD EXIT STATUS.** `make drc` reads whatever is on
+  disk. A crashed `make mag` leaves half the subcells from this run
+  beside half from the last, and every downstream number is then a
+  measurement of nothing. This happened twice in one night and
+  produced a confident, wrong claim both times.
+- **Look at geometry, not logs.** Every question that stalled on log
+  reading -- which layer, which cells, what is 0.05 um away -- was
+  answered in one klayout probe listing shapes and their cells.
+
+---
+
 # AI additions to plan
 
 ## Context

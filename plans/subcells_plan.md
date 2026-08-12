@@ -230,8 +230,14 @@ changed.
    fixes, and the second is the better one -- see the end of this
    file. LELO_TEMP fell 95 -> 87 with them. **All four prototype
    cells are now 0 DRC and LVS clean; only LELO_TEMP is left.**
-5. **LELO_TEMP's 87 DRC** -- 778 lines of hand-drawn `wire()`/`stk()`
-   with literal offsets. A conversion, not a bug fix. Scope it first.
+5. **LELO_TEMP's 87 DRC -- CENSUSED, and smaller than it looks.**
+   343 fires, 49 sites, but FIVE repeated patterns: one M5 rail 0.19 um
+   over BIAS_IBP's column tabs (12 sites, one edit), one M4 lane
+   pitched exactly ON the 0.300 minimum so every jog off it fails
+   (the largest group), M1 patches dropped into a standard-cell row,
+   and two singletons. The 778-line conversion is still right for
+   Rules 1 and 3, but it is not what the DRC is asking for. Full
+   census near the end of this file.
 6. **Three `beforeRoute` hooks left**: p_bias (VBP is a corner on M4),
    p_sw (claims its whole subcell), n_mirr (retyped to Stack its VD3
    splits cleanly and DRC stays 0, but VCP is left open).
@@ -1144,20 +1150,77 @@ the magic rule and the sign-off deck disagree about this cell, and
 which of them the tapeout actually cares about is a question for the
 owner.
 
-## LELO_TEMP: 95 errors, and why they are a different job
+## LELO_TEMP: 87 errors, censused 2026-08-12
 
-LELO_TEMP is the one prototype the plan never converted. Its 778 lines
-are `_signal_routes` with a local `wire()` painting raw Rects, `stk()`
+**They are five repeated patterns, not 87 problems.** The plan assumed
+this cell was a conversion job because it is 778 lines of hand-drawn
+`wire()`/`stk()`. The conversion is still right for Rules 1 and 3, but
+it is NOT what the DRC is asking for.
+
+    87 counted errors = 343 rule fires = 49 spatial sites = 7 rules
+    every one a SPACING rule, every one owned by LELO_TEMP itself
+    (drc listall count -> {LELO_TEMP 87}; the children are clean)
+
+| rule | fires | sites |
+|---|---|---|
+| met4.2 | 141 | 23 |
+| met3.2 | 98 | 7 |
+| met2.2 | 48 | 4 |
+| met1.2 | 30 | 2 |
+| met4.5b | 15 | 9 |
+| met4.5a | 9 | 3 |
+| via3.2 | 2 | 1 |
+
+Clustered and then looked at, they are:
+
+1. **The M5 rails over BIAS_IBP's column tabs** -- met4.5a/b, 24 fires,
+   12 sites, ONE cause. LELOTEMP_BIAS_IBP has wide M5 columns
+   (x 32.400..39.600, y 70.600..108.700) each finished with a 0.06 um
+   tab on top at y 108.700..108.760. LELO_TEMP's own horizontal M5
+   rails run at y 108.950..109.250 and 109.650..109.950 -- 0.19 um
+   above the tabs, where "attached to large metal4" wants 0.40. The
+   columns repeat at 8 um, so the error does too. Move the rail or
+   drop the tab: 12 sites, one edit.
+2. **The x 98..99.4 lane** -- met3.2 + met4.2, the largest group.
+   LELO_TEMP draws two M4 risers at x 98.500..98.800 and
+   99.100..99.400: exactly 0.300 apart, which is the met3.2 minimum
+   with NO MARGIN. Every jog off them then fails -- the top jogs come
+   to 98.850 against 99.010, 0.16 um. A lane pitched one grid wider
+   takes this whole group.
+3. **The standard-cell corner at x 149..153, y 7..19** -- met1.2 +
+   met2.2, 78 fires, 6 sites. LELO_TEMP drops its own M1 patches
+   (x 149.380..149.760) into a JNWTR standard-cell row, 0.13 um from
+   the cells' own M1 (JNWTR_IVX1_CV, NRX1_CV, NCHDL, PCHDL).
+4. met4.2 at x 126 and x 146, y 42.
+5. one via3 site at x 126.34, y 2.19.
+
+**So: a handful of wrong numbers, each repeated by a loop.** Item 2 is
+the one to read first -- a lane sitting exactly ON the minimum is a
+design that fails the moment anything jogs, and it is the biggest
+group by fires.
+
+The LVS "Netlists do not match" is the separate VR1 artefact and is
+not in this census.
+
+Note what is NO LONGER here. The old count of 95 included 56 fires of
+LELOTEMP_BIAS_IBP's subcell-overlap rule, inherited; those went with
+that cell's fix, which is the whole of 95 -> 87 and why the remaining
+errors are all LELO_TEMP's own geometry.
+
+### The conversion is still a stage of its own
+
+Separate from the DRC, and unchanged by the census: LELO_TEMP is the
+one prototype the plan never converted. Its 778 lines are
+`_signal_routes` with a local `wire()` painting raw Rects, `stk()`
 placing via stacks, and literal offsets (`- 1500`, `- 4250`, `3000`) --
-exactly the custom route code rule 1 forbids and the stored coordinates
-rule 3 forbids. Its errors are in that hand geometry, in three clusters
-(file units): a met4 bus at y 21790-21820 spanning x 6400-11200, a
-met3/met4 knot at 19620-19840 x 21990-22200, and a met1/met2 knot at
-29850-30550 x 1690-3730 -- plus 56 fires of the BIAS_IBP rule above,
-inherited.
+exactly the custom route code rule 1 forbids and the stored
+coordinates rule 3 forbids. Converting it means an L-shaped floorplan
+that `rows` cannot state, four finished blocks rather than device
+columns, and a hand-built signal net between them.
 
-Fixing those 95 one at a time is not the work. Converting LELO_TEMP to
-the declarative flow is, and it is a stage of its own: an L-shaped
-floorplan that `rows` cannot state, four finished blocks rather than
-device columns, and a hand-built signal net between them. It should be
-scoped before it is started.
+So there are two jobs here and they can be taken in either order:
+clear the 87 by fixing five numbers, or convert the cell and let the
+declarative flow place the wires. The first is a day and leaves the
+rule violations in place; the second is the plan's actual goal and
+would make the first moot.
+

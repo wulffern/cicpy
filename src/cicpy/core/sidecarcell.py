@@ -665,6 +665,7 @@ class SubcellLayout(SidecarPycell, LayoutCell):
             pr.y1 = max(pr.y1, box.y1)
             pr.y2 = min(pr.y2, box.y2)
             layout.updatePort(net, pr)
+        self.afterPortsHook(layout)
 
     @staticmethod
     def _pinRects(layout, net):
@@ -678,6 +679,34 @@ class SubcellLayout(SidecarPycell, LayoutCell):
             if r is not None:
                 out.append(r)
         return out
+
+    def afterPortsHook(self, layout):
+        """The design's own say on this subcell's ports.
+
+        Everything above decides a port from the pins the netlist
+        gives; a cell may know better. A strip of standard cells
+        publishes eight signals on li -- the one layer the design
+        reserves for power -- and the level above then has to meet li
+        eight times. The subcell class carries those pins up and says
+        so here, which is the only phase where saying it survives:
+        addAllPorts has run, and nothing after this moves a port.
+
+        THE GROUP IS THE CLASS. A declared subcell subclasses the real
+        StackGroup, so the built group's own type is the design's
+        class and its hooks are found on it -- no need for the plan to
+        carry a reference the derived spec does not keep.
+        """
+        from cicpy.sidecar import hooks_of
+        from .subcell import subcell_groups
+        entry = self.entry or {}
+        for name, grp in (subcell_groups(layout) or {}).items():
+            hook = hooks_of(type(grp)).get("afterPorts")
+            if hook is None:
+                continue
+            try:
+                hook(grp, entry)
+            except Exception as e:
+                self.log.error(f"{name}: afterPorts() raised: {e}")
 
     def _runStackPycells(self):
         """The subcell's own hooks, found under the name it is BUILT as.

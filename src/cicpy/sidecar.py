@@ -96,7 +96,14 @@ _counter = itertools.count()
 #- one).
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill", "xspace",
                  "wires", "wires_key")
-_HOOK_NAMES = ("beforePlace", "beforeRoute")
+#- `afterPorts` is the third, because a PORT is decided after the
+#- routing: addAllPorts takes the first rect it finds on a net, and
+#- the framework then faces each signal port the way its net leaves.
+#- A cell whose pins are all on one layer its neighbours may not route
+#- on -- a strip of standard cells, whose pins are li -- can only say
+#- otherwise here. Anything set in beforeRoute is overwritten before
+#- the cell is published.
+_HOOK_NAMES = ("beforePlace", "beforeRoute", "afterPorts")
 
 
 def _user_bases(cls):

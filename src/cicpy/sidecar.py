@@ -420,8 +420,17 @@ def import_beside(dirname, name, reload=False):
         if reload:
             mod = importlib.reload(mod)
     except Exception as e:
+        #- A FILE THAT EXISTS AND WILL NOT IMPORT IS A HARD ERROR.
+        #- Returning None means "there is no pycell here", and the
+        #- build then goes on to place the cell some other way -- for
+        #- a sidecar, that is the flat fallback, which quietly
+        #- OVERWRITES a good layout with a wrong one. Measured: a
+        #- stray indent in LELO_TEMP.py, and the top came out as
+        #- eleven devices in a column with every block dissolved.
+        #- A file that is not there is still None; one that is there
+        #- and broken stops the run.
         log.error(f"{name}.py: import failed: {e}")
-        return None
+        raise
     return mod
 
 

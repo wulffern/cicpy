@@ -114,20 +114,45 @@ class BlockCell(LayoutCell):
 
     @classmethod
     def of(cls, cell):
-        """The block view of `cell`, built once and remembered."""
+        """The block view of `cell`, built once and remembered.
+
+        REMEMBERED IS NOT FOREVER: a cell grows all through its build,
+        and a view taken before its instances were placed answers for
+        an empty cell. Measured: every corridor a story asked for came
+        back as the whole width of the block, because the first thing
+        to ask had asked too early. The stamp is what the view was
+        built from -- how many children, and the box they made -- and
+        a cell that has changed since gets a new one.
+        """
         if cell is None:
             return None
+        stamp = cls.stamp(cell)
         block = getattr(cell, "_blockcell", None)
-        if block is None:
+        if block is None or getattr(cell, "_blockcell_stamp", None) != stamp:
             block = cls(cell)
             #- stored BEFORE the walk, so a cell that reaches itself
             #- through its own hierarchy finds the one being built
             #- rather than recursing forever
             cell._blockcell = block
+            cell._blockcell_stamp = stamp
             block.build(cell)
         return block
 
-    def build(self, cell):
+    @staticmethod
+    def stamp(cell):
+        return (len(getattr(cell, "children", []) or []),
+                int(cell.x1), int(cell.y1), int(cell.x2), int(cell.y2))
+
+    def build(self, cell, into=None):
+        """Walk `cell`, collecting its metal and what it places.
+
+        THROUGH THE GROUPS TOO. A cell's instances are not always its
+        direct children: a placed design keeps them in CellGroups and
+        Stacks, and `children` holds the group. Walking only the top
+        level, the view of LELO_TEMP_DIG came back EMPTY -- no metal,
+        no cells, eight instances one level down -- and every question
+        asked of it ("what is free here?") answered "everything".
+        """
         for child in getattr(cell, "children", []) or []:
             if child is None:
                 continue
@@ -146,6 +171,11 @@ class BlockCell(LayoutCell):
                 r.device_metal = True
                 self.own.append(r)
                 self.add(r)
+                continue
+            #- a group or a stack: its members are the cell's, in the
+            #- cell's own frame, so walk straight into it
+            if getattr(child, "children", None) and child is not cell:
+                self.build(child)
         #- and the hierarchy `children` does not name. A reader may
         #- keep it elsewhere -- the magic one keeps `use` records out
         #- of children on purpose -- and says so through hiddenUses().

@@ -54,9 +54,12 @@ from .instance import Instance
 
 log = logging.getLogger("BlockCell")
 
-#- layers worth blocking on: conductors. A marker or an implant stops
-#- nothing.
-CONDUCTORS = ("METAL", "CUT", "DIFFUSION", "POLY")
+#- WHAT A ROUTE CAN RUN INTO: metal, and the cuts between metals. A
+#- marker or an implant stops nothing, and diffusion and poly are not
+#- on any layer a route uses -- whatever they connect to reaches li,
+#- and the li is in the view already. Copying them made the view three
+#- times its size to say nothing new.
+CONDUCTORS = ("METAL", "CUT")
 
 
 class BlockCellInstance(Instance):

@@ -116,6 +116,81 @@ class Cell(Rect):
             return [r for r in out if id(r) not in own]
         return out
 
+    #- -----------------------------------------------------------------
+    #- what is CLEAR, which is the other half of the same question
+    #- -----------------------------------------------------------------
+
+    def freeColumns(self, layer, span=None, minwidth=None):
+        """The x spans nothing on `layer` crosses, over `span` in y.
+
+        A route across a placed block needs a corridor, and a corridor
+        is a MEASUREMENT of the block, not a number to be spelled in
+        the pycell that routes over it: `inst.x1 + 40000` is this
+        technology, this floorplan and this day, and it is wrong after
+        any of them changes.
+
+        Measured through the block view, so a block made of cells
+        answers for what its children own -- which is the whole point,
+        since the metal that blocks a lane is rarely the parent's.
+
+        `span` is the (lo, hi) in y that has to be clear; the default
+        is the whole cell, which asks for a corridor a full-height
+        riser could use. `minwidth` defaults to what the technology
+        itself asks for a wire with a space on each side, so what
+        comes back is corridors something can actually be drawn in.
+        """
+        return self._free(layer, span, minwidth, vertical=True)
+
+    def freeRows(self, layer, span=None, minwidth=None):
+        """The y spans nothing on `layer` crosses, over `span` in x.
+
+        `freeColumns` turned on its side -- for a leg that crosses a
+        block east to west rather than a riser that crosses it up.
+        """
+        return self._free(layer, span, minwidth, vertical=False)
+
+    def _free(self, layer, span, minwidth, vertical):
+        from .rules import Rules
+        rules = Rules.getInstance()
+        if minwidth is None and rules is not None:
+            minwidth = int(rules.get(layer, "width")) + \
+                2 * int(rules.get(layer, "space"))
+        minwidth = int(minwidth or 0)
+        #- along = the axis the corridor runs in, across = the axis it
+        #- is measured on. A vertical corridor runs in y and is a span
+        #- in x.
+        if vertical:
+            lo, hi = int(self.x1), int(self.x2)
+            keep = (lambda r: (int(r.y1), int(r.y2)))
+            take = (lambda r: (int(r.x1), int(r.x2)))
+            limit = (int(self.y1), int(self.y2))
+        else:
+            lo, hi = int(self.y1), int(self.y2)
+            keep = (lambda r: (int(r.x1), int(r.x2)))
+            take = (lambda r: (int(r.y1), int(r.y2)))
+            limit = (int(self.x1), int(self.x2))
+        s1, s2 = span if span else limit
+        s1, s2 = int(min(s1, s2)), int(max(s1, s2))
+        used = []
+        for r in self.flatMetal():
+            if getattr(r, "layer", "") != layer:
+                continue
+            a, b = keep(r)
+            #- only what actually stands in the corridor's way: a rect
+            #- that ends before the span starts is not in it
+            if b <= s1 or a >= s2:
+                continue
+            used.append(take(r))
+        used.sort()
+        free, at = [], lo
+        for a, b in used:
+            if a - at >= minwidth:
+                free.append((at, a))
+            at = max(at, b)
+        if hi - at >= minwidth:
+            free.append((at, hi))
+        return free
+
     def getPort(self,name:str):
         p = None
 

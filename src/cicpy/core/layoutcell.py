@@ -2883,8 +2883,95 @@ class LayoutCell(Cell):
             f"{'horizontal' if horizontal else 'vertical'})")
         return self
 
+    def addBlockChannel(self, name, inst, layer, span=None, near=None,
+                        horizontal=False, minwidth=None):
+        """Name a corridor ACROSS a placed block, measured off it.
+
+        `addRoutingChannel` names the gap a placement opened, which the
+        placement knows. This names the gap a BLOCK leaves, which only
+        the block knows -- and which a route over it has to have. The
+        alternative is what it replaces: `inst.x1 + 40000`, a number
+        that is this technology, this floorplan and this day.
+
+        The block is asked through its block view (`freeColumns` /
+        `freeRows`), so a block made of cells answers for the metal its
+        children own. `span` is the stretch the route actually needs
+        clear -- a riser from a pin to the block's top needs nothing
+        below the pin -- and `near` picks the corridor closest to a
+        coordinate, which is usually the pin the route is leaving.
+        Without `near` the widest one wins.
+
+        Returns the (lo, hi) registered, in this cell's frame, or None
+        if the block has no corridor that fits.
+        """
+        cell = (getattr(inst, "layoutcell", None)
+                or getattr(inst, "_cell_obj", None))
+        if cell is None:
+            self.log.error(f"addBlockChannel({name}): {inst} has no cell")
+            return None
+        #- the block's own frame, and back again: an instance maps its
+        #- cell's origin to its position, so a span in the cell is the
+        #- same span shifted -- and mirrored, if it is.
+        if horizontal:
+            org, corg, size = int(inst.y1), int(cell.y1), int(cell.y2) - int(cell.y1)
+            mirrored = getattr(inst, "angle", "") == "MX"
+        else:
+            org, corg, size = int(inst.x1), int(cell.x1), int(cell.x2) - int(cell.x1)
+            mirrored = getattr(inst, "angle", "") == "MY"
+        local = span
+        if span is not None:
+            #- the span comes in this cell's frame; ask the block in
+            #- its own. The axis it is measured ON is the other one.
+            if horizontal:
+                o, c = int(inst.x1), int(cell.x1)
+            else:
+                o, c = int(inst.y1), int(cell.y1)
+            local = (int(span[0]) - o + c, int(span[1]) - o + c)
+
+        free = (cell.freeRows(layer, local, minwidth) if horizontal
+                else cell.freeColumns(layer, local, minwidth))
+        if mirrored:
+            far = corg + size
+            free = [(far - b, far - a) for a, b in free]
+        free = [(org + a - corg, org + b - corg) for a, b in free]
+        if not free:
+            self.log.error(f"addBlockChannel({name}): {cell.name} has no "
+                           f"free {layer} corridor over {span}")
+            return None
+        if near is not None:
+            near = int(near)
+            pick = min(free, key=lambda s: 0 if s[0] <= near <= s[1]
+                       else min(abs(s[0] - near), abs(s[1] - near)))
+        else:
+            pick = max(free, key=lambda s: s[1] - s[0])
+        self.addRoutingChannel(name, pick[0], pick[1], horizontal=horizontal)
+        return pick
+
     def routingChannel(self, name):
         return getattr(self, "_routing_channels", {}).get(name)
+
+    def channelTrackNear(self, name, coord, layer=None):
+        """The index of this channel's lane closest to `coord`.
+
+        A corridor measured off a block can be the width of the block,
+        and then "track 1" is its far edge -- nowhere near the pin the
+        route is leaving. What the story means is "the lane beside
+        this pin", and the pin is the spec: pass its coordinate and
+        get the index back, so the number in the story stays a count
+        of LANES from there.
+        """
+        ch = self.routingChannel(name)
+        if ch is None:
+            self.log.error(f"channelTrackNear: no channel {name!r}")
+            return 0
+        lo, hi, _horizontal = ch
+        #- the SAME ruler channelTrackCoord uses, or the index would
+        #- not name the lane it comes back as
+        pitch = self._lanePitch(layer)
+        if not pitch:
+            return 0
+        i = int(round((int(coord) - min(lo, hi)) / pitch - 0.5))
+        return max(0, min(i, int(abs(hi - lo) // pitch) - 1))
 
     def channelTrackCoord(self, name, index, layer=None):
         """The coordinate of track `index` inside a named channel.

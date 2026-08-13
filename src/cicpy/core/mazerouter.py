@@ -25,6 +25,7 @@ import os
 import re
 
 from .rules import Rules
+from .route import Route
 from collections import defaultdict
 
 
@@ -60,9 +61,11 @@ class MazeRouter:
     #-   Cut.getInstance       the real via size
     #- A router that hard codes any of these is a router for one PDK.
 
-    def __init__(self, trackmap, net, via_cost=None, log=None):
+    def __init__(self, trackmap, net, via_cost=None, log=None,
+                 stack=None):
         self.tm = trackmap
         self.net = net
+        stack_override = stack
         #- default: a via costs what it physically occupies. Not a tuned
         #- constant -- if a detour is shorter than the pad it displaces,
         #- the detour genuinely is cheaper.
@@ -72,6 +75,21 @@ class MazeRouter:
         #- stack order from the technology's own chain, filtered to the
         #- layers this map actually has tracks for
         stack = [l for l in self.tm.metal_stack() if l in self.tm.directions]
+        #- A CALLER MAY NARROW THE STACK, and for a route over placed
+        #- blocks it usually must. The technology's own chain starts at
+        #- the pin layer, and to the search that layer is a track layer
+        #- like any other -- so it happily runs a vertical the length
+        #- of the cell on li, which is the supply layer, and then its
+        #- own via check reports the descent blocked. Measured on
+        #- LELO_TEMP: 5 of 7 vias BLOCKED on the default stack, 0 of 2
+        #- on ["M3","M4"], same endpoints, same map.
+        if stack_override:
+            keep = [l for l in stack_override if l in self.tm.directions]
+            missing = [l for l in stack_override if l not in keep]
+            if missing:
+                (log or logging.getLogger("MazeRouter")).warning(
+                    f"{net}: no tracks for {missing}, routing on {keep}")
+            stack = keep or stack
         self._layers = stack or sorted(self.tm.directions)
         self.pin_only = tuple(l for l in (self.tm.pin_layer,) if l)
         self.via_cost = (self._default_via_cost()
@@ -517,7 +535,8 @@ class MazeRouter:
     def pin_centre(rect):
         return (int((rect.x1 + rect.x2) / 2), int((rect.y1 + rect.y2) / 2))
 
-    def connect(self, layout, a_rect, b_rect, layer=None, width=None):
+    def connect(self, layout, a_rect, b_rect, layer=None, width=None,
+                own=None):
         """Search between two pin rects and draw the result.
 
         The convenience the pycells want: give it two pins, get geometry
@@ -527,7 +546,16 @@ class MazeRouter:
         redundant route that shorts something.
         """
         layer = layer or getattr(a_rect, "layer", None) or self.tm.pin_layer
-        self._own = [a_rect, b_rect]
+        #- `own` is every rect this NET may land on, not only the two
+        #- being joined. It matters the moment a net is routed as a
+        #- chain: the second link starts on a pin the first link has
+        #- just built metal over, and metal that is not "own" is metal
+        #- to route around -- the search could not leave the pin at
+        #- all (reached 1 node, measured on LELO_TEMP's PWRUP_B).
+        self._own = [a_rect, b_rect] + [r for r in (own or [])
+                                        if r is not None
+                                        and r is not a_rect
+                                        and r is not b_rect]
         start = (*self.pin_centre(a_rect), layer)
         goal = (*self.pin_centre(b_rect), layer)
         path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))
@@ -2130,3 +2158,73 @@ def __getattr__(name):
         from . import subcell
         return getattr(subcell, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class MazeRoute(Route):
+    """A net routed by the SEARCH, at draw time, over the real cell.
+
+    Two things separate this from `addConnectivityRoute`, and both are
+    the reason a hand lane plan used to be the only option at the top
+    of a hierarchy:
+
+    IT RUNS WHEN THE CELL IS DRAWN, not when it is declared. A design
+    states its routes in `beforeRoute`; `LayoutCell.route()` executes
+    them in order afterwards. A search performed at declaration time
+    therefore sees the placement and NOTHING the design has already
+    told -- every hand story is still a list of steps. Measured on
+    LELO_TEMP: a search for one net walked straight through VC, which
+    was declared thirty lines above it. Building the track map inside
+    `route()` sees VC's metal, because by then it is metal.
+
+    WHAT IT DRAWS IS WHAT IT CLEARED. `emit()` lays the runs and vias
+    the search actually proved, with the technology's widths, minimum
+    areas and via pads. Re-telling a found path as movex/movey steps
+    does not reproduce it -- the story machinery has its own widths and
+    corner extensions -- and the geometry that comes out is not the
+    geometry that was checked (measured: 19 nets against 24, and 36
+    DRC, from a path the search had cleared completely).
+
+    `layers` narrows the stack, and for a route across placed blocks it
+    normally should: see MazeRouter.__init__.
+    """
+
+    def __init__(self, net, layer, rects, layers=None, width=None,
+                 options=""):
+        Route.__init__(self, net, layer, list(rects), [], options, "~")
+        self.routeType = "MAZE"
+        self.layoutcell = None
+        #- `Route.__init__` puts the routing layer on `routeLayer`;
+        #- `self.layer` belongs to Cell and is an int. Passing that to
+        #- connect() asked the technology for a cut "from 1 to M5".
+        self.mazeLayer = layer
+        self.rects = list(rects)
+        self.layers = list(layers) if layers else None
+        self.width = width
+
+    def route(self):
+        from .trackmap import TrackMap
+        log = logging.getLogger("MazeRoute")
+        cell = self.layoutcell
+        if cell is None or len(self.rects) < 2:
+            log.error(f"{self.net}: needs a cell and two rects to route")
+            return
+        #- CHAIN, AND REBUILD THE MAP BETWEEN LINKS. After the first
+        #- link is drawn it is metal of this net, so the next search
+        #- can land on it instead of running back to the first pin.
+        drawn = 0
+        for a, b in zip(self.rects, self.rects[1:]):
+            tm = TrackMap(cell, block_pins=True).build()
+            r = MazeRouter(tm, self.net, stack=self.layers)
+            try:
+                r.connect(cell, a, b, layer=self.mazeLayer,
+                          width=self.width, own=self.rects)
+                drawn += 1
+            except Blocked as e:
+                #- a blocked link is named, with how far it got. It is
+                #- not raised: the rest of the net may still be worth
+                #- drawing, and the design gets to see which link failed.
+                log.error(f"{self.net}: no path for link {drawn + 1} "
+                          f"({e}); reached {getattr(e, 'reached', '?')} "
+                          f"nodes")
+        log.info(f"MazeRoute: net={self.net} links={drawn}"
+                 f"/{len(self.rects) - 1} layers={self.layers or 'tech'}")

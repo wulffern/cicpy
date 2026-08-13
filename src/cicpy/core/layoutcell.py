@@ -2593,7 +2593,19 @@ class LayoutCell(Cell):
                 "of a shorted placement")
         for r in self.routes:
             if r.isRoute() and not getattr(r, '_pre_routed', False):
-                r.route()
+                #- NAME THE ROUTE THAT RAISES. A technology error --
+                #- "could not create cut from 1 to M5" -- says nothing
+                #- about WHICH of a hundred routes asked for it, and
+                #- the answer is usually the one just added.
+                try:
+                    r.route()
+                except Exception as e:
+                    self.log.error(
+                        f"route failed on {type(r).__name__} "
+                        f"net={getattr(r, 'net', '?')} "
+                        f"layer={getattr(r, 'routeLayer', '?')!r} "
+                        f"type={getattr(r, 'route_', '?')!r}: {e}")
+                    raise
                 if strict:
                     now = self._shortSignature()
                     fresh = now - baseline
@@ -2728,6 +2740,59 @@ class LayoutCell(Cell):
             self.graph = o["graph"]
 
         readJsonChildren(self, o)
+
+    def addMazeRoute(self, regex, layer="", layers=None, width=None,
+                     rects=None, excludeInstances="", includeInstances="",
+                     includeGroups=""):
+        """Route a net with the SEARCH instead of a lane plan.
+
+        For the top of a hierarchy, where the alternative is a hand
+        story per net and the lane budget is held in the designer's
+        head. The search knows what is in the way -- other nets' wires
+        AND their pins -- and it runs when the cell is drawn, so
+        everything the design has already told is metal it can see.
+
+        `layers` narrows the stack and across placed blocks it usually
+        must: left to the technology's chain the search will run a
+        vertical the length of the cell on the pin layer, which is the
+        supply layer. ["M3", "M4"] is the shape that works in sky130.
+
+        One route per matching net; the net's access rects are chained
+        in x order, so a three pin net is two searches and the second
+        may land on what the first drew.
+        """
+        from .mazerouter import MazeRoute
+        #- NAMED RECTS BEAT DISCOVERED ONES for a route between placed
+        #- blocks. getNodeAccessRects answers with every rect the net
+        #- touches, and at the top of a hierarchy that includes metal
+        #- inside the blocks -- the search then starts somewhere the
+        #- block has already walled in and cannot leave (measured:
+        #- reached 1 node, from an internal rect 18 um below the
+        #- published port). What a block offers its neighbours is its
+        #- PORT, and the design already knows which one.
+        given = [r for r in (rects or []) if r is not None]
+        for node in list(self.nodeGraphList):
+            if not re.search(regex, node):
+                continue
+            if given:
+                found = list(given)
+            else:
+                found = self.getNodeAccessRects(
+                    node, layer, includeInstances=includeInstances,
+                    excludeInstances=excludeInstances,
+                    includeGroups=includeGroups)
+                found = [r for r in found if r is not None]
+            if len(found) < 2:
+                self.log.error(f"addMazeRoute({node}): {len(found)} access "
+                               f"rect(s) on {layer or 'any layer'}, need 2")
+                continue
+            found.sort(key=lambda r: (int(r.x1), int(r.y1)))
+            self.log.info(f"addMazeRoute(net={node}, layer={layer}, "
+                          f"layers={layers}, rects={len(found)})")
+            mr = MazeRoute(node, layer or getattr(found[0], "layer", ""),
+                           found, layers=layers, width=width)
+            mr.layoutcell = self
+            self.routes.append(mr)
 
     def addConnectivityRoute(self,layer,regex, routeType, options, cuts, excludeInstances, includeInstances, includeGroups=""):
         #- named channels work here too. They did not, and the failure

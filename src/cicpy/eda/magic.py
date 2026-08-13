@@ -37,6 +37,24 @@ class Magic(cic.LayoutCell):
         self.magscale = 1
         self.techlib = techlib
         self.timestamp = 0
+        #- WHAT THIS CELL PLACES. A .mag says its contents with `use`,
+        #- and until now the reader kept only `rect`: a cell that
+        #- places library cells came back as its own paint and nothing
+        #- else. For a JNWTR standard cell that is its pins and its two
+        #- M4 supply bars -- the M2 and M3 inside its M1-M4 via stacks
+        #- are in the used cells, so every tool downstream reported the
+        #- supply columns as free metal and the GDS was the first thing
+        #- that knew otherwise (measured on LELO_TEMP_DIG).
+        #-
+        #- The uses are kept OUT of children on purpose: children is
+        #- the cell's own content, and a placement, a bounding box, a
+        #- port list and both writers all read it. This is an abstract
+        #- view for asking what is in the way, and `flatMetal()` is how
+        #- it is asked.
+        self.uses = []
+        self._pending_use = None
+        self._flatmetal = None
+        self.dirname = ""
         self.bb_x1 = cic.INT_MAX
         self.bb_y1 = cic.INT_MAX
         self.bb_x2 = cic.INT_MIN
@@ -109,6 +127,19 @@ class Magic(cic.LayoutCell):
                 self.add(p)
         elif(token == "tech"):
             self.techlib = line
+        elif(token == "use"):
+            #- `use CELL INSTNAME`, then `transform a b c d e f`, then
+            #- `box`. Only the transform is kept: the box is the used
+            #- cell's own extent, which it can say for itself.
+            ar = line.split()
+            self._pending_use = ar[0] if ar else None
+        elif(token == "transform" and self._pending_use):
+            a, b, c, d, e, f = (int(v) for v in line.split()[:6])
+            self.uses.append({"cell": self._pending_use,
+                              "dx": self.toAngstrom(c),
+                              "dy": self.toAngstrom(f),
+                              "mx": a < 0, "my": e < 0})
+            self._pending_use = None
         else:
             if(token == "rect"):
                 rects = re.findall(r"(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)",line)
@@ -142,6 +173,8 @@ class Magic(cic.LayoutCell):
         self.name = os.path.basename(fname).replace(".mag","")
         lib = os.path.basename(os.path.dirname(fname))
         self.libpath = lib
+        #- where its `use`d cells are: the same directory it came from
+        self.dirname = os.path.dirname(fname)
 
 
         with open(fname) as fi:
@@ -170,6 +203,45 @@ class Magic(cic.LayoutCell):
             return self.bboxRect
         else:
             return super().calcBoundingRect()
+
+    #- ---------------------------------------------------------------
+    #- One SOURCE of hierarchy. The view over it is `Cell.flatMetal`,
+    #- which every cell has: a .cic cell carries its hierarchy as
+    #- instance children, and this one carries it as `use` records
+    #- that the reader deliberately keeps out of children.
+    #- ---------------------------------------------------------------
+
+    def hiddenUses(self):
+        """The cells this one places that `children` does not name."""
+        out = []
+        for u in self.uses:
+            sub = self.resolveUse(u["cell"])
+            if sub is not None:
+                out.append((sub, int(u["dx"]), int(u["dy"]),
+                            u["mx"], u["my"]))
+        return out
+
+    def resolveUse(self, cellname):
+        """The cell a `use` names, read once and remembered."""
+        cached = _USED.get(cellname)
+        if cached is not None:
+            return cached if cached is not _MISSING else None
+        fname = os.path.join(self.dirname, cellname + ".mag")
+        if not os.path.exists(fname):
+            _USED[cellname] = _MISSING
+            self.log.warning(f"{self.name}: uses {cellname}, which is "
+                             f"not in {self.dirname}")
+            return None
+        sub = Layout(self.techlib)
+        sub.readFromFile(fname)
+        _USED[cellname] = sub
+        return sub
+
+
+#- one read per library cell per process: a strip of eight standard
+#- cells names the same four device cells forty times over
+_MISSING = object()
+_USED = {}
 
 
 

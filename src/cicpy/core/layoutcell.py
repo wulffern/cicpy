@@ -827,6 +827,27 @@ class LayoutCell(Cell):
                     start = len(out)
                     self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
                     self._attributeInstanceBody(child, out, start, dx, dy)
+                    #- AND WHAT THAT CELL PLACES, which its children do
+                    #- not say. A cell read from a .mag keeps its own
+                    #- paint and drops its `use` records, so a standard
+                    #- cell arrived here as its pins and its supply bars
+                    #- with nothing of the M2 and M3 inside its via
+                    #- stacks -- and every question asked of this list
+                    #- (tracks, blockers, the maze router, the
+                    #- connectivity check) answered as if those columns
+                    #- were free. The cell can traverse its own
+                    #- hierarchy; it belongs to no net either way.
+                    #- HIDDEN ONLY: the walk above already descended
+                    #- into every instance the cell names, and asking
+                    #- for the whole subtree would count those twice.
+                    flat = getattr(child_cell, "flatMetal", None)
+                    if flat is not None:
+                        for r in flat(hidden_only=True):
+                            rr = r.getCopy()
+                            rr.translate(dx + child.x1, dy + child.y1)
+                            rr.parent = child
+                            rr.device_metal = True
+                            out.append(rr)
                 continue
 
             if child.isCell():

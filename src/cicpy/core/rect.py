@@ -87,6 +87,23 @@ def snap(x):
     x = int(x/GRID)*GRID
     return x
 
+
+def onGrid(x):
+    """`x` moved down onto the TECHNOLOGY's grid.
+
+    `snap` above answers to a constant 5, which is this technology and
+    not the next one. The writers refuse anything off the tech file's
+    own grid (see core/gridcheck), so a pycell computing a coordinate
+    -- a quarter of the way up a riser, say -- has to land on it, and
+    the grid to land on is the one the rules state.
+    """
+    from .rules import Rules
+    from .gridcheck import gridFromRules
+    g = gridFromRules(Rules.getInstance())
+    if not g:
+        return int(x)
+    return int(x) - (int(x) % g)
+
 def HorizontalRectangleFromTo(layer,  x1,  x2,  y,  height):
     if(x1 > x2):
         r = Rect(layer,x2,y,x1-x2,height)

@@ -845,6 +845,13 @@ class Path(Route):
         cur = (None, None, self.routeLayer)
         for s in self.steps:
             cur = s.apply(self, cur)
+        #- WHERE THE STORY ENDED, for a caller that has to put
+        #- something there -- a port, most often. The alternative is
+        #- to recompute the last anchor outside the path, and a track
+        #- resolved outside it uses a different pitch than the path's
+        #- own: measured, a pad meant to sit on a riser landed beside
+        #- it and published a port connected to nothing.
+        self.endsAt = cur
         #- NOT by default. mergeOwnRects removes real redundancy --
         #- 28 rects of one ten-pin net -- but doing so costs
         #- connectivity: with it on, LVS goes from "Circuits match

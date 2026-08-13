@@ -70,9 +70,18 @@ class MagicPrinter(DesignPrinter):
         pass
 
     def openCellFile(self,name):
+        """Open the cell's file -- BESIDE the real one, not over it.
+
+        A cell is written a piece at a time, and anything that raises
+        part way through (an off-grid coordinate is the usual one)
+        used to leave a truncated .mag where a good one had been:
+        90 bytes, no labels, and the next build reads it as the cell.
+        The real name only appears when the whole cell is written.
+        """
         log = logging.getLogger("MagicPrinter")
         log.info(f"Writing {name}")
-        self.fcell = open(name,"w")
+        self.fcellname = name
+        self.fcell = open(name + ".part","w")
 
     def _printFlattenedCutInstance(self, inst):
         if inst is None:
@@ -108,6 +117,10 @@ class MagicPrinter(DesignPrinter):
 
         if(self.fcell):
             self.fcell.close()
+            #- and NOW it is the cell
+            name = getattr(self, "fcellname", "")
+            if name:
+                os.replace(name + ".part", name)
 
     def startCell(self,cell):
 

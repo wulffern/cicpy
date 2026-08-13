@@ -2828,6 +2828,28 @@ class LayoutCell(Cell):
         self.add(p)
         return p
 
+    def bus(self, nets, layer, starts=None, stops=None, options="",
+            pitch=None):
+        """Several nets told as one story -- see core/bus.py.
+
+            b = cell.bus(nets, "M5", starts=pins)
+            b.start()
+            b.movey(b.track("cband", 2))
+            b.movex(b.track("dband", 1))
+            p = b.member(nets[0])        # and on alone from here
+
+        A Bus IS a Path, so it is registered and routed like any other
+        route; each member is a Path in its own right, which is what
+        lets a bundle break up where the nets stop agreeing.
+        """
+        from .bus import Bus
+        b = Bus(nets, layer, starts, stops, options, pitch)
+        b.layoutcell = self
+        for m in b.members:
+            m.layoutcell = self
+        self.add(b)
+        return b
+
     def addRoutingChannel(self, name, lo, hi, horizontal=True):
         """Name the gap the placement opened, so routes can aim at it.
 

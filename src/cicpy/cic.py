@@ -334,6 +334,32 @@ def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectiv
 
 
 def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
+    """Build one cell, or leave nothing behind claiming to be it."""
+    try:
+        return _spi2mag_build(spi,lib,cell,libdir,techlib,xspace,yspace,
+                              gbreak,check_connectivity,strict)
+    except Exception:
+        #- A BUILD THAT FAILED MUST NOT LEAVE LAST RUN'S ANSWER
+        #- STANDING. Nothing is written until the printer runs at the
+        #- very end, so anything that raises -- a sidecar that will
+        #- not import, a NameError in beforeRoute -- leaves the
+        #- PREVIOUS .mag and .cic in place, and every step after it
+        #- (gds, cdl, lvs, drc) reads those and reports them, clean,
+        #- as this build's. Measured: four rounds of "nothing changed"
+        #- from a stray name in a sidecar, with LVS and DRC quoting a
+        #- file from twenty minutes earlier.
+        for ext in (".mag", ".cic"):
+            stale = os.path.join(libdir + lib, cell + ext)
+            try:
+                os.remove(stale)
+                log.error(f"{cell}{ext}: removed -- it is the previous "
+                          f"build's and this one failed")
+            except OSError:
+                pass
+        raise
+
+
+def _spi2mag_build(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
 
     techfile = f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")

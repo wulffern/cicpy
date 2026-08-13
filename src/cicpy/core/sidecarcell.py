@@ -67,7 +67,13 @@ class SidecarPycell:
         layout.place_yspace = [p.get("yspace", 0)]
         layout.place_groupbreak = [p.get("groupbreak", 10)]
 
-    def afterPlace(self, layout):
+    def _placeStacks(self, layout):
+        """The device columns: built, filled, tapped, abutted.
+
+        Called from afterPlace, which is also where the design's own
+        subcell classes get theirs -- one method, in the order the
+        recipe needs: the columns exist before a hook can adjust them.
+        """
         spec = self.spec
         #- A CELL THAT HOLDS NO STACKS HAS NOTHING HERE. Its pieces
         #- are cells and placeHier tiled them; this is the step that
@@ -217,6 +223,165 @@ class SidecarPycell:
                                             only=None, boundary=True)
         layout.log.info(f"stack level: {len(routed)} routed, "
                         f"{len(blocked)} blocked")
+
+    #- ------------------------------------------------------------
+    #- Publication, and the design's own phases
+    #-
+    #- These were SubcellLayout's, which was this same recipe plus a
+    #- constructor -- "one subcell built as a cell of its own", which
+    #- is what EVERY cell is now. A cell built as a piece of a parent
+    #- carries `entry` (its plan) and `parent_name`; a top-level one
+    #- carries neither, and every method below reads what it finds.
+    #- ------------------------------------------------------------
+
+    entry = None
+    parent_name = ""
+
+    def afterPorts(self, layout):
+        """Put the supply ports where a parent's ring can reach them.
+
+        FOR A CELL BUILT AS A PIECE, which is what `entry` says. A
+        top-level cell's ports are its children's own published rects,
+        already where those cells decided; moving them here instead
+        picked whatever the node graph listed first and published
+        three of one cell's pins as one net (measured on
+        LELOTEMP_BIAS_IBP: VD1 claiming LPO and PWRUP_1V8).
+
+        addAllPorts takes the FIRST rect it finds on the net, which
+        for a supply is whichever source pin iteration order landed
+        on -- somewhere up the column, behind every other net's pins.
+        A parent then stretches its ring to that pin and the stretch
+        crosses the column: measured, one M1 rect 4.5 um wide and 28
+        um tall through the bias column, shorting VBP, VCP, VDS and
+        VO into VDD_1V8 in one go.
+
+        A supply port belongs on the BULK column -- the guard and tap
+        geometry, which is continuous through the tap row and carries
+        the supply by construction -- at the end of the cell the
+        parent's ring is on: ground at the bottom, power at the top.
+        The ring then reaches it through pure guard, and the pin
+        layer over the devices stays free.
+        """
+        if self.entry is None:
+            for g in self.groups(layout):
+                g.afterPorts({})
+            return
+        from .mazerouter import supply_nets, supply_polarity
+        supplies = supply_nets(layout)
+        dirs = (self.entry or {}).get("port_dirs", {}) or {}
+        box = HierPycell.columnBox(layout)
+        for net in list(getattr(layout, "ports", {}) or {}):
+            if net not in supplies:
+                #- a signal port faces the traffic: the pin at the end
+                #- of the column the net leaves by (see
+                #- HierPycell._portDirections). Left as addAllPorts
+                #- found it -- the FIRST rect on the net -- a drop from
+                #- the parent's channel lands on whichever pin
+                #- iteration order reached and runs the length of the
+                #- column to get there, through every other net's pin
+                #- stack (measured: VD1 in n_load_a, two met1 spacing
+                #- errors against VBP's drop).
+                d = dirs.get(net)
+                if d is None:
+                    continue
+                rects = self._pinRects(layout, net)
+                if not rects:
+                    continue
+                key = {(0, 1): lambda r: r.y2, (0, -1): lambda r: -r.y1,
+                       (1, 0): lambda r: r.x2, (-1, 0): lambda r: -r.x1}
+                layout.updatePort(net, max(rects, key=key[tuple(d)]))
+                continue
+            g = layout.nodeGraph.get(net)
+            if g is None:
+                continue
+            bulks, allpins = [], []
+            for port in getattr(g, "ports", []):
+                r = port.get() if hasattr(port, "get") else None
+                if r is None:
+                    continue
+                allpins.append(r)
+                if getattr(port, "childName", "") == "B":
+                    bulks.append(r)
+            cands = bulks or allpins
+            if not cands:
+                continue
+            if supply_polarity(net) == "ground":
+                pr = min(cands, key=lambda r: r.y1)
+            else:
+                pr = max(cands, key=lambda r: r.y2)
+            #- clipped to the column: the bulk columns straddle the
+            #- cell edge, and a port poking past the box inflates it,
+            #- which moves the origin every parent track was tuned to
+            pr = pr.getCopy()
+            pr.x1 = max(pr.x1, box.x1)
+            pr.x2 = min(pr.x2, box.x2)
+            pr.y1 = max(pr.y1, box.y1)
+            pr.y2 = min(pr.y2, box.y2)
+            layout.updatePort(net, pr)
+        for g in self.groups(layout):
+            g.afterPorts(self.entry or {})
+
+    @staticmethod
+    def _pinRects(layout, net):
+        """Every pin rect on this net, from the node graph."""
+        g = layout.nodeGraph.get(net)
+        if g is None:
+            return []
+        out = []
+        for port in getattr(g, "ports", []):
+            r = port.get() if hasattr(port, "get") else None
+            if r is not None:
+                out.append(r)
+        return out
+
+    #- ---------------------------------------------------------------
+    #- The design's own phases. Ordinary polymorphism: a declared
+    #- subcell subclasses the real StackGroup and the base declares
+    #- every phase as a no-op, so calling the method IS the dispatch.
+    #- beforePlace and beforeRoute keep their own path through
+    #- run_stack_pycells, where beforeRoute's answer decides whether
+    #- the built-in router leaves the stack alone.
+    #- ---------------------------------------------------------------
+
+    def groups(self, layout):
+        from .subcell import subcell_groups
+        return list((subcell_groups(layout) or {}).values())
+
+    def afterPlace(self, layout):
+        self._placeStacks(layout)
+        for g in self.groups(layout):
+            g.afterPlace(self.entry or {})
+
+    def afterRoute(self, layout):
+        for g in self.groups(layout):
+            g.afterRoute(self.entry or {})
+
+    def beforePaint(self, layout):
+        for g in self.groups(layout):
+            g.beforePaint(self.entry or {})
+
+    def afterPaint(self, layout):
+        for g in self.groups(layout):
+            g.afterPaint(self.entry or {})
+
+    def beforePorts(self, layout):
+        for g in self.groups(layout):
+            g.beforePorts(self.entry or {})
+
+    def _runStackPycells(self):
+        """The subcell's own hooks, found under the name it is BUILT as.
+
+        The plan a fresh walk would produce here names the one stack
+        after this cell -- LELOTEMP_OTAR_P_BIAS_P_BIAS -- and the
+        `<SUBCELLNAME>.py` escape hatch is looked up by that name. The
+        parent's name is what makes it come out right.
+        """
+        from .subcell import run_stack_pycells
+        try:
+            run_stack_pycells(self, log=self.log,
+                              parent_name=self.parent_name or None)
+        except Exception as e:
+            self.log.error(f"stack pycells: {e}")
 
 
 class HierPycell:
@@ -377,8 +542,14 @@ class HierPycell:
     def _buildSubcell(self, entry, ckt):
         name = entry["name"]
         design = self.parent
-        cell = SubcellLayout(self._subcellSpec(entry), entry,
-                             parent_name=self.name)
+        #- AN ORDINARY SIDECAR CELL, from a spec rather than from a
+        #- class. There is no separate kind of object for a piece:
+        #- what made one look special -- its spec is derived, its
+        #- ports face its parent -- is data, not type.
+        from cicpy.sidecar import SidecarCell
+        cell = SidecarCell(spec=self._subcellSpec(entry))
+        cell.entry = entry
+        cell.parent_name = self.name
         cell.name = name
         cell.ckt = ckt
         cell.subckt = ckt
@@ -599,164 +770,3 @@ class HierPycell:
         #- They were here as well, which meant an assembly laid its
         #- rings from a second copy of the same loop.
         LayoutCell.route(self)
-
-
-class SubcellLayout(SidecarPycell, LayoutCell):
-    """One subcell, built as a cell of its own.
-
-    The FLAT recipe over a one-subcell spec: the same placement, the
-    same fill and taps, the same stack-level router, from the
-    subcell's own Subckt and from its own origin. There is nothing
-    special about it -- which is the point. A subcell used to be a
-    COPY of a region of its parent's geometry, and everything that
-    made that hard (the parent's absolute coordinates, the guard
-    overhang window, deciding which rects belonged) was an artefact
-    of copying rather than building.
-    """
-
-    def __init__(self, spec, entry, parent_name=""):
-        LayoutCell.__init__(self)
-        self.spec = spec
-        self.entry = entry
-        self.parent_name = parent_name
-        self.noPowerRoute = True
-        self.data = SidecarPycell.recipe_data()
-
-    def afterPorts(self, layout):
-        """Put the supply ports where a parent's ring can reach them.
-
-        addAllPorts takes the FIRST rect it finds on the net, which
-        for a supply is whichever source pin iteration order landed
-        on -- somewhere up the column, behind every other net's pins.
-        A parent then stretches its ring to that pin and the stretch
-        crosses the column: measured, one M1 rect 4.5 um wide and 28
-        um tall through the bias column, shorting VBP, VCP, VDS and
-        VO into VDD_1V8 in one go.
-
-        A supply port belongs on the BULK column -- the guard and tap
-        geometry, which is continuous through the tap row and carries
-        the supply by construction -- at the end of the cell the
-        parent's ring is on: ground at the bottom, power at the top.
-        The ring then reaches it through pure guard, and the pin
-        layer over the devices stays free.
-        """
-        from .mazerouter import supply_nets, supply_polarity
-        supplies = supply_nets(layout)
-        dirs = (self.entry or {}).get("port_dirs", {}) or {}
-        box = HierPycell.columnBox(layout)
-        for net in list(getattr(layout, "ports", {}) or {}):
-            if net not in supplies:
-                #- a signal port faces the traffic: the pin at the end
-                #- of the column the net leaves by (see
-                #- HierPycell._portDirections). Left as addAllPorts
-                #- found it -- the FIRST rect on the net -- a drop from
-                #- the parent's channel lands on whichever pin
-                #- iteration order reached and runs the length of the
-                #- column to get there, through every other net's pin
-                #- stack (measured: VD1 in n_load_a, two met1 spacing
-                #- errors against VBP's drop).
-                d = dirs.get(net)
-                if d is None:
-                    continue
-                rects = self._pinRects(layout, net)
-                if not rects:
-                    continue
-                key = {(0, 1): lambda r: r.y2, (0, -1): lambda r: -r.y1,
-                       (1, 0): lambda r: r.x2, (-1, 0): lambda r: -r.x1}
-                layout.updatePort(net, max(rects, key=key[tuple(d)]))
-                continue
-            g = layout.nodeGraph.get(net)
-            if g is None:
-                continue
-            bulks, allpins = [], []
-            for port in getattr(g, "ports", []):
-                r = port.get() if hasattr(port, "get") else None
-                if r is None:
-                    continue
-                allpins.append(r)
-                if getattr(port, "childName", "") == "B":
-                    bulks.append(r)
-            cands = bulks or allpins
-            if not cands:
-                continue
-            if supply_polarity(net) == "ground":
-                pr = min(cands, key=lambda r: r.y1)
-            else:
-                pr = max(cands, key=lambda r: r.y2)
-            #- clipped to the column: the bulk columns straddle the
-            #- cell edge, and a port poking past the box inflates it,
-            #- which moves the origin every parent track was tuned to
-            pr = pr.getCopy()
-            pr.x1 = max(pr.x1, box.x1)
-            pr.x2 = min(pr.x2, box.x2)
-            pr.y1 = max(pr.y1, box.y1)
-            pr.y2 = min(pr.y2, box.y2)
-            layout.updatePort(net, pr)
-        for g in self.groups(layout):
-            g.afterPorts(self.entry or {})
-
-    @staticmethod
-    def _pinRects(layout, net):
-        """Every pin rect on this net, from the node graph."""
-        g = layout.nodeGraph.get(net)
-        if g is None:
-            return []
-        out = []
-        for port in getattr(g, "ports", []):
-            r = port.get() if hasattr(port, "get") else None
-            if r is not None:
-                out.append(r)
-        return out
-
-    #- ---------------------------------------------------------------
-    #- The design's own hooks, at every phase that has one
-    #- ---------------------------------------------------------------
-
-    #- ---------------------------------------------------------------
-    #- The design's own phases. Ordinary polymorphism: a declared
-    #- subcell subclasses the real StackGroup and the base declares
-    #- every phase as a no-op, so calling the method IS the dispatch.
-    #- beforePlace and beforeRoute keep their own path through
-    #- run_stack_pycells, where beforeRoute's answer decides whether
-    #- the built-in router leaves the stack alone.
-    #- ---------------------------------------------------------------
-
-    def groups(self, layout):
-        from .subcell import subcell_groups
-        return list((subcell_groups(layout) or {}).values())
-
-    def afterPlace(self, layout):
-        super().afterPlace(layout)
-        for g in self.groups(layout):
-            g.afterPlace(self.entry or {})
-
-    def afterRoute(self, layout):
-        for g in self.groups(layout):
-            g.afterRoute(self.entry or {})
-
-    def beforePaint(self, layout):
-        for g in self.groups(layout):
-            g.beforePaint(self.entry or {})
-
-    def afterPaint(self, layout):
-        for g in self.groups(layout):
-            g.afterPaint(self.entry or {})
-
-    def beforePorts(self, layout):
-        for g in self.groups(layout):
-            g.beforePorts(self.entry or {})
-
-    def _runStackPycells(self):
-        """The subcell's own hooks, found under the name it is BUILT as.
-
-        The plan a fresh walk would produce here names the one stack
-        after this cell -- LELOTEMP_OTAR_P_BIAS_P_BIAS -- and the
-        `<SUBCELLNAME>.py` escape hatch is looked up by that name. The
-        parent's name is what makes it come out right.
-        """
-        from .subcell import run_stack_pycells
-        try:
-            run_stack_pycells(self, log=self.log,
-                              parent_name=self.parent_name or None)
-        except Exception as e:
-            self.log.error(f"stack pycells: {e}")

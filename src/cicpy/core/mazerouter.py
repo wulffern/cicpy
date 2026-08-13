@@ -1410,8 +1410,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             write_suggestions)
     _spec = getattr(layout, "_sidecar_spec", None) or {}
     spec_subcells = {e.get("name", ""): e
-                     for e in (_spec.get("stacks")
-                               or _spec.get("subcells", []))}
+                     for e in _spec.get("stacks", [])}
     inst_by_name = {getattr(i, "instanceName", ""): i
                     for i in layout.iterInstances()}
     captured_by_stack = {}

@@ -233,9 +233,12 @@ class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
             cls._place = knobs
             delattr(cls, "place")
 
-    def __init__(self):
+    def __init__(self, spec=None):
         LayoutCell.__init__(self)
-        self.spec = type(self).compile()
+        #- from the CLASS, which is the usual way, or from a spec --
+        #- which is how a piece of a parent is built. Same object,
+        #- same recipe; only where the declaration came from differs.
+        self.spec = type(self).compile() if spec is None else spec
         self.noPowerRoute = True
         #- the flat recipe's data-driven half. resetOrigins is about
         #- placed devices; a cell that has none simply has nothing to
@@ -275,14 +278,12 @@ class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
         else:
             LayoutCell.route(self)
 
-    def beforePlace(self, layout):
-        SidecarPycell.beforePlace(self, layout)
-
-    def afterPlace(self, layout):
-        SidecarPycell.afterPlace(self, layout)
-
-    def beforeRoute(self, layout):
-        SidecarPycell.beforeRoute(self, layout)
+    #- and no wrappers for beforePlace / afterPlace / beforeRoute:
+    #- they are inherited. They existed to hold the `if not
+    #- made_of_subcells` guards, and forwarding to the class you
+    #- already inherit from is the same method twice -- with the
+    #- added cost that a design's super() call resolved here rather
+    #- than at the recipe.
 
     @classmethod
     def compile(cls):

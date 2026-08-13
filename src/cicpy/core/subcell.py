@@ -49,7 +49,14 @@ def subcell_spec(layout):
     if not spec:
         return []
     out = []
-    for entry in (spec.get("stacks") or spec.get("subcells") or []):
+    #- STACKS ONLY, and no falling back to `subcells`. They are
+    #- different things now: a cell's stacks are the device columns it
+    #- places, its subcells are the cells it is assembled from. Read
+    #- with a fallback, an assembly's children came back as its own
+    #- groups and every phase was dispatched to them twice -- measured
+    #- on LELOTEMP_BIAS_IBP, three of its ports republished onto one
+    #- net.
+    for entry in (spec.get("stacks") or []):
         name = str(entry.get("name", "") or "")
         match = str(entry.get("match", "") or "")
         if not name or not match:

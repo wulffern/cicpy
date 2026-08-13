@@ -2789,8 +2789,10 @@ class LayoutCell(Cell):
             found.sort(key=lambda r: (int(r.x1), int(r.y1)))
             self.log.info(f"addMazeRoute(net={node}, layer={layer}, "
                           f"layers={layers}, rects={len(found)})")
-            mr = MazeRoute(node, layer or getattr(found[0], "layer", ""),
-                           found, layers=layers, width=width)
+            mr = MazeRoute(node, layer, found, layers=layers, width=width)
+            #- Route.__init__ wants a layer name for routeLayer; the
+            #- SEARCH wants none unless the design said one.
+            mr.routeLayer = layer or getattr(found[0], "layer", "")
             mr.layoutcell = self
             self.routes.append(mr)
 

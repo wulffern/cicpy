@@ -568,7 +568,20 @@ class MazeRouter:
         components, and guessing them is how a router quietly adds a
         redundant route that shorts something.
         """
-        layer = layer or getattr(a_rect, "layer", None) or self.tm.pin_layer
+        #- EACH END ON ITS OWN LAYER. One `layer` for both is right
+        #- only when the two pins happen to share one, and between
+        #- placed blocks they rarely do -- a block publishes on
+        #- whatever its own routing left free. Forcing the goal onto
+        #- the start's layer, the search reached the destination
+        #- exactly (0 away) on the layer the pin is actually ON, and
+        #- then failed because it could not via up to the layer it had
+        #- been told to arrive on: the cap plate is there. Measured on
+        #- LELO_TEMP -- bias publishes PWRUP_B on M5, the pair on M3,
+        #- the strip on M4.
+        a_layer = (layer or getattr(a_rect, "layer", None)
+                   or self.tm.pin_layer)
+        b_layer = (layer or getattr(b_rect, "layer", None) or a_layer)
+        layer = a_layer
         #- `own` is every rect this NET may land on, not only the two
         #- being joined. It matters the moment a net is routed as a
         #- chain: the second link starts on a pin the first link has
@@ -579,8 +592,8 @@ class MazeRouter:
                                         if r is not None
                                         and r is not a_rect
                                         and r is not b_rect]
-        start = (*self.pin_centre(a_rect), layer)
-        goal = (*self.pin_centre(b_rect), layer)
+        start = (*self.pin_centre(a_rect), a_layer)
+        goal = (*self.pin_centre(b_rect), b_layer)
         path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))
         return self.emit(layout, path, width=width)
 
@@ -2213,7 +2226,16 @@ class MazeRoute(Route):
         #- `Route.__init__` puts the routing layer on `routeLayer`;
         #- `self.layer` belongs to Cell and is an int. Passing that to
         #- connect() asked the technology for a cut "from 1 to M5".
-        self.mazeLayer = layer
+        #-
+        #- AND None IS NOT THE SAME AS THE FIRST RECT'S LAYER. Handing
+        #- connect() a layer forces BOTH ends onto it; only a design
+        #- that actually said one means that. Defaulting it to the
+        #- first rect's layer made every link start AND end on the
+        #- layer the first pin happened to use -- the search then
+        #- reached the second pin exactly, 0 away, on the layer that
+        #- pin is really on, and failed because it had been told to
+        #- arrive one layer up, under a cap plate.
+        self.mazeLayer = layer or None
         self.rects = list(rects)
         self.layers = list(layers) if layers else None
         self.width = width

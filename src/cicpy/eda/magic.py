@@ -130,11 +130,17 @@ class Magic(cic.LayoutCell):
             #- `use CELL INSTNAME`, then `transform a b c d e f`, then
             #- `box`. Only the transform is kept: the box is the used
             #- cell's own extent, which it can say for itself.
+            #- `use CELL INSTNAME [LIBPATH]`: magic writes the
+            #- library a cell came from as a third token, and a strip
+            #- of standard cells is the case where it is not this
+            #- cell's own directory.
             ar = line.split()
-            self._pending_use = ar[0] if ar else None
+            self._pending_use = ((ar[0], ar[2] if len(ar) > 2 else "")
+                                 if ar else None)
         elif(token == "transform" and self._pending_use):
             a, b, c, d, e, f = (int(v) for v in line.split()[:6])
-            self.uses.append({"cell": self._pending_use,
+            self.uses.append({"cell": self._pending_use[0],
+                              "libpath": self._pending_use[1],
                               "dx": self.toAngstrom(c),
                               "dy": self.toAngstrom(f),
                               "mx": a < 0, "my": e < 0})
@@ -214,26 +220,29 @@ class Magic(cic.LayoutCell):
         """The cells this one places that `children` does not name."""
         out = []
         for u in self.uses:
-            sub = self.resolveUse(u["cell"])
+            sub = self.resolveUse(u["cell"], u.get("libpath", ""))
             if sub is not None:
                 out.append((sub, int(u["dx"]), int(u["dy"]),
                             u["mx"], u["my"]))
         return out
 
-    def resolveUse(self, cellname):
+    def resolveUse(self, cellname, libpath=""):
         """The cell a `use` names, read once and remembered."""
-        cached = _USED.get(cellname)
+        key = (libpath, cellname)
+        cached = _USED.get(key)
         if cached is not None:
             return cached if cached is not _MISSING else None
-        fname = os.path.join(self.dirname, cellname + ".mag")
+        where = os.path.join(self.dirname, libpath) if libpath \
+            else self.dirname
+        fname = os.path.join(where, cellname + ".mag")
         if not os.path.exists(fname):
-            _USED[cellname] = _MISSING
+            _USED[key] = _MISSING
             self.log.warning(f"{self.name}: uses {cellname}, which is "
-                             f"not in {self.dirname}")
+                             f"not in {where}")
             return None
         sub = Layout(self.techlib)
         sub.readFromFile(fname)
-        _USED[cellname] = sub
+        _USED[key] = sub
         return sub
 
 

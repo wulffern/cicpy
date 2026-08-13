@@ -357,6 +357,23 @@ class Step:
         return cls()
 
 
+def _on(rect, at=None):
+    """A point on a rect: its centre, or the middle of one edge."""
+    cx, cy = int(rect.centerX()), int(rect.centerY())
+    if not at:
+        return (cx, cy)
+    side = str(at)[0].lower()
+    if side == "e":
+        return (int(rect.x2), cy)
+    if side == "w":
+        return (int(rect.x1), cy)
+    if side == "n":
+        return (cx, int(rect.y2))
+    if side == "s":
+        return (cx, int(rect.y1))
+    return (cx, cy)
+
+
 @step
 class Start(Step):
     """Begin ON THE PORT, wherever the port is.
@@ -370,15 +387,23 @@ class Start(Step):
     """
     name = "start"
 
-    def __init__(self, rect=None):
+    def __init__(self, rect=None, at=None):
         self.rect = rect
+        #- WHERE ON THE PIN. The centre is the right answer for a pin
+        #- and a poor one for a bar: a block that publishes a supply
+        #- or a bias as a rect spanning its whole width has no centre
+        #- worth starting from, and a story that started there drew
+        #- its first leg back across the block it was leaving (VC,
+        #- measured: LPI and four more nets on one component). "e",
+        #- "w", "n" or "s" starts at that edge instead.
+        self.at = at
 
     def apply(self, path, cur):
         r = self.rect if self.rect is not None else \
             path.anchorRect(path.startRects)
         if r is None:
             return cur
-        return (int(r.centerX()), int(r.centerY()), r.layer)
+        return _on(r, self.at) + (r.layer,)
 
 
 @step
@@ -386,8 +411,9 @@ class End(Step):
     """Land ON THE PORT. Draws whatever leg is still needed to reach it."""
     name = "end"
 
-    def __init__(self, rect=None):
+    def __init__(self, rect=None, at=None):
         self.rect = rect
+        self.at = at
 
     def apply(self, path, cur):
         r = self.rect if self.rect is not None else \
@@ -395,7 +421,7 @@ class End(Step):
         if r is None:
             return cur
         x, y, layer = cur
-        tx, ty = int(r.centerX()), int(r.centerY())
+        tx, ty = _on(r, self.at)
         if x is None or y is None:
             #- nothing to travel from: land on the stop and stop
             x, y = tx, ty
@@ -600,11 +626,11 @@ class Path(Route):
         self.steps.append(s)
         return self
 
-    def start(self, rect=None):
-        return self._add(Start(rect))
+    def start(self, rect=None, at=None):
+        return self._add(Start(rect, at))
 
-    def end(self, rect=None):
-        return self._add(End(rect))
+    def end(self, rect=None, at=None):
+        return self._add(End(rect, at))
 
     def up(self, layer=None):
         return self._add(Up(layer))

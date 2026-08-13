@@ -91,7 +91,8 @@ class BlockCellInstance(Instance):
     def rects(self, dx=0, dy=0, mx=False, my=False):
         """This instance's contents, in the caller's frame."""
         return self.block.rects(dx + int(self.x1), dy + int(self.y1),
-                                mx != self.mx, my != self.my)
+                                mx != self.mx, my != self.my,
+                                frame=True)
 
 
 class BlockCell(LayoutCell):
@@ -187,16 +188,26 @@ class BlockCell(LayoutCell):
     #- asking
     #- -----------------------------------------------------------------
 
-    def rects(self, dx=0, dy=0, mx=False, my=False, hidden_only=False):
+    def rects(self, dx=0, dy=0, mx=False, my=False, hidden_only=False,
+              frame=False):
         """Every conductor below this cell, in the caller's frame.
 
         The copies happen HERE, once per question, from a structure
         that holds each cell's metal exactly once.
+
+        `frame` says dx/dy place the cell's BOX, which is what an
+        instance does -- a placed cell puts its box corner at the
+        instance position, whatever its own origin is. Asked of the
+        top of a view (`frame=False`) the answer stays in the cell's
+        own coordinates, which is what its owner means by "in this
+        cell's frame".
         """
         out = []
+        box = (int(self.x1), int(self.y1), int(self.x2), int(self.y2)) \
+            if frame else None
         if not hidden_only:
             for r in self.own:
-                out.append(self.moved(r, dx, dy, mx, my))
+                out.append(self.moved(r, dx, dy, mx, my, box))
         for inst in self.places:
             if hidden_only and not getattr(inst, "hidden", False):
                 continue
@@ -204,12 +215,31 @@ class BlockCell(LayoutCell):
         return out
 
     @staticmethod
-    def moved(rect, dx, dy, mx, my):
+    def moved(rect, dx, dy, mx, my, box=None):
+        """One rect, placed.
+
+        MIRROR ABOUT THE CELL'S OWN BOX, not about zero. The two are
+        the same for a cell whose box starts at its origin and differ
+        by x1/y1 for every other -- and a block with a supply ring
+        below y=0 is one. Measured on LELO_TEMP_CCMP: the mirrored
+        comparator's metal came back 24000 low, and with it every
+        answer this view gives about what is free up there.
+        """
         r = rect.getCopy()
         r.device_metal = True
+        x1, y1, x2, y2 = box if box else (0, 0, 0, 0)
+        #- x2 (not x1 + x2) for the mirror, -x1 for the plain case:
+        #- both put the box's own corner at the instance position,
+        #- which is what a placed cell does.
         if mx:
             r.mirrorY(0)
+            r.translate(x2, 0)
+        elif box:
+            r.translate(-x1, 0)
         if my:
             r.mirrorX(0)
+            r.translate(0, y2)
+        elif box:
+            r.translate(0, -y1)
         r.translate(int(dx), int(dy))
         return r

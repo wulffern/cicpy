@@ -69,6 +69,12 @@ class SidecarPycell:
 
     def afterPlace(self, layout):
         spec = self.spec
+        #- A CELL THAT HOLDS NO STACKS HAS NOTHING HERE. Its pieces
+        #- are cells and placeHier tiled them; this is the step that
+        #- builds device columns, and it is empty rather than skipped
+        #- so the interface stays the same for both.
+        if not spec.get("stacks"):
+            return
         p = spec.get("place", {})
         channel = p.get("channel", 6) * layout.um
 
@@ -85,7 +91,7 @@ class SidecarPycell:
             return out
 
         groups, stacks, fills = {}, {}, set()
-        for e in spec.get("subcells", []):
+        for e in spec.get("stacks", []):
             gname = e.get("group", "main")
             if gname not in groups:
                 groups[gname] = layout.makeCellGroup(gname)
@@ -140,7 +146,7 @@ class SidecarPycell:
         #- array's guard against an nmos stack is not such a pair --
         #- magic refuses the li abutment, measured).
         xspace = {e["name"]: e.get("xspace", 0)
-                  for e in spec.get("subcells", [])}
+                  for e in spec.get("stacks", [])}
         rows = spec.get("rows", [])
         row_stacks = [[stacks[n] for n in row if n in stacks]
                       for row in rows]
@@ -169,7 +175,7 @@ class SidecarPycell:
                 "mid",
                 max(int(s.y2) for s in row_stacks[0]),
                 min(int(s.y1) for s in row_stacks[1]))
-        for e in spec.get("subcells", []):
+        for e in spec.get("stacks", []):
             st = stacks.get(e["name"])
             if st is not None:
                 layout.addRoutingChannel(e.get("channel", e["name"]),
@@ -177,17 +183,35 @@ class SidecarPycell:
                                          horizontal=False)
 
     def beforeRoute(self, layout):
+        """The supplies, and the stack-level router.
+
+        ONE METHOD FOR BOTH KINDS OF CELL. The ring is the same
+        declaration either way; what differs is what it is attached
+        TO, and that is not a flag but what the cell holds -- guard
+        and tap geometry if it holds devices, the children's own
+        published supply rects if it holds cells. The assembly recipe
+        used to carry its own copy of this loop, so the two drifted:
+        one grew `guard_exclude` and the other did not.
+        """
+        devices = bool(self.spec.get("stacks"))
         for s in self.spec.get("supplies", []):
             net = s["net"]
-            if s.get("ring"):
-                layout.addRouteRing("M1", net, s["ring"],
+            side = s.get("ring")
+            if side:
+                layout.addRouteRing("M1", net, side,
                                     widthmult=3, spacemult=2)
-            layout.addPowerGuardConnection(
-                net, excludeInstances=s.get("guard_exclude", ""))
-            if s.get("strap"):
-                layout.addPowerStrap(
-                    net, "", s["strap"], terminals=("B",),
-                    excludeInstances=s.get("strap_exclude", ""))
+            if devices:
+                layout.addPowerGuardConnection(
+                    net, excludeInstances=s.get("guard_exclude", ""))
+                if s.get("strap"):
+                    layout.addPowerStrap(
+                        net, "", s["strap"], terminals=("B",),
+                        excludeInstances=s.get("strap_exclude", ""))
+            elif side:
+                layout.addPowerConnection(
+                    net, "", "top" if "t" in side else "bottom")
+        if not devices:
+            return
         from cicpy.core.mazerouter import route_stack_level
         routed, blocked = route_stack_level(layout, log=layout.log,
                                             only=None, boundary=True)
@@ -219,36 +243,26 @@ class HierPycell:
     #- ------------------------------------------------------------
 
     def hierarchy(self):
-        """Split the netlist and build a cell per subcell.
+        """Every declared piece, built as a cell.
 
-        In memory and in one process: nothing is written to disk and
-        re-parsed, because nothing here needs geometry. Membership
-        and boundary nets are properties of the NETLIST (see
-        core/hierarchy.py), so each part can be built as a cell in
-        its own right and the parent instantiates it -- which is what
-        the two-pass build, a generated <CELL>_HIER.spice and a
-        second process between them used to buy.
+        UNCONDITIONAL. It used to run only for a cell that declared
+        `routes`, so what a cell was MADE OF depended on whether its
+        crossing nets happened to be written down -- two different
+        builds of the same declaration, and the one cell in this
+        design that had no routes to declare stayed a flat cell with
+        150 lines of Rect and Cut reaching into its neighbours'
+        instances. A declared piece is a cell; `routes` only says how
+        the pieces are joined.
 
-        Ordering is the one subtlety: a subcell is registered in
-        design.cells BEFORE the parent places anything, and
-        MagicDesign.getLayoutCell prefers design.cells over the .mag
-        library, so the parent builds against the children built this
-        run rather than last run's files.
+        The split and the definition of the built cells belong to the
+        design (`Design.buildSubcells`) -- a cell per part, registered
+        ahead of this one so the parent builds against the children
+        built this run rather than last run's files. What a part
+        BECOMES is here, because that is the recipe's business.
         """
-        spec = self.spec
-        if "hier" not in spec:
-            return
-        from .hierarchy import plan_from_netlist, split_subckt
-
         specs = [{"name": e["name"], "match": e.get("match", ""),
                   "type": e.get("type", "stack")}
-                 for e in spec.get("subcells", []) if e.get("match")]
-        plan = plan_from_netlist(self.ckt, specs, self.name)
-        if not plan:
-            self.log.warning(f"{self.name}: declares an assembly but "
-                             f"the split found no subcells")
-            return
-        made = split_subckt(self.ckt, plan)
+                 for e in self.spec.get("subcells", [])]
         #- the router's paste-ready blocks belong in THIS cell's file,
         #- where the subcell classes are; cleared here so one run's
         #- blocks accumulate and the last run's do not survive it
@@ -257,12 +271,27 @@ class HierPycell:
                                    self.name + ".routes.py"))
         except OSError:
             pass
-        dirs = self._portDirections(plan)
-        for entry in plan:
+        dirs = {}
+
+        def build(entry, ckt):
             entry["port_dirs"] = dirs.get(entry["stack"], {})
-            self._buildSubcell(entry, made[entry["stack"]])
+            return self._buildSubcell(entry, ckt)
+
+        #- the directions need the whole plan, and the plan comes back
+        #- from the split -- so the first pass through is a dry one
+        from .hierarchy import plan_from_netlist
+        plan = plan_from_netlist(self.ckt, [s for s in specs
+                                            if s.get("match")], self.name)
+        if not plan:
+            if specs:
+                self.log.warning(f"{self.name}: declares subcells but "
+                                 f"the split found none")
+            return
+        dirs = self._portDirections(plan)
+
+        built = self.parent.buildSubcells(self, specs, build)
         #- what this run built, for the step that writes their views
-        self.subcells_built = [e["name"] for e in plan]
+        self.subcells_built = [e["name"] for e in built]
 
     def _portDirections(self, plan):
         """{subcell: {net: (dx, dy)}} -- which way each port faces.
@@ -331,7 +360,15 @@ class HierPycell:
                  if x["name"] == entry["stack"])
         return {
             "place": dict(spec.get("place", {})),
-            "subcells": [e],
+            #- A STACK, NOT A SUBCELL. The two used to be one key and
+            #- the ambiguity was the whole knot: a child built from
+            #- `subcells: [itself]` declares that it is assembled from
+            #- a copy of itself, so the recipe could not be run
+            #- unconditionally without recursing forever. A cell is
+            #- assembled from `subcells` -- other cells -- and places
+            #- devices into `stacks`. A child has stacks and no
+            #- subcells, which is what ends the recursion.
+            "stacks": [e],
             "rows": [[e["name"]]],
             "supplies": [{k: v for k, v in s.items() if k != "ring"}
                          for s in spec.get("supplies", [])],
@@ -365,11 +402,6 @@ class HierPycell:
         #- is asserted rather than assumed.
         self._amendSubcellNetlist(cell, entry)
 
-        design.cells[name] = cell
-        if name in getattr(design, "cellnames", []):
-            design.cellnames.remove(name)
-        #- ahead of the parent: defined before it is used
-        design.cellnames.insert(0, name)
         return cell
 
     @staticmethod
@@ -563,14 +595,9 @@ class HierPycell:
             trim_ends = r.get("trim", "lr")
             if trim_ends:
                 self.trimChannelRoute(net, ends=trim_ends)
-        for sup in self.spec.get("supplies", []):
-            side = sup.get("ring")
-            if not side:
-                continue
-            self.addRouteRing("M1", sup["net"], side,
-                              widthmult=3, spacemult=2)
-            self.addPowerConnection(sup["net"], "",
-                                    "top" if "t" in side else "bottom")
+        #- THE SUPPLIES ARE beforeRoute's, for both kinds of cell.
+        #- They were here as well, which meant an assembly laid its
+        #- rings from a second copy of the same loop.
         LayoutCell.route(self)
 
 

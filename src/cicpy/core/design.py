@@ -209,6 +209,58 @@ class Design():
             self.cells[c.name] = c
             self.cellnames.append(c.name)
 
+    def define(self, cell, before=None):
+        """Put a cell in the design, DEFINED BEFORE IT IS USED.
+
+        `add` appends, which is right for cells arriving from a file.
+        A cell BUILT during a run is different: something is about to
+        instantiate it, and every reader -- the .cic writer, the magic
+        printer, `getLayoutCell` -- must find it already defined. So
+        it goes to the front, replacing any name it takes over.
+
+        This is design bookkeeping and it lives here, with `cells` and
+        `cellnames` and the ordering rule in `cellNames`, rather than
+        in whatever recipe happened to build the thing.
+        """
+        if cell is None:
+            return None
+        name = cell.name
+        self.cells[name] = cell
+        if name in self.cellnames:
+            self.cellnames.remove(name)
+        if before and before in self.cellnames:
+            self.cellnames.insert(self.cellnames.index(before), name)
+        else:
+            self.cellnames.insert(0, name)
+        return cell
+
+    def buildSubcells(self, parent, specs, build):
+        """Split `parent`'s netlist and build a cell per part.
+
+        THE HIERARCHY IS A PROPERTY OF THE NETLIST: membership and
+        boundary nets follow from which instances a part claims (see
+        core/hierarchy.py), so each part can be built as a cell in its
+        own right, in memory, in one pass -- which is what the old
+        two-pass build with a generated <CELL>_HIER.spice bought.
+
+        Splitting a netlist into cells and defining them IS design
+        construction, so it happens here. What a part becomes is not:
+        `build(entry, subckt)` is the caller's, and returns the built
+        cell. Returns the plan, one entry per part.
+        """
+        from .hierarchy import plan_from_netlist, split_subckt
+        wanted = [s for s in specs if s.get("match")]
+        if not wanted:
+            return []
+        plan = plan_from_netlist(parent.ckt, wanted, parent.name)
+        if not plan:
+            return []
+        made = split_subckt(parent.ckt, plan)
+        for entry in plan:
+            cell = build(entry, made[entry["stack"]])
+            self.define(cell, before=parent.name)
+        return plan
+
     def cellNames(self):
         """Every cell, LOWER LEVELS FIRST.
 

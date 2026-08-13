@@ -1408,9 +1408,10 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     #- has its conclusions written out as a paste-ready block.
     from .routeplan import (stack_key, wires_lookup, replay_claims,
                             write_suggestions)
+    _spec = getattr(layout, "_sidecar_spec", None) or {}
     spec_subcells = {e.get("name", ""): e
-                     for e in (getattr(layout, "_sidecar_spec", None)
-                               or {}).get("subcells", [])}
+                     for e in (_spec.get("stacks")
+                               or _spec.get("subcells", []))}
     inst_by_name = {getattr(i, "instanceName", ""): i
                     for i in layout.iterInstances()}
     captured_by_stack = {}

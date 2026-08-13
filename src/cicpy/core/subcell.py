@@ -49,7 +49,7 @@ def subcell_spec(layout):
     if not spec:
         return []
     out = []
-    for entry in spec.get("subcells") or []:
+    for entry in (spec.get("stacks") or spec.get("subcells") or []):
         name = str(entry.get("name", "") or "")
         match = str(entry.get("match", "") or "")
         if not name or not match:

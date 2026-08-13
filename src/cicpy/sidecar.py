@@ -236,43 +236,53 @@ class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
     def __init__(self):
         LayoutCell.__init__(self)
         self.spec = type(self).compile()
-        #- MADE OF SUBCELLS, or made of devices. Read off the
-        #- declaration rather than passed in, so there is no way for
-        #- the caller and the file to disagree.
-        self.made_of_subcells = "hier" in self.spec
         self.noPowerRoute = True
-        if not self.made_of_subcells:
-            #- the flat recipe's data-driven half. resetOrigins is
-            #- about placed devices, which an assembly has none of.
-            self.data = SidecarPycell.recipe_data()
+        #- the flat recipe's data-driven half. resetOrigins is about
+        #- placed devices; a cell that has none simply has nothing to
+        #- reset, so this is not a switch either.
+        self.data = SidecarPycell.recipe_data()
 
-    # -- the cell's own methods; what it is made of picks the recipe
+    #- WHAT A CELL IS MADE OF IS NOT A FLAG. It used to be
+    #- `made_of_subcells`, read off whether `routes` was declared, and
+    #- every step of the interface was guarded by it -- so overriding
+    #- beforeRoute and calling super() ran the flat recipe or nothing
+    #- at all depending on a declaration elsewhere in the class. What
+    #- decides is CONTENT: a cell holds child cells, or it holds
+    #- stacks of devices, and the two are mutually exclusive because
+    #- a declared piece is always built as a cell.
+
+    @property
+    def subcells(self):
+        """The pieces this cell is assembled from."""
+        return self.spec.get("subcells", []) or []
+
+    @property
+    def stacks(self):
+        """The device columns this cell places itself."""
+        return self.spec.get("stacks", []) or []
+
+    # -- the cell's own methods; what it HOLDS picks the recipe
 
     def place(self):
-        if self.made_of_subcells:
+        if self.subcells:
             HierPycell.placeHier(self)
         else:
             LayoutCell.place(self)
 
     def route(self):
-        if self.made_of_subcells:
+        if self.subcells:
             HierPycell.routeHier(self)
         else:
             LayoutCell.route(self)
 
-    # -- the flat recipe, which a cell made of devices wants. A
-    # -- design override calls super() and gets it when it applies
     def beforePlace(self, layout):
-        if not self.made_of_subcells:
-            SidecarPycell.beforePlace(self, layout)
+        SidecarPycell.beforePlace(self, layout)
 
     def afterPlace(self, layout):
-        if not self.made_of_subcells:
-            SidecarPycell.afterPlace(self, layout)
+        SidecarPycell.afterPlace(self, layout)
 
     def beforeRoute(self, layout):
-        if not self.made_of_subcells:
-            SidecarPycell.beforeRoute(self, layout)
+        SidecarPycell.beforeRoute(self, layout)
 
     @classmethod
     def compile(cls):

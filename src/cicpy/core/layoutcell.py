@@ -3709,7 +3709,10 @@ class LayoutCell(Cell):
 
         self._runMethod(pycell,data,"afterRoute")
 
-        self._alignCutsToSubcellCuts()
+        #- reconciling contacts with the cells below is an ASSEMBLY's
+        #- business and happens there (HierPycell.routeHier). It sat
+        #- in this pipeline, where it ran for every cell ever built
+        #- and had work to do only in the few that place other cells.
 
         self._runMethod(pycell,data,"beforePaint")
 

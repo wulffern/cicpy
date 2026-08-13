@@ -770,3 +770,11 @@ class HierPycell:
         #- They were here as well, which meant an assembly laid its
         #- rings from a second copy of the same loop.
         LayoutCell.route(self)
+        #- AND THE CONTACTS MEET THE CELLS BELOW. A parent and a child
+        #- contacting the same port each centre on their own copy of
+        #- it -- the child on the pin, the parent on the port rect the
+        #- child clipped to its column -- and magic cannot represent
+        #- two contacts of one type that partially overlap across a
+        #- cell boundary. Measured: LELOTEMP_BIAS_IBP is 0 DRC with
+        #- this and 4 without, LELOTEMP_CCMP 0 either way.
+        self._alignCutsToSubcellCuts()

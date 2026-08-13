@@ -2884,7 +2884,7 @@ class LayoutCell(Cell):
         return self
 
     def addBlockChannel(self, name, inst, layer, span=None, near=None,
-                        horizontal=False, minwidth=None):
+                        horizontal=False, minwidth=None, net=None):
         """Name a corridor ACROSS a placed block, measured off it.
 
         `addRoutingChannel` names the gap a placement opened, which the
@@ -2900,6 +2900,13 @@ class LayoutCell(Cell):
         below the pin -- and `near` picks the corridor closest to a
         coordinate, which is usually the pin the route is leaving.
         Without `near` the widest one wins.
+
+        `net` is the net the corridor is FOR, and its own metal inside
+        the block is not counted against it -- a riser that lands on
+        its own rung is connected, not shorted. Without it the
+        question is net-blind, and a block that routes one of its own
+        nets clear across itself answers "no corridor" to everybody,
+        that net included.
 
         Returns the (lo, hi) registered, in this cell's frame, or None
         if the block has no corridor that fits.
@@ -2928,15 +2935,57 @@ class LayoutCell(Cell):
                 o, c = int(inst.y1), int(cell.y1)
             local = (int(span[0]) - o + c, int(span[1]) - o + c)
 
-        free = (cell.freeRows(layer, local, minwidth) if horizontal
-                else cell.freeColumns(layer, local, minwidth))
+        free = (cell.freeRows(layer, local, minwidth, net=net) if horizontal
+                else cell.freeColumns(layer, local, minwidth, net=net))
         if mirrored:
             far = corg + size
             free = [(far - b, far - a) for a, b in free]
         free = [(org + a - corg, org + b - corg) for a, b in free]
         if not free:
+            #- SAY WHAT IS IN THE WAY. "no corridor" sends the reader
+            #- to the floorplan; the widest obstacles send them to the
+            #- block that drew them, which is where the fix is.
+            try:
+                wide = sorted(
+                    ((int(r.x2) - int(r.x1), getattr(r, "net", "") or "?")
+                     for r in cell.flatMetal()
+                     if getattr(r, "layer", "") == layer),
+                    reverse=True)[:4]
+                why = ", ".join(f"{n}:{w}" for w, n in wide)
+                #- and what a corridor of ANY width would have been:
+                #- "none at all" and "none wide enough" are different
+                #- faults with different fixes.
+                any_ = (cell.freeRows(layer, local, 1, net=net) if horizontal
+                        else cell.freeColumns(layer, local, 1, net=net))
+                from .rules import Rules as _Ru
+                _r = _Ru.getInstance()
+                eff = minwidth if minwidth is not None else (
+                    int(_r.get(layer, "width"))
+                    + 2 * int(_r.get(layer, "space")))
+                why += (f"; ignoring minwidth={eff}: ") + (
+                    ", ".join(f"{a}..{b}({b - a})" for a, b in any_[:6])
+                    or "nothing")
+                import os as _os
+                if _os.environ.get("CICPY_WHYBLOCK"):
+                    lo_, hi_ = [int(v) for v in
+                                _os.environ["CICPY_WHYBLOCK"].split(":")]
+                    for r in cell.flatMetal():
+                        if getattr(r, "layer", "") != layer:
+                            continue
+                        if int(r.x2) <= lo_ or int(r.x1) >= hi_:
+                            continue
+                        self.log.error(
+                            f"   block x={int(r.x1)}..{int(r.x2)} "
+                            f"y={int(r.y1)}..{int(r.y2)} "
+                            f"net={getattr(r, 'net', None)!r} "
+                            f"name={getattr(r, 'name', None)!r} "
+                            f"port={getattr(r, 'isPort', lambda: '?')()!r}")
+            except Exception:
+                why = "?"
             self.log.error(f"addBlockChannel({name}): {cell.name} has no "
-                           f"free {layer} corridor over {span}")
+                           f"free {layer} corridor over {span}"
+                           + (f" for {net}" if net else "")
+                           + f"; widest {layer} there: {why}")
             return None
         if near is not None:
             near = int(near)

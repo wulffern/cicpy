@@ -120,7 +120,7 @@ class Cell(Rect):
     #- what is CLEAR, which is the other half of the same question
     #- -----------------------------------------------------------------
 
-    def freeColumns(self, layer, span=None, minwidth=None):
+    def freeColumns(self, layer, span=None, minwidth=None, net=None):
         """The x spans nothing on `layer` crosses, over `span` in y.
 
         A route across a placed block needs a corridor, and a corridor
@@ -138,18 +138,26 @@ class Cell(Rect):
         riser could use. `minwidth` defaults to what the technology
         itself asks for a wire with a space on each side, so what
         comes back is corridors something can actually be drawn in.
-        """
-        return self._free(layer, span, minwidth, vertical=True)
 
-    def freeRows(self, layer, span=None, minwidth=None):
+        `net` is the net that wants the corridor, and its OWN metal is
+        not in its way: a riser that lands on its own rung is
+        connected, not shorted. Asked net-blind, LELO_TEMP_DIG has no
+        free M5 column at all -- RST_B's own rungs cross the block
+        full width at two heights. Asked for RST_B, the column its
+        port already sits in comes back free, which is the true
+        answer and the one the route needs.
+        """
+        return self._free(layer, span, minwidth, vertical=True, net=net)
+
+    def freeRows(self, layer, span=None, minwidth=None, net=None):
         """The y spans nothing on `layer` crosses, over `span` in x.
 
         `freeColumns` turned on its side -- for a leg that crosses a
         block east to west rather than a riser that crosses it up.
         """
-        return self._free(layer, span, minwidth, vertical=False)
+        return self._free(layer, span, minwidth, vertical=False, net=net)
 
-    def _free(self, layer, span, minwidth, vertical):
+    def _free(self, layer, span, minwidth, vertical, net=None):
         from .rules import Rules
         rules = Rules.getInstance()
         if minwidth is None and rules is not None:
@@ -171,9 +179,47 @@ class Cell(Rect):
             limit = (int(self.x1), int(self.x2))
         s1, s2 = span if span else limit
         s1, s2 = int(min(s1, s2)), int(max(s1, s2))
+        flat = [r for r in self.flatMetal()
+                if getattr(r, "layer", "") == layer]
+
+        #- WHAT BELONGS TO THE NET IS MORE THAN WHAT IS LABELLED WITH
+        #- IT. A net's wires carry its name, but the PORT rect that
+        #- publishes it and the via pads that sit on it carry none --
+        #- the block view stamps a net on routed metal and on nothing
+        #- else. Measured on LELO_TEMP_DIG: RST_B's own port and the
+        #- three pads on its own rungs chopped RST_B's corridor to
+        #- 1000 units, and the net was told there was no way down to
+        #- its own pin.
+        #-
+        #- So an UNATTRIBUTED rect that overlaps the net's own metal
+        #- on this layer is the net's. Overlapping two nets at once
+        #- would be a short, so there is nothing to disambiguate.
+        mine = []
+        if net is not None:
+            mine = [r for r in flat if getattr(r, "net", "") == net]
+            p = self.getPort(net)
+            for pr in ([p.get()] if p is not None and p.get() is not None
+                       else []):
+                if getattr(pr, "layer", "") == layer:
+                    mine.append(pr)
+
+        def isMine(r):
+            if net is None:
+                return False
+            if getattr(r, "net", "") == net:
+                return True
+            if getattr(r, "net", ""):
+                return False
+            for m in mine:
+                if not (int(r.x2) <= int(m.x1) or int(r.x1) >= int(m.x2)
+                        or int(r.y2) <= int(m.y1) or int(r.y1) >= int(m.y2)):
+                    return True
+            return False
+
         used = []
-        for r in self.flatMetal():
-            if getattr(r, "layer", "") != layer:
+        for r in flat:
+            #- a net's own metal is not an obstacle to itself
+            if isMine(r):
                 continue
             a, b = keep(r)
             #- only what actually stands in the corridor's way: a rect

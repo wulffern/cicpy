@@ -2829,7 +2829,7 @@ class LayoutCell(Cell):
         return p
 
     def bus(self, nets, layer, starts=None, stops=None, options="",
-            pitch=None):
+            lanes=1):
         """Several nets told as one story -- see core/bus.py.
 
             b = cell.bus(nets, "M5", starts=pins)
@@ -2843,11 +2843,13 @@ class LayoutCell(Cell):
         lets a bundle break up where the nets stop agreeing.
         """
         from .bus import Bus
-        b = Bus(nets, layer, starts, stops, options, pitch)
+        b = Bus(nets, layer, starts, stops, options, lanes)
         b.layoutcell = self
+        #- THE MEMBERS ARE THE ROUTES. The Bus tells the story; what
+        #- the cell holds is one Path per net, like any other route.
         for m in b.members:
             m.layoutcell = self
-        self.add(b)
+            self.add(m)
         return b
 
     def addRoutingChannel(self, name, lo, hi, horizontal=True):

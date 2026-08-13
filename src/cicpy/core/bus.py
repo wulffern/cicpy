@@ -41,9 +41,9 @@ and both are offset.
 Where the bundle ends and the nets go their own ways, the members are
 Paths like any other::
 
-    b = cell.bus(nets, "M5", starts=pins)
+    b = cell.bus(nets, "M5", starts=pins, lanes=2)
     b.start()
-    b.movey(b.track("cband", 2))     # four rows, one per member
+    b.movey(b.track("cband", 2))     # four rows, two lanes apart
     b.movex(b.track("dband", 1))     # east, still parallel
 
     p = b.member("IBP_1U<0>")        # and this one alone from here
@@ -63,10 +63,15 @@ class Bus(Path):
     """Several nets on parallel lanes, one story."""
 
     def __init__(self, nets, layer, starts=None, stops=None,
-                 options="", pitch=None):
+                 options="", lanes=1):
         super().__init__(",".join(nets), layer, [], [], options)
         self.nets = list(nets)
-        self.lanePitch = pitch
+        #- HOW FAR APART THE MEMBERS RUN, in legal lanes. One is as
+        #- close as the technology allows for the WIRES, and a bundle
+        #- that turns needs more: the via pad at a turn is three times
+        #- the wire, so four members turning one lane apart leave 2400
+        #- between their pads where met4.2 wants 3000.
+        self.lanes = max(1, int(lanes))
         starts = list(starts or [])
         stops = list(stops or [])
         self.members = []
@@ -75,9 +80,7 @@ class Bus(Path):
                      [starts[i]] if i < len(starts) else [],
                      [stops[i]] if i < len(stops) else [],
                      options)
-            m.parent = self
             self.members.append(m)
-            self.add(m)
 
     def member(self, net):
         """One net's own path, to be continued alone."""
@@ -103,17 +106,19 @@ class Bus(Path):
         s = copy.copy(step)
         anchor = getattr(s, "anchor", None)
         if i and anchor is not None:
-            s.anchor = anchor + i * (self.lanePitch or self.PITCH)
+            s.anchor = anchor + (i * self.lanes) * self.PITCH
         return s
 
     def route(self):
-        """Walk every member.
+        """Nothing: the MEMBERS are the routes.
 
-        The Bus draws nothing of its own: it is the shape of the
-        bundle, and the members are what a technology paints.
+        A Bus is the shape of a bundle, not a thing that gets drawn.
+        Its members are registered with the cell like any other route,
+        so the route phase walks them, the writers serialise them and
+        every tool that reads a .cic sees them. Held as children of
+        the Bus instead they drew fine and appeared nowhere -- the
+        geometry was in the GDS and the .cic had none of it, so
+        checkroutes, tracks and render were all blind to the one
+        bundle in the cell.
         """
-        self.log.info(f"bus: nets={len(self.members)}, "
-                      f"layer={self.routeLayer}")
-        for m in self.members:
-            m.layoutcell = self.layoutcell
-            m.route()
+        return

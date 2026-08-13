@@ -70,9 +70,17 @@ class BlockCellInstance(Instance):
     put a cell that is already built.
     """
 
-    def __init__(self, block, dx=0, dy=0, mx=False, my=False):
+    def __init__(self, block, dx=0, dy=0, mx=False, my=False, net=""):
         super().__init__()
         self.block = block
+        #- AN INSTANCE MAY BELONG TO A NET. Almost none do -- a device
+        #- is a device -- but a via the router places is that net's,
+        #- and its contents are otherwise `!device`: metal blocked
+        #- under a name no net can equal. So the router's own vias
+        #- walled in the net that drew them, and a second link starting
+        #- on a pin the first had just vias'd over could not leave it
+        #- (one node explored, measured on LELO_TEMP's PWRUP_B).
+        self.net = net or ""
         self.cell = getattr(block, "name", "")
         self.instanceName = self.cell
         self.layoutcell = block
@@ -90,9 +98,14 @@ class BlockCellInstance(Instance):
 
     def rects(self, dx=0, dy=0, mx=False, my=False):
         """This instance's contents, in the caller's frame."""
-        return self.block.rects(dx + int(self.x1), dy + int(self.y1),
-                                mx != self.mx, my != self.my,
-                                frame=True)
+        out = self.block.rects(dx + int(self.x1), dy + int(self.y1),
+                               mx != self.mx, my != self.my,
+                               frame=True)
+        if self.net:
+            for r in out:
+                r.device_metal = False
+                r.setNet(self.net)
+        return out
 
 
 class BlockCell(LayoutCell):
@@ -163,7 +176,8 @@ class BlockCell(LayoutCell):
                     continue
                 angle = getattr(child, "angle", "") or ""
                 self.place(sub, child.x1, child.y1,
-                           angle == "MY", angle == "MX", hidden=False)
+                           angle == "MY", angle == "MX", hidden=False,
+                           net=getattr(child, "net", "") or "")
                 continue
             if hasattr(child, "isRect") and child.isRect() \
                     and self.blocking(child):
@@ -199,8 +213,9 @@ class BlockCell(LayoutCell):
             out.append(self)
         return out
 
-    def place(self, cell, dx, dy, mx=False, my=False, hidden=False):
-        inst = BlockCellInstance(BlockCell.of(cell), dx, dy, mx, my)
+    def place(self, cell, dx, dy, mx=False, my=False, hidden=False,
+              net=""):
+        inst = BlockCellInstance(BlockCell.of(cell), dx, dy, mx, my, net)
         inst.hidden = hidden
         self.places.append(inst)
         self.add(inst)

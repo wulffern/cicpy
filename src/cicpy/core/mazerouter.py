@@ -318,6 +318,29 @@ class MazeRouter:
                 return True
         return False
 
+    def via_candidate(self, x, y, a_layer, b_layer):
+        """The cut array that could actually be placed here, or None.
+
+        THE SEARCH MUST ASK WHAT THE EMITTER WILL PLACE. `via_is_free`
+        answers for the technology's default single cut, and `emit`
+        refuses to place a lone via -- so the search happily planned a
+        descent somewhere only a 1x1 fits, the emitter declined it, and
+        the net came back drawn but OPEN, with one via missing in the
+        middle (measured on LELO_TEMP's PWRUP_B: links 2/2, "no room
+        for a 2-cut via at (1347000, 439700)", net still in three
+        pieces). Both now ask this.
+        """
+        from cicpy.core.cut import Cut
+        for (hc, vc) in ((2, 1), (1, 2)):
+            cand = Cut.getInstance(a_layer, b_layer, hc, vc)
+            if cand is None:
+                continue
+            if self.via_is_free(x, y, a_layer, b_layer,
+                                cut_wh=(int(cand.width()),
+                                        int(cand.height()))):
+                return cand
+        return None
+
     def via_is_free(self, x, y, a_layer=None, b_layer=None, cut_wh=None):
         """Can this net drop a via column at (x, y)?
 
@@ -494,7 +517,7 @@ class MazeRouter:
         #- once, not once per neighbouring layer: the column does not
         #- care which layer is being left.
         for other in self._adj[layer]:
-            if self.via_is_free(x, y, layer, other):
+            if self.via_candidate(x, y, layer, other) is not None:
                 out.append(((x, y, other), self.via_cost))
         return out
 
@@ -633,17 +656,7 @@ class MazeRouter:
             #- first whose extent the neighbourhood accepts. The space
             #- question is via_is_free's, asked at the candidate's own
             #- size.
-            inst = None
-            for (hc, vc) in ((2, 1), (1, 2)):
-                cand = Cut.getInstance(a_layer, b_layer, hc, vc)
-                if cand is None:
-                    continue
-                if not self.via_is_free(
-                        x, y, a_layer, b_layer,
-                        cut_wh=(int(cand.width()), int(cand.height()))):
-                    continue
-                inst = cand
-                break
+            inst = self.via_candidate(x, y, a_layer, b_layer)
             if inst is None:
                 #- NO LONE VIA. A 1x1 used to sit at the end of this
                 #- list as the last resort, so a corner with room for
@@ -660,6 +673,10 @@ class MazeRouter:
                 continue
             inst.moveCenter(int(x), int(y))
             inst.updateBoundingRect()
+            #- SAY WHOSE VIA THIS IS. Instance contents are `!device`
+            #- to the track map -- blocked under a name no net equals
+            #- -- so an unnamed via of this net's own walls the net in.
+            inst.setNet(self.net)
             layout.add(inst)
             ncut += 1
             #- pads sized to the cut that was actually placed, on BOTH

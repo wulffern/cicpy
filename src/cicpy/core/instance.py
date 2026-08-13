@@ -231,10 +231,10 @@ class Instance(Cell):
             rect.translate(self.xcell, self.ycell)
         elif self.angle == "MY":
             rect.mirrorY(0)
-            rect.translate(self.xcell, self.ycell)
+            rect.translate(*self._foldForChildren())
         elif self.angle == "MX":
             rect.mirrorX(0)
-            rect.translate(self.xcell, self.ycell)
+            rect.translate(*self._foldForChildren())
         else:
             #- R0: xcell is the load-origin correction, and whether the
             #- children need it depends on where the cell came from. A
@@ -250,6 +250,27 @@ class Instance(Cell):
         rect.translate(self.x1, self.y1)
         return rect
 
+    def _foldForChildren(self):
+        """The mirror fold, in the frame THE CHILDREN are already in.
+
+        `xcell`/`ycell` fold about the cell's own box as the file
+        states it, which is what the painted `use` record needs: magic
+        mirrors the child's raw coordinates. A maglib cell's children,
+        though, were normalised at load (it records `libshift`), so
+        their frame starts at the origin and the fold about the raw
+        box is off by exactly the cell's own x1/y1.
+
+        For a cell whose box starts at its origin the two are the same
+        number, which is why one attribute served both until a cell
+        with a supply ring below y=0 was mirrored: the comparator
+        pair's upper pins came back 24000 low, the two seam nets
+        landed short of them and LVS called them open.
+        """
+        cell = self.layoutcell
+        if cell is None or getattr(cell, "libshift", None) is None:
+            return (self.xcell, self.ycell)
+        return (self.xcell - int(cell.x1), self.ycell - int(cell.y1))
+
     def setAngle(self, angle: str):
         self.angle = angle or ""
         self.xcell = 0
@@ -261,7 +282,17 @@ class Instance(Cell):
         elif self.angle == "MY":
             self.xcell = self.layoutcell.x2
         elif self.angle == "MX":
-            self.ycell = self.layoutcell.y1 + self.layoutcell.y2
+            #- y2, NOT y1 + y2, which is the same thing only for a
+            #- cell whose box starts at its origin. A cell with a
+            #- supply ring below y=0 has y1 < 0, and the extra term
+            #- dropped the mirrored copy by exactly that much:
+            #- LELO_TEMP_CCMP's upper comparator landed 24000 low,
+            #- swallowed the 20000 seam gap the placer had left and
+            #- overlapped the lower one by 4000 -- VDD, VSS and CMPO_B
+            #- shorted. The fold that MY already uses (x2) says it
+            #- correctly: the mirror puts the cell's far edge at the
+            #- instance's origin.
+            self.ycell = self.layoutcell.y2
 
         for child in self.children:
             child.translate(-self.x1, -self.y1)

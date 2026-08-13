@@ -15,6 +15,15 @@ The API reference lives in [pycell](pycell.md), [layout](layout.md) and
 conventions, and the facts about the libraries and the design rules that
 are expensive to rediscover.
 
+**This page drifts behind the code, and has.** It described the sidecar
+and the flat router for weeks after `layout.path()` stories,
+`addBlockChannel`, `Bus` and `CICPY_TRACE` landed — the whole vocabulary
+a top level actually routes in. When something here disagrees with
+`src/cicpy/core/`, the source is right; and if you find a gap, fix this
+page in the same commit. Check `git log -- docs/agent_layout.md` against
+`git log src/cicpy/core/` before trusting a section you are about to
+lean on.
+
 ## The sidecar flow — the current best method
 
 Everything below this section still works and is still the reference
@@ -175,6 +184,73 @@ else: netgen prints "Netlists match uniquely **with port errors**" on
 *failing* runs, so grepping for "match uniquely" green-lights broken
 cells. Measured — a subcell shipped with its ladder unrouted behind
 exactly that false positive.
+
+### Stories: how the TOP routes between blocks
+
+`routes:` above is for a cell whose subcells are tiled in rows. A top
+level that is a floorplan of finished blocks routes with **stories** --
+`layout.path()` -- which say where a net goes as a sequence of moves,
+each aimed at a *named* thing rather than a coordinate:
+
+```python
+p = layout.path("RST_A", "M2", start=[pin_a], stop=[pin_b])
+p.movey(p.track("cband", 8))       # a band track
+p.up("M5")                         # change layer
+p.movex(p.track("dband", 2))       # a channel lane
+p.down("M4")
+p.movey(p.landing("y"))            # the stop rect's row
+p.up("M5")
+p.movex(p.landing("x"))            # ...and its column
+p.end()                            # land on it
+```
+
+`p.track(channel, n)`, `p.pin(inst, net, axis)` and `p.landing(axis)`
+all resolve at draw time, so the story survives a resize. `p.end()`
+lands on the stop rect -- never call it on a leg that is meeting a
+supply *ring*, because a ring spans the tile and the last leg would run
+to the middle of the cell; `movey` to the ring's row and drop a via.
+
+**`CICPY_TRACE=<net>` prints where every step of that net resolved.**
+Use it the moment a leg goes somewhere unexpected -- it is the only
+thing that shows a lane resolving *outside* its channel. Measured:
+`track("dband", 12)` came back 1494800 for a channel ending at 1489800,
+so the descent landed inside the neighbouring block and merged four
+nets. Nothing in the short report said "your lane index is too big".
+
+### Ask the BLOCK where it is free
+
+A story that crosses a placed block needs a corridor through it, and
+the block is what knows -- not the pycell routing over it. `inst.x1 +
+40000` is this technology, this floorplan and this day.
+
+```python
+ok = layout.addBlockChannel("digfree", dig, "M5",
+                            span=(int(pin.y1), int(dig.y2)),
+                            near=int(pin.centerX()),
+                            net="RST_B")          # <- for THIS net
+if ok:
+    p.movex(p.track("digfree", 1))
+```
+
+It returns the registered `(lo, hi)` or **None**, and a `None` that is
+not checked is the expensive kind of bug: every later `p.track("digfree",
+n)` then resolves to a bogus x and the leg is drawn somewhere arbitrary.
+**Guard the call.** Measured on LELO_TEMP: an unguarded one put RST_B's
+descent on top of RST_A, one merged net, and it was the whole LVS
+failure.
+
+**`net=` is usually required, not optional.** Without it the question is
+net-blind, and a block that routes one of its own nets clear across
+itself answers "no corridor" to everybody -- including that net, which
+only wants to reach its own pin. `freeColumns` / `freeRows` take it too.
+Note that what belongs to a net is more than what is *labelled* with it:
+the block view stamps a net on routed metal only, so port rects and via
+pads come back unattributed and are claimed by overlap.
+
+When there is no corridor the error names the widest obstacles on the
+layer with their nets, and the spans a route of any width could have
+used -- "none at all" and "none wide enough" are different faults.
+`CICPY_WHYBLOCK=lo:hi` lists every rect in a column with its net.
 
 ### ChannelRoutes and drops
 
@@ -605,6 +681,11 @@ Two facts that fall out of it and are worth carrying:
 
 ## Verification beyond DRC
 
+**LVS is the verdict. `checkroutes` is a lead.** Take that literally:
+`make gds cdl lvs` and the `Final result:` line decide whether a cell is
+right. Everything below is for finding *where* to look, faster than a
+full run.
+
 `cicpy checkroutes <cic> <tech> <cell>` reports shorts and opens from a
 .cic that is already on disk, in about a second and without touching a
 file. Use it after every routing change. The MCP `connectivity` tool
@@ -612,8 +693,39 @@ re-runs sch2mag, which *replaces* the layout it is asked about: right
 for an sch2mag design, wrong for a ciccreator library, and it will
 overwrite the .mag you were checking.
 
+Two ways it reports a short that is not one, both measured:
+
+- **it flattens, and subcells reuse net names.** `VO`, `VIN`, `LPI` are
+  internal to more than one block, and one component carrying two of
+  them reads as a short. LELO_TEMP reported 13 shorts on a layout netgen
+  called free of them.
+- **a bus member is not its bus.** `nets=IBP_1U,IBP_1U<3>` is naming,
+  not geometry. So is a port name sitting on the internal net it
+  publishes (`nets=CMPO,VO`).
+
+**Check the techfile path before believing any of it.** It is
+`<ip>/tech/cic/<techlib>.tech` -- `tech/` is a directory of tooling, not
+of tech files. Given a path that does not exist, `checkroutes` used to
+answer "0 shorts, 0 opens, clean" for a cell with 12 shorts, 8 opens and
+a failing LVS. The MCP tool refuses the run now, but the lesson
+generalises: a green result from a tool that should have failed is worse
+than no result.
+
 A tap-less leaf cell reports its supply rails split. That is the library
 design, not a defect.
+
+**And a DRC improvement can be a short.** Never sweep a placement
+parameter on the DRC count alone. Measured, moving one net's lane:
+
+| lane | DRC | LVS |
+| :--- | :--- | :--- |
+| 9 | 2 | merged into VDD_1V8 |
+| 10 | 4 | nothing merged — the right one |
+| 11 | 2 | merged with RST_A |
+| 12 | 0 | merged with RST_A |
+
+The correct lane was the worst of the four by DRC. Metal that has moved
+onto another net is *invisible* to DRC; only LVS sees it.
 
 - `make gds cdl lvs` is the full check; LVS needs the gds regenerated
   first or the extraction runs against a stale state and the result is

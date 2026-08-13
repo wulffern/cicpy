@@ -67,6 +67,30 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
+def _missing(**paths):
+    """The named paths that are not there, as a message, or None.
+
+    A PATH THAT IS NOT THERE MUST NOT LOOK LIKE AN ANSWER. Every tool
+    here shells out and reads the output, so a run that died on its
+    first line comes back as empty output -- and a tool that reads
+    "clean" out of emptiness reports the layout is fine. Measured on
+    2026-08-13: `checkroutes` was given `tech/sky130A.tech`, which does
+    not exist (the file is `tech/cic/sky130A.tech`), and answered
+    "0 shorts, 0 opens, clean" for a cell that had 12 shorts, 8 opens
+    and a failing LVS. That went into a report as progress.
+
+    Checked before the shell-out, because the error a caller can act on
+    is "this path is wrong", not a traceback.
+    """
+    bad = [f"{k}={v!r}" for k, v in paths.items()
+           if v and not os.path.exists(v)]
+    if not bad:
+        return None
+    return ("cannot run: no such file: " + ", ".join(bad)
+            + "\nNOTE: this is not a result. In the aicex IPs the "
+              "technology file is <ip>/tech/cic/<techlib>.tech.")
+
+
 def _run_cic(*args, includes=None):
     """Run a `cicpy` subcommand and return its de-colored output.
 
@@ -128,6 +152,9 @@ def cell_info(cicfile: str, cell: str | None = None) -> str:
         cicfile: Path to the .cic file.
         cell: Cell name to inspect. Omit to list cells.
     """
+    bad = _missing(cicfile=cicfile)
+    if bad:
+        return bad
     cells = _load_cells(cicfile)
     if cell is None:
         names = [c.get("name", "?") for c in cells]
@@ -195,6 +222,9 @@ def netlist_info(spicefile: str, subckt: str) -> str:
         spicefile: Path to the spice netlist.
         subckt: Subcircuit name to inspect.
     """
+    bad = _missing(spicefile=spicefile)
+    if bad:
+        return bad
     lines = []
     with open(spicefile) as fi:
         for raw in fi:
@@ -710,6 +740,9 @@ def stackorder(spicefile: str, cell: str, terminal: str = "D",
         group: Only this column, by netlist group name, e.g. "xnd".
         verbose: List the instances in each column too.
     """
+    bad = _missing(spicefile=spicefile)
+    if bad:
+        return bad
     cmd = ["cicpy", "stackorder", spicefile, cell, "--terminal", terminal]
     if group:
         cmd += ["--group", group]
@@ -739,11 +772,24 @@ def checkroutes(cicfile: str, techfile: str, cell: str, includes: list[str] | No
         cell: The cell to check.
         includes: Other .cic files the design references.
     """
+    bad = _missing(cicfile=cicfile, techfile=techfile)
+    if bad:
+        return bad
     cmd = ["cicpy", "checkroutes", cicfile, techfile, cell]
     for inc in (includes or []):
         cmd += ["--I", inc]
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    shorts, opens = _parse_connectivity(proc.stdout + proc.stderr)
+    raw = _strip_ansi(proc.stdout + proc.stderr)
+    shorts, opens = _parse_connectivity(raw)
+    #- CLEAN IS A VERDICT THE RUN HAS TO REACH, not what is left when
+    #- nothing was parsed. A crash produces no shorts and no opens,
+    #- and reading that as "clean" is the worst answer this tool can
+    #- give: it says the layout is fine. Only the CLI's own success
+    #- line means clean.
+    if not shorts and not opens and "no shorts, no opens" not in raw:
+        return (f"{cell}: checkroutes reached no verdict "
+                f"(exit {proc.returncode}). THIS IS NOT A CLEAN RESULT.\n"
+                + (raw.strip() or "(no output)"))
     out = [f"{cell}: {len(shorts)} shorts, {len(opens)} opens"]
     if shorts:
         out.append("shorts:")
@@ -781,6 +827,9 @@ def tracks(cicfile: str, techfile: str, cell: str, layer: str = "",
               still usable at the other.
         includes: Other .cic files the design references.
     """
+    bad = _missing(cicfile=cicfile, techfile=techfile)
+    if bad:
+        return bad
     args = ["tracks", cicfile, techfile, cell]
     if layer:
         args += ["--layer", layer]
@@ -815,6 +864,9 @@ def blockers(cicfile: str, techfile: str, cell: str, net: str, box: str,
         box: "X1:X2:Y1:Y2", the column to test.
         includes: Other .cic files the design references.
     """
+    bad = _missing(cicfile=cicfile, techfile=techfile)
+    if bad:
+        return bad
     return _run_cic("blockers", cicfile, techfile, cell,
                     "--net", net, "--box", box, includes=includes)
 
@@ -843,6 +895,9 @@ def findroute(cicfile: str, techfile: str, cell: str, net: str,
         stop: "X,Y,LAYER".
         includes: Other .cic files the design references.
     """
+    bad = _missing(cicfile=cicfile, techfile=techfile)
+    if bad:
+        return bad
     return _run_cic("findroute", cicfile, techfile, cell,
                     "--net", net, "--start", start, "--stop", stop,
                     includes=includes)

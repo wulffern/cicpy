@@ -96,17 +96,6 @@ _counter = itertools.count()
 #- one).
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill", "xspace",
                  "wires", "wires_key")
-#- THE HOOK VOCABULARY IS THE FRAMEWORK'S OWN. LayoutCell.layout()
-#- dispatches these eight phases, a cell gets all of them by ordinary
-#- override -- the class IS the LayoutCell -- and a subcell class had
-#- a hand-kept whitelist of two, which is only ever a list of what
-#- someone has needed so far. beforePlace and beforeRoute keep their
-#- own path (run_stack_pycells, where beforeRoute's return value
-#- claims the stack); the rest arrive at their phase.
-_HOOK_NAMES = ("beforePlace", "afterPlace", "beforeRoute", "afterRoute",
-               "beforePaint", "afterPaint", "beforePorts", "afterPorts")
-
-
 def _user_bases(cls):
     """The design-authored classes of cls's MRO, base first.
 
@@ -128,16 +117,51 @@ def _attrs(cls, keys):
     return out
 
 
-def hooks_of(cls):
-    """{hook name: plain function} the DESIGN declared on a subcell
-    class. From the user classes' dicts, not getattr: the group base
-    classes are framework and their methods are not hooks."""
-    return _attrs(cls, _HOOK_NAMES)
-
-
 class Subcell:
-    """Marker mixin of a declared subcell: Stack/DiffPair/Mirror."""
+    """Marker mixin of a declared subcell: Stack/DiffPair/Mirror.
+
+    AND THE PHASES, as the no-ops a design overrides. These are the
+    same eight LayoutCell.layout() dispatches, so a subcell class and
+    a cell class are written the same way -- override the phase you
+    care about, call super() if the base does anything.
+
+    They are methods, not a registry: there was a `_HOOK_NAMES`
+    whitelist and a `hooks_of()` that read the design's class dicts to
+    tell a declared hook from an inherited one, and neither buys
+    anything. Every one of these names is free on StackGroup, so
+    calling the method IS the dispatch, and a design that declares
+    none pays for nothing. (`route` is the one name that cannot join
+    them: Cell.route is real, and a hook would shadow it.)
+
+    `beforeRoute` is the only one whose return value is read: True
+    means "this subcell is routed, the built-in router must not touch
+    it".
+    """
     type = "stack"
+
+    def beforePlace(self, entry):
+        return None
+
+    def afterPlace(self, entry):
+        return None
+
+    def beforeRoute(self, entry):
+        return None
+
+    def afterRoute(self, entry):
+        return None
+
+    def beforePaint(self, entry):
+        return None
+
+    def afterPaint(self, entry):
+        return None
+
+    def beforePorts(self, entry):
+        return None
+
+    def afterPorts(self, entry):
+        return None
 
     def __init_subclass__(cls, **kw):
         super().__init_subclass__(**kw)

@@ -489,16 +489,21 @@ def _run_stack_pycell(layout, entry, log, cell=None):
     name = entry["name"]
     grp = subcell_groups(layout).get(entry["stack"])
     if grp is not None:
-        from cicpy.sidecar import hooks_of
-        methods = hooks_of(type(grp))
-        if methods:
-            #- hooks are METHODS on the built group: (self, entry),
-            #- with self.layout the parent. Adapted to the shared
-            #- invoker's (layout, entry) shape here.
-            hooks = {h: (lambda fn=fn: lambda _lay, e: fn(grp, e))()
-                     for h, fn in methods.items()}
-            return _invoke_stack_hooks(hooks, name, layout, entry,
-                                       log, cell)
+        #- ORDINARY POLYMORPHISM. The group IS the design's class and
+        #- the base declares every phase, so these are method calls;
+        #- there is nothing to look up and nothing to adapt.
+        try:
+            grp.beforePlace(entry)
+        except Exception as e:
+            log.error(f"{name}: beforePlace() raised: {e}")
+        try:
+            handled = bool(grp.beforeRoute(entry))
+        except Exception as e:
+            log.error(f"{name}: beforeRoute() raised: {e}")
+            handled = False
+        if handled:
+            log.info(f"{name}: routed by its own pycell")
+        return handled
     from cicpy.sidecar import import_beside
     dirname = getattr(layout, "dirname", "") or ""
     #- reload: the per-stack file is the one pycell edited between

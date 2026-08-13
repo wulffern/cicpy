@@ -59,7 +59,7 @@ log = logging.getLogger("BlockCell")
 #- on any layer a route uses -- whatever they connect to reaches li,
 #- and the li is in the view already. Copying them made the view three
 #- times its size to say nothing new.
-CONDUCTORS = ("METAL", "CUT")
+CONDUCTORS = ("METAL",)
 
 
 class BlockCellInstance(Instance):

@@ -53,7 +53,6 @@ class Magic(cic.LayoutCell):
         #- it is asked.
         self.uses = []
         self._pending_use = None
-        self._flatmetal = None
         self.dirname = ""
         self.bb_x1 = cic.INT_MAX
         self.bb_y1 = cic.INT_MAX

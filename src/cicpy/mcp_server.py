@@ -260,6 +260,7 @@ def render(
     height: int = 1200,
     flightlines: list[str] | None = None,
     auto_libs: bool = True,
+    block: bool = False,
 ) -> Image:
     """Render a cell to an image and return it inline.
 
@@ -281,6 +282,13 @@ def render(
             A cell that instantiates finished blocks needs them all or
             the render dies on the first unresolved reference; set
             False to pass `includes` alone.
+        block: Draw the cell's BLOCK VIEW instead of the cell: what a
+            route would run into, at every depth. A cell read from a
+            .mag keeps its own paint and names the rest with `use`, so
+            the picture of the cell and the picture of what is in the
+            way are not the same picture -- a standard cell looks like
+            two pins and two supply bars until this is on, and then
+            the via stacks that block a lane are in it.
         flightlines: Nets to draw FLIGHTLINES for -- each net's pins
             boxed and joined by a dashed line, over the layout that may
             or may not connect them. Pass the nets `checkroutes` calls
@@ -308,6 +316,16 @@ def render(
         rules = ciclib.Rules(techfile)
         design = ciclib.Design()
         design.fromJsonFilesWithDependencies(cicfile, includes)
+        if block:
+            #- the block view is a cell like any other, so it prints
+            #- through the same printer -- flightlines included
+            target = design.cells.get(cell)
+            if target is None:
+                raise ValueError(f"no cell {cell!r} in {cicfile}")
+            view = ciclib.Design()
+            for b in target.blockCell().blocks():
+                view.add(b)
+            design = view
         nets = list(flightlines or [])
         if nets == ["*"]:
             nets = _all_multi_pin_nets(design, cell)

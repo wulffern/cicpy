@@ -79,64 +79,42 @@ class Cell(Rect):
         """
         return []
 
+    def blockCell(self):
+        """This cell as a block view: its conductors and what it places.
+
+        Built once per cell and remembered on it. See
+        `core/blockcell.py` -- the view is a CELL, with a
+        BlockCellInstance per cell placed, so nothing is copied per
+        instance and a device cell used forty times is held once.
+        """
+        from .blockcell import BlockCell
+        return BlockCell.of(self)
+
     def flatMetal(self, used_only=False, hidden_only=False):
-        """Every rect below this cell, in this cell's own frame.
+        """Every conductor below this cell, in this cell's own frame.
 
-        THE CELL TRAVERSES ITS OWN HIERARCHY, once, and remembers the
-        answer. This is an obstacle view, not a layout: nothing is
-        added to `children`, so what the cell IS does not change. It
-        answers only "what would a route run into here" -- which is
-        the question `tracks`, `blockers`, the maze router and the
-        connectivity check all ask, and which none of them could ask
-        through a cell that placed other cells.
-
-        Measured on LELO_TEMP_DIG: a JNWTR standard cell came back as
-        its pins and its two M4 supply bars, because the M2 and M3 of
-        its M1-M4 via stacks are inside the cells it uses. Every tool
-        called those columns free metal and the GDS was the first
-        thing that knew otherwise.
+        The flat form of `blockCell()`, for a caller that wants a list
+        rather than a walk. It answers "what would a route run into
+        here" -- the question `tracks`, `blockers`, the maze router and
+        the connectivity check all ask, and which none of them could
+        ask through a cell that places other cells. Measured on
+        LELO_TEMP_DIG: a JNWTR standard cell came back as its pins and
+        its two M4 supply bars, because the M2 and M3 of its M1-M4 via
+        stacks are inside the cells it uses.
 
         `used_only` leaves out the cell's own rects. `hidden_only`
         leaves out everything a caller walking `children` can already
         see, which is what the rect collector wants: it descends into
         instances itself, and would count them twice.
         """
-        if getattr(self, "_flatmetal", None) is None:
-            own = [c.getCopy() for c in self.children
-                   if hasattr(c, "isRect") and c.isRect()]
-            hidden, placed = list(self.hiddenUses()), []
-            for child in self.children:
-                if not (hasattr(child, "isInstance") and child.isInstance()):
-                    continue
-                sub = (getattr(child, "layoutcell", None)
-                       or getattr(child, "_cell_obj", None))
-                if sub is None or sub is self:
-                    continue
-                placed.append((sub, int(child.x1), int(child.y1),
-                               getattr(child, "angle", "") == "MY",
-                               getattr(child, "angle", "") == "MX"))
-            def spread(entries):
-                out = []
-                for sub, dx, dy, mx, my in entries:
-                    for r in sub.flatMetal():
-                        rr = r.getCopy()
-                        #- a mirror is about the placed cell's own
-                        #- origin, which is where the offset puts it
-                        if mx:
-                            rr.mirrorY(0)
-                        if my:
-                            rr.mirrorX(0)
-                        rr.translate(dx, dy)
-                        out.append(rr)
-                return out
-
-            self._flatmetal = (own, spread(hidden), spread(placed))
-        own, hidden, placed = self._flatmetal
+        block = self.blockCell()
         if hidden_only:
-            return list(hidden)
+            return block.rects(hidden_only=True)
+        out = block.rects()
         if used_only:
-            return list(hidden) + list(placed)
-        return list(own) + list(hidden) + list(placed)
+            own = {id(r) for r in block.own}
+            return [r for r in out if id(r) not in own]
+        return out
 
     def getPort(self,name:str):
         p = None

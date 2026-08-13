@@ -96,14 +96,15 @@ _counter = itertools.count()
 #- one).
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill", "xspace",
                  "wires", "wires_key")
-#- `afterPorts` is the third, because a PORT is decided after the
-#- routing: addAllPorts takes the first rect it finds on a net, and
-#- the framework then faces each signal port the way its net leaves.
-#- A cell whose pins are all on one layer its neighbours may not route
-#- on -- a strip of standard cells, whose pins are li -- can only say
-#- otherwise here. Anything set in beforeRoute is overwritten before
-#- the cell is published.
-_HOOK_NAMES = ("beforePlace", "beforeRoute", "afterPorts")
+#- THE HOOK VOCABULARY IS THE FRAMEWORK'S OWN. LayoutCell.layout()
+#- dispatches these eight phases, a cell gets all of them by ordinary
+#- override -- the class IS the LayoutCell -- and a subcell class had
+#- a hand-kept whitelist of two, which is only ever a list of what
+#- someone has needed so far. beforePlace and beforeRoute keep their
+#- own path (run_stack_pycells, where beforeRoute's return value
+#- claims the stack); the rest arrive at their phase.
+_HOOK_NAMES = ("beforePlace", "afterPlace", "beforeRoute", "afterRoute",
+               "beforePaint", "afterPaint", "beforePorts", "afterPorts")
 
 
 def _user_bases(cls):

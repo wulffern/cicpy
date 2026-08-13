@@ -665,7 +665,7 @@ class SubcellLayout(SidecarPycell, LayoutCell):
             pr.y1 = max(pr.y1, box.y1)
             pr.y2 = min(pr.y2, box.y2)
             layout.updatePort(net, pr)
-        self.afterPortsHook(layout)
+        self.designHook("afterPorts", layout)
 
     @staticmethod
     def _pinRects(layout, net):
@@ -680,33 +680,50 @@ class SubcellLayout(SidecarPycell, LayoutCell):
                 out.append(r)
         return out
 
-    def afterPortsHook(self, layout):
-        """The design's own say on this subcell's ports.
+    #- ---------------------------------------------------------------
+    #- The design's own hooks, at every phase that has one
+    #- ---------------------------------------------------------------
 
-        Everything above decides a port from the pins the netlist
-        gives; a cell may know better. A strip of standard cells
-        publishes eight signals on li -- the one layer the design
-        reserves for power -- and the level above then has to meet li
-        eight times. The subcell class carries those pins up and says
-        so here, which is the only phase where saying it survives:
-        addAllPorts has run, and nothing after this moves a port.
+    def designHook(self, name, layout):
+        """Run the subcell classes' `name` hook, if they declare it.
 
         THE GROUP IS THE CLASS. A declared subcell subclasses the real
         StackGroup, so the built group's own type is the design's
-        class and its hooks are found on it -- no need for the plan to
-        carry a reference the derived spec does not keep.
+        class and its hooks are found on it -- the derived spec a
+        subcell is built from does not carry a class reference, and
+        does not need to.
+
+        beforePlace and beforeRoute do not come through here: they
+        have their own path in run_stack_pycells, where beforeRoute's
+        return value decides whether the built-in router leaves the
+        stack alone.
         """
         from cicpy.sidecar import hooks_of
         from .subcell import subcell_groups
-        entry = self.entry or {}
-        for name, grp in (subcell_groups(layout) or {}).items():
-            hook = hooks_of(type(grp)).get("afterPorts")
+        for gname, grp in (subcell_groups(layout) or {}).items():
+            hook = hooks_of(type(grp)).get(name)
             if hook is None:
                 continue
             try:
-                hook(grp, entry)
+                hook(grp, self.entry or {})
             except Exception as e:
-                self.log.error(f"{name}: afterPorts() raised: {e}")
+                self.log.error(f"{gname}: {name}() raised: {e}")
+
+    def afterPlace(self, layout):
+        super().afterPlace(layout)
+        self.designHook("afterPlace", layout)
+
+    def afterRoute(self, layout):
+        self.designHook("afterRoute", layout)
+
+    def beforePaint(self, layout):
+        self.designHook("beforePaint", layout)
+
+    def afterPaint(self, layout):
+        self.designHook("afterPaint", layout)
+
+    def beforePorts(self, layout):
+        self.designHook("beforePorts", layout)
 
     def _runStackPycells(self):
         """The subcell's own hooks, found under the name it is BUILT as.

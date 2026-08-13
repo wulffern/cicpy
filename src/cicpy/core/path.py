@@ -357,6 +357,31 @@ class Step:
         return cls()
 
 
+def trace(path, step, coord, cur):
+    """Where one step of a story resolved to, when asked.
+
+    `CICPY_TRACE=<net>` logs every anchored step of that net: the
+    anchor, what it came out as, where the path was, and the rect it
+    is aiming at. It is the question that matters when a story lands
+    somewhere odd, and answering it any other way means reading the
+    finished geometry -- which is the same coordinates twice removed,
+    and stale the moment a build fails part way.
+
+    Measured, twice in one session: a leg that appeared 16 um from its
+    pin was aiming correctly and the geometry was from an earlier
+    build; and a `movex` to a channel that did not exist resolved to
+    None, was skipped in silence, and sent its net across the tile.
+    """
+    if os.environ.get("CICPY_TRACE") != path.net:
+        return
+    stop = path.anchorRect(path.stopRects)
+    where = (f"{stop.layer}({int(stop.x1)},{int(stop.y1)})-"
+             f"({int(stop.x2)},{int(stop.y2)})" if stop is not None
+             else "no stop rect")
+    log.info(f"trace {path.net}: {step.name} {step.anchor!r} -> {coord} "
+             f"(from {cur}, aiming at {where})")
+
+
 def _on(rect, at=None):
     """A point on a rect: its centre, or the middle of one edge."""
     cx, cy = int(rect.centerX()), int(rect.centerY())
@@ -487,6 +512,7 @@ class MoveX(Step):
     def apply(self, path, cur):
         x, y, layer = cur
         c = path.resolveAnchor(self.anchor)
+        trace(path, self, c, cur)
         if c is None:
             return cur
         if self.axis == "x":

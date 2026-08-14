@@ -218,9 +218,14 @@ class MazeRouter:
         That is what shorts two nets a track apart: each is legal on its own
         track, which is all is_free used to check, and touched the
         neighbour's.
+
+        It is THIS net's width, not the technology's: a supply widened
+        by its NETS rule reaches further from its centreline, and a
+        search that reserved the minimum would draw it straight over
+        the neighbouring track.
         """
         if layer not in self._clearance:
-            self._clearance[layer] = (self.rule(layer, "width")
+            self._clearance[layer] = (self.net_width(layer)
                                       + self.rule(layer, "space"))
         return self._clearance[layer]
 
@@ -247,6 +252,83 @@ class MazeRouter:
             if t.crosses_pin(self.net, lo, hi):
                 return False
         return near
+
+    def net_width(self, layer):
+        """The width a SEARCHED route of this net is drawn at.
+
+        `widthmult` in the NETS table: a supply carries real current and
+        wants the metal, and the technology minimum is a minimum and not
+        an intent. Rings and straps do not come through here -- they are
+        laid by addRouteRing with their own widthmult, and are already
+        wide -- so this only widens what the maze router draws.
+
+        The clearance the search reserved comes from the same rule, so a
+        widened wire still owns the tracks it covers.
+        """
+        w = self.rule(layer, "width")
+        mult = self.tm.net_rule(self.net).get("widthmult")
+        if mult:
+            try:
+                w = int(round(w * float(mult)))
+            except (TypeError, ValueError):
+                pass
+        return w
+
+    def keepaway_penalty(self, layer, coord, lo, hi):
+        """How much this step should cost EXTRA for running too close.
+
+        A PENALTY, not an exclusion. `keepaway` says a net is sensitive,
+        not that its neighbourhood is illegal -- make it illegal and a
+        crowded column has no path at all, and "unroutable" is a much
+        worse answer than "routed, but it went the long way". The search
+        pays a multiple of the step and takes the detour when one
+        exists.
+
+        It is symmetric: the clearance is wanted whether the sensitive
+        net is the one being routed or the one already there, so the
+        wider of the two nets' `keepaway` decides.
+
+        Returns 0 when nothing near is sensitive, so a technology with
+        no such rule pays one attribute lookup and nothing else.
+        """
+        if not self.tm.has_keepaway():
+            return 0
+        mine = self.tm.keepaway_tracks(self.net)
+        tracks = self.tm.tracks.get(layer)
+        if not tracks:
+            return 0
+        pitch = self.tm.hpitch if self.tm.directions.get(layer) == "h" \
+            else self.tm.vpitch
+        #- the widest clearance any rule asks for bounds the scan; a
+        #- narrower rule is then filtered per net below
+        reach = max(mine, self._max_keepaway()) * max(1, int(pitch))
+        if reach <= 0:
+            return 0
+        worst = 0
+        for t in self.tm.track_range(layer, coord - reach, coord + reach):
+            gap = abs(int(t.coord) - int(coord))
+            for other in set(t.wires) | set(t.pins):
+                if not other or other == self.net or other == "?":
+                    continue
+                want = max(mine, self.tm.keepaway_tracks(other))
+                if want <= 0 or gap > want * pitch:
+                    continue
+                spans = list(t.wires.get(other, ())) \
+                    + list(t.pins.get(other, ()))
+                if not any(s_lo < hi and lo < s_hi for s_lo, s_hi in spans):
+                    continue
+                #- closer is worse: touching the neighbouring track
+                #- costs the full `want`, the outermost one costs 1
+                worst = max(worst, want - gap // max(1, pitch))
+        return worst
+
+    def _max_keepaway(self):
+        m = getattr(self, "_maxka", None)
+        if m is None:
+            m = max([int(e.get("keepaway", 0) or 0)
+                     for _, e in self.tm.net_rules()] or [0])
+            self._maxka = m
+        return m
 
     def _via_layers(self, a_layer, b_layer):
         """The layers a via between a_layer and b_layer occupies."""
@@ -514,14 +596,17 @@ class MazeRouter:
         travel_ok = (layer not in self.pin_only
                      or getattr(self.tm, "pin_travel", ""))
         step = self.tm.hpitch if horizontal else self.tm.vpitch
-        weight = self.tm.layer_cost(layer)
+        weight = self.tm.layer_cost(layer, self.net)
         for delta in (-step, step) if travel_ok else ():
             nx, ny = (x + delta, y) if horizontal else (x, y + delta)
             if not self.in_bounds(nx, ny):
                 continue
             lo, hi = sorted(((x, nx) if horizontal else (y, ny)))
             if self.is_free(layer, y if horizontal else x, lo, hi):
-                out.append(((nx, ny, layer), abs(delta) * weight))
+                near = self.keepaway_penalty(layer, y if horizontal else x,
+                                             lo, hi)
+                out.append(((nx, ny, layer),
+                            abs(delta) * weight * (1 + near)))
 
         #- a via to an adjacent layer, if the column is clear. Asked
         #- once, not once per neighbouring layer: the column does not
@@ -622,7 +707,7 @@ class MazeRouter:
             #- the technology's width, not the track pitch. They happen
             #- to be equal here, which is exactly why the two were
             #- confused and why adjacent tracks abutted.
-            w = width or self.rule(layer, "width")
+            w = width or self.net_width(layer)
             half = w // 2
             #- A run must be long enough to satisfy the layer's minimum
             #- area. The technology carries `minlength` for this --

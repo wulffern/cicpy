@@ -126,10 +126,21 @@ class SidecarPycell:
         #- the rule that invented them -- has nothing to match against
         #- once a column is built as a cell of its own. Netlist first,
         #- height matching for the column the netlist says nothing of.
+        #- Both spellings of the index, because a schematic may draw the
+        #- fills one per symbol (xfill_p_su_0 .. _10) or as one vector
+        #- instance (xfill_p_su[10:0], netlisted as xfill_p_su<0>..<10>).
+        #- The second is worth supporting: fills are the bulk of what is
+        #- on the page -- 19 devices and their 76 supply pins out of 137
+        #- placements in LELOTEMP_BIAS_IBP -- and a vector instance
+        #- collapses each run to one symbol. Reading only the underscore
+        #- form silently yields no counts for the vector form, and the
+        #- column then builds with no fills at all rather than failing.
         counts = {}
         for inst in (getattr(getattr(layout, "ckt", None),
                              "instances", None) or []):
-            m = re.fullmatch(r"xfill_(.+)_(\d+)", getattr(inst, "name", ""))
+            name = getattr(inst, "name", "")
+            m = (re.fullmatch(r"xfill_(.+)_(\d+)", name)
+                 or re.fullmatch(r"xfill_(.+)<(\d+)>", name))
             if m:
                 counts[m.group(1)] = max(counts.get(m.group(1), 0),
                                          int(m.group(2)) + 1)

@@ -32,10 +32,11 @@ cell:
         supplies = [{"net": "VDD_1V8", "ring": "t", "strap": "top"}]
 
         channel = 8            # um between the rows in the top
-        routes = [             # the top's ChannelRoutes; presence of
-            {"net": "VCP", "track": 6,          # `routes` enables the
-             "drops": [[n_mirr, "M2", "left"]]},  # hier build
-        ]
+        routes = [             # the top's ChannelRoutes: how the
+            {"net": "VCP", "track": 6,           # pieces are JOINED.
+             "drops": [[n_mirr, "M2", "left"]]},   # May be empty; the
+        ]                                   # subcell classes above are
+                                            # what make the cell assembled
 
 The class name is the subcell name. `rows` and drop entries
 reference the classes themselves, so a typo is a NameError at import
@@ -63,13 +64,15 @@ the cell the framework builds is the instance of the design's own
 class, and it is handed to itself as the pycell, so every hook the
 design declares runs.
 
-Which recipe a cell gets is a property of what it DECLARES, not of
-how it was constructed: declare `routes` and the cell is made of
+Which recipe a cell gets is a property of what it HOLDS, not of how
+it was constructed: declare subcell classes and the cell is made of
 subcells -- hierarchy() splits its netlist, builds each part as a
-cell and registers it, and place() tiles them -- otherwise it is made
-of devices. One pass, one process, one object; there is no <CELL>_HIER
-scaffold, no generated netlist between two passes, and no role to
-pass to a constructor.
+cell and registers it, and place() tiles them -- declare none and it
+is made of devices. `routes` says how the pieces are JOINED, not
+whether they exist: a cell with subcells and `routes = []` is still
+assembled, it simply has no channel routes to declare. One pass, one
+process, one object; there is no <CELL>_HIER scaffold, no generated
+netlist between two passes, and no role to pass to a constructor.
 
 `compile()` turns the class into the spec dict the recipes consume;
 detection in cic.py is by content: a module defining a SidecarCell
@@ -204,12 +207,13 @@ class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
     (um between the rows) and `routes` (one ChannelRoute per crossing
     net).
 
-    WHAT A CELL IS MADE OF is what `routes` decides. Declared, the
-    cell is made of SUBCELLS: hierarchy() splits its netlist, builds
-    each part as a cell of its own and registers it, place() tiles
-    them and route() lays the crossing nets. Undeclared, the cell is
-    made of DEVICES: the flat recipe places, fills, taps and routes
-    them. Either way it is one object, one pass, one process.
+    WHAT A CELL IS MADE OF is what it HOLDS. Nested Subcell classes
+    and the cell is made of SUBCELLS: hierarchy() splits its netlist,
+    builds each part as a cell of its own and registers it, place()
+    tiles them and route() lays the crossing nets. None, and the cell
+    is made of DEVICES: the flat recipe places, fills, taps and routes
+    them. `routes` decides neither -- it says how the pieces are
+    JOINED. Either way it is one object, one pass, one process.
 
     An instance IS the LayoutCell the framework builds, and its own
     pycell -- so beforePlace, afterPlace, beforeRoute, afterPorts and

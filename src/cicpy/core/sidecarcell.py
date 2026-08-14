@@ -398,9 +398,13 @@ class HierPycell:
     addRouteConnection drops -- plus the supply rings, before handing
     over to the ordinary router.
 
-    Mixed into SidecarCell. A cell gets this recipe by DECLARING
-    `routes`; a design that needs more than the declarations
-    overrides place()/route() on its own class and calls super().
+    Mixed into SidecarCell. A cell gets this recipe by HOLDING
+    subcells -- see SidecarCell.place()/route(), which branch on
+    `self.subcells`, and hierarchy(), which is unconditional. It is
+    not `routes` that decides: an assembled cell may declare
+    `routes = []` and lay its crossing nets some other way. A design
+    that needs more than the declarations overrides place()/route()
+    on its own class and calls super().
     """
 
     #- ------------------------------------------------------------

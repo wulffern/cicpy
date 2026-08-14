@@ -88,7 +88,8 @@ class LELOTEMP_OTAR(SidecarCell):
 
     #- the assembled top IS the cell, so its declarations sit on the
     #- cell class: `channel` um between the rows, one ChannelRoute
-    #- per crossing net; presence of `routes` enables the hier build
+    #- per crossing net. `routes` says how the pieces are JOINED; it
+    #- is the subcell classes above that make the cell assembled
     channel = 8
     routes = [
         {"net": "VCP", "track": 6, "drops": [[n_mirr, "M2", "left"],
@@ -104,9 +105,11 @@ into every sidecar cell -- `SidecarPycell`, which places devices, and
 `HierPycell`, whose `hierarchy()` splits the cell's netlist and
 builds a LayoutCell per subcell before `place()` tiles them.
 
-Which recipe a cell gets is what it DECLARES, not how it was built:
-declare `routes` and the cell is made of SUBCELLS, otherwise it is
-made of DEVICES. One object, one pass, one process — there is no
+Which recipe a cell gets is what it HOLDS, not how it was built:
+declare subcell classes and the cell is made of SUBCELLS, declare
+none and it is made of DEVICES. `routes` decides neither — it says
+how the pieces are joined, and an assembled cell may declare
+`routes = []`. One object, one pass, one process — there is no
 `<CELL>_HIER` scaffold, no generated netlist between two passes and
 no role to pass in. Detection is by content: a `<CELL>.py` defining a
 `SidecarCell` subclass is the sidecar; a module with module-level

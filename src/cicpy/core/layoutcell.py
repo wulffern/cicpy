@@ -2128,6 +2128,101 @@ class LayoutCell(Cell):
                     self.routes.append(ro)
                     rr.add(ro)
 
+    def addAntennaDiode(self, path:str, cell:str="REYTR_ANTX1_CV", layer:str="M1",
+                        includeInstances:str="", excludeInstances:str="",
+                        includeGroups:str="", location:str="bottom",
+                        space:int=0, options:str="", diodePort:str="A"):
+        """Hang an antenna diode off every net matching `path`.
+
+        A long wire on a high metal collects charge during processing and
+        discharges through whatever gate it reaches; the check is a ratio
+        of antenna area to gate area. A diode on the net gives the charge
+        somewhere else to go, which is why the fix is a placement and not
+        a reroute -- there is nothing wrong with the wire.
+
+        `path` is a regex over net names, the same grammar the other
+        route commands take. For each match the diode is placed beside
+        the net's own access rects and its `diodePort` is routed to them.
+
+        The diode is a physical-only instance, like the cut cells, so
+        placement does not need it in the netlist. LVS DOES: a diode
+        extracts as a device where a cut extracts as connectivity, so
+        the schematic has to carry the same cell on the same net or the
+        comparison will show a device on one side only. That is a real
+        edit to the design, not something this command can do for you.
+        """
+        from .route import Route
+
+        placed = 0
+        for node in list(self.nodeGraphList):
+            if not re.search(path, node):
+                continue
+            rects = self.getNodeAccessRects(
+                node, layer, includeInstances=includeInstances,
+                excludeInstances=excludeInstances, includeGroups=includeGroups,
+                options=options)
+            if not rects:
+                self.log.warning(
+                    f"addAntennaDiode: {node} has no {layer} access rect "
+                    f"to land a diode on; skipped")
+                continue
+
+            #- one diode per net, on the first access rect: the check is
+            #- per gate, and a second diode on the same net adds area
+            #- without removing a violation
+            r = rects[0]
+            probe = self.parent.getLayoutCell(cell) if self.parent else None
+            if probe is None:
+                self.log.warning(
+                    f"addAntennaDiode: no layoutcell {cell}; is the "
+                    f"library on the scan path?")
+                return placed
+
+            pbox = probe.getRect()
+            w = int(pbox.width())
+            h = int(pbox.height())
+            gap = int(space) if space else h
+            x = int(r.x1)
+            if location == "bottom":
+                y = int(r.y1) - h - gap
+            elif location == "top":
+                y = int(r.y2) + gap
+            elif location == "left":
+                x = int(r.x1) - w - gap
+                y = int(r.y1)
+            else:
+                x = int(r.x2) + gap
+                y = int(r.y1)
+
+            name = f"xantenna_{node}_{placed}"
+            inst = self.addPhysicalInstance(cell, name, x, y)
+            if inst is None:
+                continue
+
+            port = inst.layoutcell.getPort(diodePort) if inst.layoutcell else None
+            if port is None:
+                self.log.warning(
+                    f"addAntennaDiode: {cell} has no port {diodePort}; "
+                    f"placed {name} unrouted")
+                placed += 1
+                continue
+
+            #- a Port IS a Rect, in the diode's own frame; build the
+            #- placed copy rather than mutating the library cell's port
+            start = Rect(layer, int(port.x1) + x, int(port.y1) + y,
+                         int(port.width()), int(port.height()))
+            ro = Route(node, layer, [start], [r], options, "-|--")
+            self._annotateRoute(ro, "addAntennaDiode", {
+                "path": path, "cell": cell, "layer": layer,
+                "location": location, "includeInstances": includeInstances,
+            })
+            self.routes.append(ro)
+            placed += 1
+
+        self.log.info(f"addAntennaDiode(path={path}, cell={cell}): "
+                      f"placed {placed}")
+        return placed
+
     def addRectangle(self, layer, x1, y1, width, height, angle=""):
         self.log.info(f"addRectangle(layer={layer}, x1={x1}, y1={y1}, width={width}, height={height}, angle={angle})")
         r = Rect(layer,x1,y1,width,height)

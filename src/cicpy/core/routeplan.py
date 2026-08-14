@@ -86,11 +86,27 @@ def wires_lookup(entry, key, instances=()):
     if not wires or os.environ.get("CICPY_NO_ROUTEPLAN"):
         return None
     declared = entry.get("wires_key", "")
-    if declared != key:
+    #- A mismatch condemns the COORDINATES, not the whole block.
+    #-
+    #- What goes stale is a resolved trunkx or bandy: an absolute number
+    #- that meant something only against the placement it was computed
+    #- from. An anchor does not -- trunktab/trunkright/trunkleft are
+    #- recomputed from the net's own pins every run -- and a `blocked`
+    #- declaration carries no geometry at all, it only says this net is
+    #- not for the maze router to draw.
+    #-
+    #- Throwing those away with the coordinates is what made renaming
+    #- instances expensive: the fingerprint covers every member's name,
+    #- so collapsing a fill run to a vector instance invalidated a whole
+    #- block, the router searched, and in LELOTEMP_BIAS_IBP's p_su it
+    #- then shorted VDD_1V8 to VSU -- the very thing the block's three
+    #- `blocked` lines existed to prevent.
+    stale = declared != key
+    if stale:
         log.warning(f"{entry.get('name', '?')}: wires_key {declared!r} "
-                    f"does not match the placement ({key}); the wires "
-                    f"block is stale -- searching afresh")
-        return None
+                    f"does not match the placement ({key}); any wire "
+                    f"declaring a coordinate is dropped and searched "
+                    f"afresh, the rest replay")
     insts = [i for i in (instances or []) if i is not None]
     span = None
     if insts:
@@ -103,6 +119,15 @@ def wires_lookup(entry, key, instances=()):
     for w in wires:
         if len(w) < 2:
             continue
+        if stale:
+            #- the coordinate-bearing ones, and only those
+            if len(w) >= 4 and re.search(r"(trunkx|bandy)=?-?\d",
+                                         str(w[3]) or ""):
+                log.warning(
+                    f"{entry.get('name', '?')}: {w[0]} declares a "
+                    f"coordinate against a placement that has changed "
+                    f"-- searching this net afresh")
+                continue
         if span is not None and len(w) >= 4:
             m = re.search(r"trunkx=(-?[0-9.]+)", str(w[3]) or "")
             if m and not (span[0] <= float(m.group(1)) <= span[1]):

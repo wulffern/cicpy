@@ -51,10 +51,23 @@ class RoutePlan(unittest.TestCase):
         self.assertEqual(lut["VD1"][3], "trunkx=1000")
         self.assertEqual(lut["VSU"][1], "blocked")
 
-    def test_stale_key_is_rejected(self):
+    def test_stale_key_drops_only_the_coordinates(self):
+        """A mismatch condemns the coordinates, not the block.
+
+        A resolved trunkx meant something only against the placement it
+        came from, so it goes. A `blocked` declaration carries no
+        geometry and cannot be stale that way, so it stays -- dropping
+        it was how renaming a fill run silently removed the three
+        declarations holding VDD_1V8 off VSU in LELOTEMP_BIAS_IBP.
+        """
         from cicpy.core.routeplan import stack_key, wires_lookup
         key = stack_key(STACK)
-        self.assertIsNone(wires_lookup(self._entry("deadbeef0000"), key))
+        lut = wires_lookup(self._entry("deadbeef0000"), key)
+        self.assertIsNotNone(lut)
+        #- VD1 declared trunkx=1000; gone
+        self.assertNotIn("VD1", lut)
+        #- VSU declared nothing but its own absence; kept
+        self.assertEqual(lut["VSU"][1], "blocked")
 
     def test_off_switch(self):
         from cicpy.core.routeplan import stack_key, wires_lookup

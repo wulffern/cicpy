@@ -12,8 +12,14 @@ from cicpy.core.path import Path, Anchor, _TrackAnchor, _PinAnchor
 from cicpy.core.rules import Rules
 from cicpy.core.design import Design
 
-IP = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TECH = os.path.join(os.path.dirname(IP), "tech_sky130A", "cic", "sky130.tech")
+#- cicpy's OWN technology, not a sibling checkout's. This reached for
+#- tech_sky130A, which CI does not have, so setUpClass raised
+#- FileNotFoundError and the whole class ERRORED there -- a red build
+#- for a missing neighbour rather than anything about a Path.
+#- Nothing here is sky130-specific: the test is that a story survives
+#- a round trip, and any technology answers that.
+TECH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                    "..", "transpile", "demo.tech")
 
 
 class TestPathJson(unittest.TestCase):

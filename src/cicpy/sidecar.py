@@ -300,9 +300,23 @@ class SidecarCell(SidecarPycell, HierPycell, LayoutCell):
         for c in cells:
             entry = {"name": c.__name__, "type": c.type, "cls": c}
             entry.update(_attrs(c, _SUBCELL_KEYS))
-            if "match" not in entry:
+            #- A DECLARATION THAT CANNOT CLAIM ANYTHING IS DROPPED, not
+            #- warned about and kept. `plan_from_netlist` reads
+            #- `s["match"]` and compiles it, so a subcell with none is
+            #- a KeyError and one with a broken regex is an re.error --
+            #- the whole build dies for a typo in one class, and the
+            #- message names neither the cell nor the subcell.
+            if not entry.get("match"):
                 log.warning(f"{cls.__name__}.{c.__name__}: no match "
-                            f"regex; the subcell claims no instances")
+                            f"regex; the subcell claims no instances "
+                            f"and is dropped")
+                continue
+            try:
+                re.compile(str(entry["match"]))
+            except re.error as e:
+                log.error(f"{cls.__name__}.{c.__name__}: bad match "
+                          f"regex {entry['match']!r}: {e}; dropped")
+                continue
             _warn_absolute_wires(f"{cls.__name__}.{c.__name__}", entry)
             subcells.append(entry)
         spec["subcells"] = subcells

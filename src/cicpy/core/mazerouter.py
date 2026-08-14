@@ -331,6 +331,16 @@ class MazeRouter:
         pieces). Both now ask this.
         """
         from cicpy.core.cut import Cut
+        #- BOTH TESTS, and the general one first. A 1x2 cut is narrow
+        #- in x and fits columns the layer's own via extent does not --
+        #- so asking only about the array that will be placed makes the
+        #- search take layer changes the rest of the router calls
+        #- illegal (a change directly on top of a pin, which
+        #- test_search_detours_around_a_blocked_column is about). The
+        #- general check is the invariant; the specific one only stops
+        #- the search planning a via the emitter will then refuse.
+        if not self.via_is_free(x, y, a_layer, b_layer):
+            return None
         for (hc, vc) in ((2, 1), (1, 2)):
             cand = Cut.getInstance(a_layer, b_layer, hc, vc)
             if cand is None:
@@ -689,7 +699,9 @@ class MazeRouter:
             #- SAY WHOSE VIA THIS IS. Instance contents are `!device`
             #- to the track map -- blocked under a name no net equals
             #- -- so an unnamed via of this net's own walls the net in.
-            inst.setNet(self.net)
+            #- `route_net`, not `net`: see BlockCellInstance. Every
+            #- instance has a `net` and almost none of them mean it.
+            inst.route_net = self.net
             layout.add(inst)
             ncut += 1
             #- pads sized to the cut that was actually placed, on BOTH

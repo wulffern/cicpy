@@ -14,11 +14,22 @@ LIB = os.path.join(IP, "rey_atr_sky130a", "design", "REY_ATR_SKY130A.cic")
 TECH = os.path.join(IP, "tech_sky130A", "cic", "sky130.tech")
 
 #- VDS's pin, and a spot in the mid channel with nothing in it.
-#- Recalibrated 2026-08-10: the publish frame shifts whenever flat
-#- content changes (here: the VIA4 tech-rule fix re-published OTAR),
-#- and these are fixture coordinates, not invariants.
-VDS_PIN = (267200, 92000)
-CLEAR = (267200, 350000)
+#-
+#- DERIVED, NOT WRITTEN DOWN. These were literals and they rotted: the
+#- publish frame shifts whenever flat content changes, so the y drifted
+#- out of the pin (92000, against a pin at 105000..109000) and three
+#- tests then asserted things about a point that is on no pin at all --
+#- which reads as a router regression and is a fixture one.
+#-
+#- THE FIXTURE ITSELF IS STILL IN ANOTHER REPOSITORY, which is wrong
+#- and is why these skip in CI. tests/unittests/fixture.py is the
+#- in-repo replacement (SAR9B_CV.cic.gz + demo.tech, which carries
+#- routing directions now); moving these tests onto it is not a
+#- repoint, because several of them need a particular SHAPE -- a
+#- foreign pin whose column is blocked but which can be routed around
+#- -- and that has to be found in the new design, not assumed.
+VDS_PIN = None
+CLEAR = None
 
 
 def _have_fixture():
@@ -37,6 +48,16 @@ class MazeRouterTest(unittest.TestCase):
         design = load_design(CIC, [LIB])
         cls.cell = design.cells["LELOTEMP_OTAR"]
         cls.tm = TrackMap(cls.cell, block_pins=True).build()
+        global VDS_PIN, CLEAR
+        g = cls.cell.nodeGraph.get("VDS")
+        rects = [p.get("M1") for p in getattr(g, "ports", [])
+                 if hasattr(p, "get") and p.get("M1") is not None]
+        if not rects:
+            raise unittest.SkipTest("fixture has no VDS pin on M1")
+        r = min(rects, key=lambda r: int(r.y1))
+        VDS_PIN = ((int(r.x1) + int(r.x2)) // 2,
+                   (int(r.y1) + int(r.y2)) // 2)
+        CLEAR = (VDS_PIN[0], int(cls.cell.y2) - 40000)
 
     def router(self, net):
         from cicpy.core.mazerouter import MazeRouter

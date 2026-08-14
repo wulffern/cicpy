@@ -73,13 +73,22 @@ class BlockCellInstance(Instance):
     def __init__(self, block, dx=0, dy=0, mx=False, my=False, net=""):
         super().__init__()
         self.block = block
-        #- AN INSTANCE MAY BELONG TO A NET. Almost none do -- a device
-        #- is a device -- but a via the router places is that net's,
-        #- and its contents are otherwise `!device`: metal blocked
-        #- under a name no net can equal. So the router's own vias
-        #- walled in the net that drew them, and a second link starting
-        #- on a pin the first had just vias'd over could not leave it
-        #- (one node explored, measured on LELO_TEMP's PWRUP_B).
+        #- AN INSTANCE MAY BELONG TO A NET, and says so through
+        #- `route_net` -- NOT through `net`. Almost no instance belongs
+        #- to one: a device is a device, and its internals are
+        #- `!device` on purpose, metal blocked under a name no net can
+        #- equal. A via the ROUTER places is the exception, and it is
+        #- the only one -- without it the router's own vias walled in
+        #- the net that drew them, and a chained route's second link
+        #- could not leave a pin the first had vias'd over (one node
+        #- explored, measured on LELO_TEMP's PWRUP_B).
+        #-
+        #- Reading `net` instead is wrong and quietly so: Instance
+        #- descends from Rect, so EVERY instance has one, and trusting
+        #- it published a device's internal metal under whatever net
+        #- the instance happened to carry -- foreign pins stopped
+        #- blocking vias (test_a_via_on_the_pin_layer_needs_to_know_
+        #- its_own_pin).
         self.net = net or ""
         self.cell = getattr(block, "name", "")
         self.instanceName = self.cell
@@ -177,7 +186,7 @@ class BlockCell(LayoutCell):
                 angle = getattr(child, "angle", "") or ""
                 self.place(sub, child.x1, child.y1,
                            angle == "MY", angle == "MX", hidden=False,
-                           net=getattr(child, "net", "") or "")
+                           net=getattr(child, "route_net", "") or "")
                 continue
             if hasattr(child, "isRect") and child.isRect() \
                     and self.blocking(child):

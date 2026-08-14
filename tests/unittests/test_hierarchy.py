@@ -8,6 +8,8 @@ layout three stages later.
 import re
 import unittest
 
+from cicpy.core.subcktcompat import instance_of
+
 import cicspi as spi
 
 from cicpy.core.hierarchy import plan_from_netlist, split_subckt
@@ -120,12 +122,12 @@ class SplitSubckt(unittest.TestCase):
         """`instances` shrank; positional indices left behind return the
         wrong instance, or run off the end."""
         for inst in self.ckt.instances:
-            self.assertIs(self.ckt.getInstance(inst.name), inst)
+            self.assertIs(instance_of(self.ckt, inst.name), inst)
 
     def test_the_instance_line_does_not_alias_the_port_list(self):
         """Editing a child's ports must not silently edit the parent's
         connection order."""
-        inst = self.ckt.getInstance("xcaps")
+        inst = instance_of(self.ckt, "xcaps")
         self.assertIsNot(inst.nodes, self.made["caps"].nodes)
 
     def test_the_subckts_are_registered_for_lookup(self):

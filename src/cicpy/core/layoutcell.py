@@ -1469,7 +1469,8 @@ class LayoutCell(Cell):
         cktinst = arr[0]
         param = arr[1]
         value = arr[2]
-        inst = self.ckt.getInstance(cktinst)
+        from .subcktcompat import instance_of
+        inst = instance_of(self.ckt, cktinst)
         if inst is not None:
             inst.setProperty(param, value)
 

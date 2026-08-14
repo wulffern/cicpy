@@ -1313,10 +1313,8 @@ class StackGroup(CellGroup):
         nm = getattr(inst, "instanceName", "") or ""
         if ckt is None or not nm:
             return None
-        try:
-            ci = ckt.getInstance(nm)
-        except Exception:
-            ci = None
+        from .subcktcompat import instance_of
+        ci = instance_of(ckt, nm)
         nodes = list(getattr(ci, "nodes", []) or []) if ci is not None else []
         #- only when the schematic states the tie: every pin one net
         if nodes and len(set(nodes)) == 1:

@@ -3646,11 +3646,19 @@ class LayoutCell(Cell):
                 if delta:
                     break
             if delta:
+                where = rects[0] if rects else None
                 cut.translate(delta[0], delta[1])
                 moved += 1
+                #- WHERE, not just how far. "cut moved 200,400" is true of
+                #- any cut in the cell and cannot be checked against the
+                #- geometry afterwards; the site and the layer can.
                 self.log.info(
-                    f"{self.name}: cut moved {delta[0]},{delta[1]} onto the "
-                    f"identical cut a subcell already has there")
+                    f"{self.name}: {getattr(cut, 'cell', '?')} moved "
+                    f"{delta[0]},{delta[1]} "
+                    f"({where[0] if where else '?'} at "
+                    f"{where[1] if where else '?'},"
+                    f"{where[2] if where else '?'}) onto the identical cut "
+                    f"a subcell already has there")
         if moved:
             self.updateBoundingRect()
 

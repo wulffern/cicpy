@@ -41,6 +41,7 @@ plausible.
 """
 import logging
 import os
+import re
 
 from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo
 from .route import Route
@@ -454,7 +455,18 @@ class End(Step):
             path.drawSegment(x, y, tx, y, layer)
         if y != ty:
             path.drawSegment(tx, y, tx, ty, layer)
-        if layer != r.layer:
+        #- `noendcut`, the same option the canned shapes take
+        #- (Route.addEndCuts). A story that lands where the CHILD has
+        #- already brought the net up does not need its own stack, and
+        #- drawing one anyway is not merely redundant -- the parent and
+        #- the child each centre a contact on their own copy of the
+        #- pin, and two contacts of one type that PARTIALLY overlap
+        #- have no legal form. Magic accepts it (the tiles resolve);
+        #- klayout reads the flattened GDS and sees one notched
+        #- polygon where a via must be a square. Measured on
+        #- LELOTEMP_CCMPR: two via2.1a, from an M1->M4 stack the
+        #- comparator already had at that pin.
+        if layer != r.layer and not re.search(r"noendcut", path.options or ""):
             path.drawVia(tx, ty, layer, r.layer)
         return (tx, ty, r.layer)
 

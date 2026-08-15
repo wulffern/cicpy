@@ -921,6 +921,18 @@ class LayoutCell(Cell):
                 r.moveTo(int(r.x1), y1 + y2 - int(r.y2))
             else:
                 r.moveTo(x1 + x2 - int(r.x2), int(r.y1))
+            #- AND SAY SO, FOR EVERY ANCESTOR. Skipping body
+            #- attribution on the mirrored instance itself is not
+            #- enough: the instance's own unmirrored PARENT runs the
+            #- same pass over the same rects one level up, against
+            #- pins that do not agree with them, and paints them
+            #- wrong. Measured on LELO_TEMP -- the comparator pair
+            #- reported shorts=0 asked directly and a VDD/VSS short
+            #- inside its own bounds asked through the tile, with
+            #- nothing routed at either level. A checker that answers
+            #- differently depending on where you stand is worse than
+            #- one that is wrong twice.
+            r.in_mirror = True
 
     def _aliasChildPortNets(self, inst, out, start):
         """A child's boundary net is the PARENT's net, under its name.
@@ -1035,7 +1047,8 @@ class LayoutCell(Cell):
             pins.append((net, layer,
                          pi.x1 + dx, pi.y1 + dy, pi.x2 + dx, pi.y2 + dy))
         body = [rr for rr in out[start:]
-                if not getattr(rr, "net", "") and not getattr(rr, "isPin", False)]
+                if not getattr(rr, "net", "") and not getattr(rr, "isPin", False)
+                and not getattr(rr, "in_mirror", False)]
         #- seed: the rect directly under a pin carries the pin's net
         for rr in body:
             layer = getattr(rr, "layer", "")

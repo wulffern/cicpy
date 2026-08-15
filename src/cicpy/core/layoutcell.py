@@ -760,7 +760,27 @@ class LayoutCell(Cell):
         out.sort(key=lambda r: (r.centerY(), r.centerX(), r.x1))
         return out
 
-    def _collectPhysicalRects(self, obj=None, dx=0, dy=0, out=None, active=None,
+    @staticmethod
+    def _applyTransformChain(rect, xforms):
+        """Place a rect through a chain of instances, innermost first.
+
+        `xforms` is the instance chain from the cell being asked down to
+        the cell the rect was drawn in, OUTERMOST FIRST. Each instance
+        maps its own cell's frame into its parent's, so composing them
+        from the inside out is the whole of the placement -- translation,
+        mirror and rotation together, applied ONCE.
+
+        This replaces `_applyInstanceAngle`, which translated on the way
+        down and folded the flat list on the way back up. The fold was
+        correct only relative to where the walk began, which is why
+        `checkroutes` gave one answer for a mirrored block asked directly
+        and another for the same block asked through its parent.
+        """
+        for inst in reversed(xforms):
+            inst._transformRect(rect)
+        return rect
+
+    def _collectPhysicalRects(self, obj=None, xforms=(), out=None, active=None,
                               include_ports=False):
         if out is None:
             out = []
@@ -793,7 +813,7 @@ class LayoutCell(Cell):
                 #- this `continue`.
                 if include_ports:
                     pr = child.getCopy()
-                    pr.translate(dx, dy)
+                    self._applyTransformChain(pr, xforms)
                     pr.parent = obj
                     pr.isPin = True
                     #- getCopy() returns a plain Rect and drops the
@@ -825,30 +845,19 @@ class LayoutCell(Cell):
                             child_cell = resolved
                 if child_cell is not None:
                     start = len(out)
-                    self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
-                    #- FIRST, before either of the two passes below.
-                    #- `setAngle` DOES mirror the instance's own port
-                    #- rects, so attribution and aliasing both want the
-                    #- body already in the mirrored frame. Measured on
-                    #- LELO_TEMP: this order 2 shorts, the other 3.
-                    mirrored = (getattr(child, "angle", "") or "").upper() \
-                        in ("MX", "MY")
-                    self._applyInstanceAngle(child, out, start)
+                    inner = tuple(xforms) + (child,)
+                    self._collectPhysicalRects(child_cell, inner, out, active, include_ports)
                     self._aliasChildPortNets(child, out, start)
-                    #- NOT FOR A MIRRORED INSTANCE. Attribution floods
-                    #- a net through a device body from the pins it
-                    #- overlaps, and a mirrored instance's pin rects do
-                    #- not agree with its mirrored body -- run there it
-                    #- painted a tap cell's own M1 bar with the signal
-                    #- net of the device beside it, and reported the
-                    #- bar shorted to its own PTAPC. The levels BELOW
-                    #- are unmirrored and have already attributed every
-                    #- body inside, so nothing is lost by skipping it
-                    #- here. (Measured on LELO_TEMP: with it, 2 shorts,
-                    #- both false and both inside the mirror; without
-                    #- it, 0.)
-                    if not mirrored:
-                        self._attributeInstanceBody(child, out, start, dx, dy)
+                    #- ALWAYS, mirrored or not. The body is now in the
+                    #- same frame as the instance's own pins -- both got
+                    #- there through `Instance._transformRect`, the pins
+                    #- at `setAngle` time and the body just now -- so a
+                    #- mirrored instance no longer needs excusing from
+                    #- attribution. Skipping it (commit 60f968e) left the
+                    #- mirrored bodies netless, and a netless rect is not
+                    #- neutral to the connectivity flood: it is a
+                    #- conductor belonging to whatever it lies between.
+                    self._attributeInstanceBody(child, out, start, xforms)
                     #- AND WHAT THAT CELL PLACES, which its children do
                     #- not say. A cell read from a .mag keeps its own
                     #- paint and drops its `use` records, so a standard
@@ -864,23 +873,21 @@ class LayoutCell(Cell):
                     #- for the whole subtree would count those twice.
                     flat = getattr(child_cell, "flatMetal", None)
                     if flat is not None:
-                        hstart = len(out)
                         for r in flat(hidden_only=True):
                             rr = r.getCopy()
-                            rr.translate(dx + child.x1, dy + child.y1)
+                            self._applyTransformChain(rr, inner)
                             rr.parent = child
                             rr.device_metal = True
                             out.append(rr)
-                        self._applyInstanceAngle(child, out, hstart)
                 continue
 
             if child.isCell():
-                self._collectPhysicalRects(child, dx, dy, out, active, include_ports)
+                self._collectPhysicalRects(child, xforms, out, active, include_ports)
                 continue
 
             if child.isRect():
                 rr = child.getCopy()
-                rr.translate(dx, dy)
+                self._applyTransformChain(rr, xforms)
                 rr.parent = obj
                 if hasattr(child, "route_owner_info"):
                     rr.route_owner_info = child.route_owner_info
@@ -889,76 +896,6 @@ class LayoutCell(Cell):
 
         active.remove(obj_id)
         return out
-
-    @staticmethod
-    def _applyInstanceAngle(inst, out, start):
-        """A MIRRORED INSTANCE IS MIRRORED HERE TOO.
-
-        The walk above places a child's rects by TRANSLATION alone --
-        `dx + child.x1, dy + child.y1` -- so an instance placed MX or
-        MY arrived here as an unmirrored copy at the right corner.
-        Everything that reads this list then answered about geometry
-        that is not on the mask: `tracks` reported free lanes that are
-        occupied, `blockers` missed the blocks, and the connectivity
-        check reported a mirrored block's top ring where its bottom
-        ring actually is. Measured on LELO_TEMP, whose comparator pair
-        mirrors its upper half: three shorts, VDD_1V8 to VSS twice and
-        IBP_1U<1> to VBP2, all inside the mirrored instance, all with
-        `routes=none` because no route was involved -- and all three
-        gone the moment the mirror was taken off.
-
-        The flip is about the INSTANCE's own placed box, which is
-        where the mask puts it: MX about the horizontal centre line,
-        MY about the vertical one.
-        """
-        ang = (getattr(inst, "angle", "") or "").upper()
-        if ang not in ("MX", "MY"):
-            return
-        cell = (getattr(inst, "layoutcell", None)
-                or getattr(inst, "_cell_obj", None))
-        if cell is None:
-            return
-        #- THE FOLD IS THE CELL'S, NOT THE INSTANCE BOX'S.
-        #-
-        #- ciccreator, which has had this right all along, mirrors a
-        #- rect about ZERO in the child's own frame and then corrects
-        #- by the CELL's extent (Instance::setAngle / ::transform):
-        #-
-        #-     MX:  ycell += cell->y1() + cell->y2()
-        #-          r->mirrorX(0); r->translate(xcell, ycell);
-        #-          r->translate(x1, y1)
-        #-
-        #- Folding about the instance's placed box instead -- which is
-        #- what this did -- agrees with that ONLY when the cell's own
-        #- y1 is 0. For any cell whose content does not start at the
-        #- origin the two differ by exactly cell.y1, and every rect
-        #- inside the mirror lands that far out: far enough to sit on
-        #- the neighbouring device's bar, which is how a mirrored
-        #- comparator came to report VDD_1V8 shorted to VSS.
-        #-
-        #- The rects here are already translated by ty = dy + inst.y1,
-        #- so the same fold in this frame is
-        #-     y' = 2*ty + cell.y1 + cell.y2 - y
-        tx, ty = int(inst.x1), int(inst.y1)
-        cx = int(cell.x1) + int(cell.x2)
-        cy = int(cell.y1) + int(cell.y2)
-        for r in out[start:]:
-            if ang == "MX":
-                r.moveTo(int(r.x1), 2 * ty + cy - int(r.y2))
-            else:
-                r.moveTo(2 * tx + cx - int(r.x2), int(r.y1))
-            #- AND SAY SO, FOR EVERY ANCESTOR. Skipping body
-            #- attribution on the mirrored instance itself is not
-            #- enough: the instance's own unmirrored PARENT runs the
-            #- same pass over the same rects one level up, against
-            #- pins that do not agree with them, and paints them
-            #- wrong. Measured on LELO_TEMP -- the comparator pair
-            #- reported shorts=0 asked directly and a VDD/VSS short
-            #- inside its own bounds asked through the tile, with
-            #- nothing routed at either level. A checker that answers
-            #- differently depending on where you stand is worse than
-            #- one that is wrong twice.
-            r.in_mirror = True
 
     def _aliasChildPortNets(self, inst, out, start):
         """A child's boundary net is the PARENT's net, under its name.
@@ -986,15 +923,9 @@ class LayoutCell(Cell):
         (measured: LELOTEMP_CMPR's VIP sits at y 137000 in its own
         frame and the instance port for it resolves to y 77000).
         """
+        pairs = inst.portPairs() if hasattr(inst, "portPairs") else []
         alias = {}
-        for ip in getattr(inst, "children", []) or []:
-            if ip is None:
-                continue
-            if not ((hasattr(ip, "isPort") and ip.isPort())
-                    or (hasattr(ip, "isInstancePort") and ip.isInstancePort())):
-                continue
-            child_net = getattr(ip, "childName", "") or ""
-            parent_net = getattr(ip, "name", "") or ""
+        for parent_net, child_net in pairs:
             if child_net and parent_net and child_net != parent_net:
                 alias[child_net] = parent_net
         if not alias:
@@ -1004,7 +935,7 @@ class LayoutCell(Cell):
             if n in alias:
                 rr.setNet(alias[n])
 
-    def _attributeInstanceBody(self, inst, out, start, dx=0, dy=0):
+    def _attributeInstanceBody(self, inst, out, start, xforms=()):
         """Resolve the rects inside one instance: a net, or an obstacle.
 
         An instance KNOWS what its terminals are wired to -- its
@@ -1070,11 +1001,18 @@ class LayoutCell(Cell):
             if not net:
                 continue
             layer = getattr(pi, "routeLayer", "") or getattr(pi, "layer", "")
-            pins.append((net, layer,
-                         pi.x1 + dx, pi.y1 + dy, pi.x2 + dx, pi.y2 + dy))
+            #- AN INSTANCE'S PORT RECTS ARE ALREADY TRANSFORMED, and must
+            #- never be transformed a second time. `setAngle` mirrored
+            #- them when the instance was placed (as `InstancePort` does
+            #- in the C++ original), so they sit in the instance's PARENT
+            #- frame already. Getting them into the frame this list is
+            #- collected in therefore means the OUTER chain only -- the
+            #- instances above this one, not this one.
+            pr = pi.getCopy()
+            self._applyTransformChain(pr, xforms)
+            pins.append((net, layer, pr.x1, pr.y1, pr.x2, pr.y2))
         body = [rr for rr in out[start:]
-                if not getattr(rr, "net", "") and not getattr(rr, "isPin", False)
-                and not getattr(rr, "in_mirror", False)]
+                if not getattr(rr, "net", "") and not getattr(rr, "isPin", False)]
         #- seed: the rect directly under a pin carries the pin's net
         for rr in body:
             layer = getattr(rr, "layer", "")
@@ -1262,7 +1200,106 @@ class LayoutCell(Cell):
         if ra != rb:
             parent[rb] = ra
 
-    def _shortBridges(self, indices, adjacency, shapes, limit=8):
+    def _netSeeds(self, indices, shapes, seeds=None):
+        """Which rects a net is KNOWN to be on, inside one component.
+
+        Two sources, and both are needed. A rect can carry a net of its
+        own, and an ANCHOR -- a port or a node-graph rect -- can land on
+        a rect that carries none. The second is how a component made
+        entirely of unattributed metal comes to be reported as a short
+        in the first place, so a reporter that ignores it can only ever
+        describe the shorts that were already obvious.
+        """
+        seeds = seeds or {}
+        out = {}
+        for idx in indices:
+            net = getattr(shapes[idx], "net", "")
+            if not net or self._ignoreConnectivityNet(net):
+                net = seeds.get(idx, "")
+            if net and not self._ignoreConnectivityNet(net):
+                out[idx] = net
+        return out
+
+    def _shortChains(self, indices, adjacency, shapes, nets, seeds=None,
+                     limit=3, hops=14):
+        """The rectangle-by-rectangle path from one net to the other.
+
+        A BRIDGE line names two rects that touch and carry different
+        labels. That is the whole story when the short is a wire laid
+        across another wire, and NO story at all when the two nets are
+        joined through a run of metal that carries no net -- there is no
+        adjacency anywhere along it whose two ends disagree, so the
+        reporter printed nothing and left a component of several hundred
+        rectangles with no lead in it.
+
+        This says it the other way round: walk the component from a rect
+        the first net is known to be on until a rect the second net is
+        known to be on is reached, and print the path. Every rect on it
+        is a real rectangle at a real coordinate, so the reader can
+        follow it in the layout; the ones in the middle are exactly the
+        unattributed metal the BRIDGE view could not name.
+
+        Shortest path, breadth first, so the run reported is the most
+        direct one rather than a tour of the component.
+        """
+        from collections import deque
+
+        known = self._netSeeds(indices, shapes, seeds)
+        if not known:
+            return []
+        by_net = defaultdict(list)
+        for idx, net in known.items():
+            by_net[net].append(idx)
+
+        chains = []
+        for i, a in enumerate(nets):
+            for b in nets[i + 1:]:
+                starts = by_net.get(a, ())
+                targets = set(by_net.get(b, ()))
+                if not starts or not targets:
+                    continue
+                prev = {idx: None for idx in starts}
+                queue = deque(starts)
+                hit = None
+                while queue and hit is None:
+                    cur = queue.popleft()
+                    for nxt in adjacency.get(cur, ()):
+                        if nxt in prev:
+                            continue
+                        prev[nxt] = cur
+                        if nxt in targets:
+                            hit = nxt
+                            break
+                        queue.append(nxt)
+                if hit is None:
+                    continue
+                path = []
+                node = hit
+                while node is not None:
+                    path.append(node)
+                    node = prev[node]
+                path.reverse()
+                #- a long chain is still readable at its ends: the two
+                #- named rects are what identifies the nets, and the
+                #- middle is what the reader walks
+                if len(path) > hops:
+                    path = path[:hops // 2] + [None] + path[-(hops // 2):]
+                chains.append({
+                    "nets": [a, b],
+                    "hops": len(path),
+                    "path": [None if idx is None else {
+                        "layer": shapes[idx].layer,
+                        "rect": [int(shapes[idx].x1), int(shapes[idx].y1),
+                                 int(shapes[idx].x2), int(shapes[idx].y2)],
+                        "net": known.get(idx, ""),
+                        "owner": self._getShapeOwner(shapes[idx]),
+                    } for idx in path],
+                })
+                if len(chains) >= limit:
+                    return chains
+        return chains
+
+    def _shortBridges(self, indices, adjacency, shapes, limit=8, seeds=None):
         """Where two nets actually touch, rectangle by rectangle.
 
         A shorted component says *that* two nets are joined. This says
@@ -1281,13 +1318,8 @@ class LayoutCell(Cell):
         """
         from collections import deque
 
-        label = {}
-        queue = deque()
-        for idx in indices:
-            net = getattr(shapes[idx], "net", "")
-            if net and not self._ignoreConnectivityNet(net):
-                label[idx] = net
-                queue.append(idx)
+        label = dict(self._netSeeds(indices, shapes, seeds))
+        queue = deque(label)
         if not queue:
             return []
 
@@ -1384,19 +1416,28 @@ class LayoutCell(Cell):
                 if net_name and not self._ignoreConnectivityNet(net_name):
                     component_nets[comp_id].add(net_name)
 
+        #- WHICH RECT the anchor lands on, not merely that it landed.
+        #- A component whose rects carry no net of their own still gets
+        #- two nets tagged on it this way, and the bridge reporter --
+        #- which seeded only from rect nets -- then had nothing to say
+        #- about it at all. A component of 868 rectangles with no bridge
+        #- line is not a lead, it is noise.
+        anchor_seed = {}
         for net_name, anchor in anchors:
             matched = False
             if not self._isConnectivityPropagationLayer(anchor.layer):
                 unmatched[net_name].append(anchor)
                 continue
-            for comp_id, rects in components.items():
-                for rect in rects:
+            for comp_id, idxs in component_indices.items():
+                for idx in idxs:
+                    rect = shapes[idx]
                     if not self._layersConnectForConnectivity(anchor.layer, rect.layer):
                         continue
                     if not self._rectsTouchOrOverlap(anchor, rect):
                         continue
                     net_components[net_name].add(comp_id)
                     component_nets[comp_id].add(net_name)
+                    anchor_seed.setdefault(idx, net_name)
                     matched = True
                     break
                 if matched:
@@ -1437,7 +1478,11 @@ class LayoutCell(Cell):
                     "bounds": bounds,
                     "routes": route_sources,
                     "bridges": self._shortBridges(
-                        component_indices[comp_id], adjacency, shapes),
+                        component_indices[comp_id], adjacency, shapes,
+                        seeds=anchor_seed),
+                    "chains": self._shortChains(
+                        component_indices[comp_id], adjacency, shapes,
+                        sorted(nets), seeds=anchor_seed),
                 })
 
         opens = []
@@ -1530,6 +1575,8 @@ class LayoutCell(Cell):
             )
             for bridge in short.get("bridges", ()):
                 self.log.warning("  " + self.describeBridge(bridge))
+            for chain in short.get("chains", ()):
+                self.log.warning("  " + self.describeChain(chain))
         return result["shorts"]
 
     @staticmethod
@@ -1548,6 +1595,22 @@ class LayoutCell(Cell):
             return text
         return (f"BRIDGE {'|'.join(bridge['nets'])}: "
                 f"{side(bridge['a'])} touches {side(bridge['b'])}")
+
+    @staticmethod
+    def describeChain(chain):
+        """The run of metal that joins two nets, rect by rect."""
+        def hop(h):
+            if h is None:
+                return "..."
+            text = (f"{h['layer']} ({h['rect'][0]},{h['rect'][1]})-"
+                    f"({h['rect'][2]},{h['rect'][3]})")
+            if h.get("net"):
+                text += f" ={h['net']}"
+            if h.get("owner"):
+                text += f" [{h['owner']}]"
+            return text
+        return (f"CHAIN {'|'.join(chain['nets'])} in {chain['hops']} hops: "
+                + " -> ".join(hop(h) for h in chain["path"]))
 
     def reportOpens(self, target_layer=""):
         result = self.checkConnectivity(target_layer)

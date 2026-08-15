@@ -826,8 +826,29 @@ class LayoutCell(Cell):
                 if child_cell is not None:
                     start = len(out)
                     self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
+                    #- FIRST, before either of the two passes below.
+                    #- `setAngle` DOES mirror the instance's own port
+                    #- rects, so attribution and aliasing both want the
+                    #- body already in the mirrored frame. Measured on
+                    #- LELO_TEMP: this order 2 shorts, the other 3.
+                    mirrored = (getattr(child, "angle", "") or "").upper() \
+                        in ("MX", "MY")
+                    self._applyInstanceAngle(child, out, start)
                     self._aliasChildPortNets(child, out, start)
-                    self._attributeInstanceBody(child, out, start, dx, dy)
+                    #- NOT FOR A MIRRORED INSTANCE. Attribution floods
+                    #- a net through a device body from the pins it
+                    #- overlaps, and a mirrored instance's pin rects do
+                    #- not agree with its mirrored body -- run there it
+                    #- painted a tap cell's own M1 bar with the signal
+                    #- net of the device beside it, and reported the
+                    #- bar shorted to its own PTAPC. The levels BELOW
+                    #- are unmirrored and have already attributed every
+                    #- body inside, so nothing is lost by skipping it
+                    #- here. (Measured on LELO_TEMP: with it, 2 shorts,
+                    #- both false and both inside the mirror; without
+                    #- it, 0.)
+                    if not mirrored:
+                        self._attributeInstanceBody(child, out, start, dx, dy)
                     #- AND WHAT THAT CELL PLACES, which its children do
                     #- not say. A cell read from a .mag keeps its own
                     #- paint and drops its `use` records, so a standard
@@ -843,12 +864,14 @@ class LayoutCell(Cell):
                     #- for the whole subtree would count those twice.
                     flat = getattr(child_cell, "flatMetal", None)
                     if flat is not None:
+                        hstart = len(out)
                         for r in flat(hidden_only=True):
                             rr = r.getCopy()
                             rr.translate(dx + child.x1, dy + child.y1)
                             rr.parent = child
                             rr.device_metal = True
                             out.append(rr)
+                        self._applyInstanceAngle(child, out, hstart)
                 continue
 
             if child.isCell():
@@ -866,6 +889,38 @@ class LayoutCell(Cell):
 
         active.remove(obj_id)
         return out
+
+    @staticmethod
+    def _applyInstanceAngle(inst, out, start):
+        """A MIRRORED INSTANCE IS MIRRORED HERE TOO.
+
+        The walk above places a child's rects by TRANSLATION alone --
+        `dx + child.x1, dy + child.y1` -- so an instance placed MX or
+        MY arrived here as an unmirrored copy at the right corner.
+        Everything that reads this list then answered about geometry
+        that is not on the mask: `tracks` reported free lanes that are
+        occupied, `blockers` missed the blocks, and the connectivity
+        check reported a mirrored block's top ring where its bottom
+        ring actually is. Measured on LELO_TEMP, whose comparator pair
+        mirrors its upper half: three shorts, VDD_1V8 to VSS twice and
+        IBP_1U<1> to VBP2, all inside the mirrored instance, all with
+        `routes=none` because no route was involved -- and all three
+        gone the moment the mirror was taken off.
+
+        The flip is about the INSTANCE's own placed box, which is
+        where the mask puts it: MX about the horizontal centre line,
+        MY about the vertical one.
+        """
+        ang = (getattr(inst, "angle", "") or "").upper()
+        if ang not in ("MX", "MY"):
+            return
+        x1, y1 = int(inst.x1), int(inst.y1)
+        x2, y2 = int(inst.x2), int(inst.y2)
+        for r in out[start:]:
+            if ang == "MX":
+                r.moveTo(int(r.x1), y1 + y2 - int(r.y2))
+            else:
+                r.moveTo(x1 + x2 - int(r.x2), int(r.y1))
 
     def _aliasChildPortNets(self, inst, out, start):
         """A child's boundary net is the PARENT's net, under its name.

@@ -630,16 +630,12 @@ layer above stays empty for signals. `addPowerStrap` then carries only
 the BULK terminal out to the ring, one routing width wide rather than
 one pin wide, with the via down on the pin.
 
-**The stack routers do not rail supplies either.** `routeParallel`'s
-default terminals include S, which on a stack whose sources are the
-supply laid a power route down the middle of the signal space --
-a second path to a node that was already connected. `_ports_by_net`
-now skips the supply nets, so `routeParallel` and `routeMirror` leave
-them to the guard. Pass `includeSupplies=True` to get the old
-behaviour for a cell that really wants the rail: a decap column, or a
-library with no guard to jog to. Which nets count comes from
-`supply_nets()` -- a net on a BODY terminal is a supply by
-construction, so this does not grep for "VDD".
+**The stack's own M1 supply routing stays.** What is wrong is
+`addPowerConnection`, which reaches across the cell on the pin's
+layer; the local M1 tie inside a stack is the connection you want and
+`routeParallel`/`routeMirror` keep making it. Do not "fix" a supply
+short by taking the supply out of the stack -- that removes the right
+connection along with the wrong one.
 
 **Check the placement for shorts before you route.** One
 `checkroutes` on the bare placement is seconds and it is the only

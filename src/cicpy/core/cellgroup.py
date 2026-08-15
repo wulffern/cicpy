@@ -710,49 +710,20 @@ class StackGroup(CellGroup):
             out.append(RouteBundle(self.layout, f"{self.name}_{name}", instances))
         return out
 
-    def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True, includeSupplies=False):
+    def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True):
         """Resolve nodeGraph ports for ``instances`` into a per-net rect list
         on ``layer``. Pin geometry is read from ``port.get(layer)``; ports
         whose ``routeLayer`` doesn't match ``layer`` are skipped — those
         nets simply won't be tied at that layer (caller's responsibility to
         choose a layer the device actually exposes).
-
-        A SUPPLY IS NOT ROUTED IN THE STACK. The default terminals of
-        ``routeParallel`` include S, and on a stack whose sources are the
-        supply that laid a rail down the column on the routing layer --
-        a power route, drawn by the stack, in the middle of the signal
-        space. It is not needed and it is not free:
-
-        * the connection already exists a fraction of a micron away. A
-          library that rings each device in its own tap has the guard
-          column right beside the source pin, on the pin's own layer,
-          and the taps tie it up, down and across.
-          ``addPowerGuardConnection`` is that jog; the rail is a second
-          path to the same node.
-        * the rail spans the column, so every signal that wants to
-          cross the column has to cross it. Measured on LELOTEMP_CMPR,
-          a REY_ATR cell whose pins overhang their abutment box: with
-          no signal route anywhere in the cell, every signal net was
-          already shorted to VDD_1V8 or VSS.
-
-        So supplies are skipped here, which is one place rather than in
-        each caller. ``includeSupplies=True`` restores the old
-        behaviour for a cell that really does want the rail -- a decap
-        column, or a library with no guard to jog to. Which nets those
-        are comes from ``supply_nets``: a net on a BODY terminal is a
-        supply by construction, so this does not grep for "VDD".
         """
-        from .mazerouter import supply_nets
         terminal_set = set(terminals or [])
         member_names = {getattr(i, "instanceName", "") for i in instances}
         grouped = {}
         graph = getattr(self.layout, "nodeGraph", None)
         if graph is None:
             return grouped
-        supplies = set() if includeSupplies else supply_nets(self.layout)
         for net, node in graph.items():
-            if net in supplies:
-                continue
             if excludeNets and re.search(excludeNets, net):
                 continue
             terminal_rects = {}
@@ -947,10 +918,10 @@ class StackGroup(CellGroup):
             return Rect(layer, route_rect.x1, y, width, height)
         raise ValueError(f"Unsupported parallel port edge '{edge}'")
 
-    def routeParallel(self, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, includeSupplies=False):
+    def routeParallel(self, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True):
         """Join repeated device terminals inside the stack and expose one bundle port per net."""
         for bundle in self._parallel_instance_groups(excludeInstances=excludeInstances):
-            nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal, includeSupplies=includeSupplies)
+            nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
             required_rects = minRects if minRects is not None else len(bundle.members)
             required_rects = max(2, required_rects)
             for net, (terminal_name, rects) in nets.items():
@@ -975,7 +946,7 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, align="full", includeSupplies=False):
+    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, align="full"):
         """Route common mirror terminals across the whole stack as one bundle.
 
         ``align`` is passed to the rail: ``"full"`` takes the pin's own
@@ -988,7 +959,7 @@ class StackGroup(CellGroup):
         if len(instances) < 2:
             return self
         bundle = RouteBundle(self.layout, f"{self.name}_mirror", sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", ""))))
-        nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal, includeSupplies=includeSupplies)
+        nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
         required_rects = minRects if minRects is not None else 2
         required_rects = max(2, required_rects)
         #- rails already placed in this column, so the next net can be
@@ -1353,6 +1324,21 @@ class StackGroup(CellGroup):
     def routeDummyDevices(self):
         return self.routeSupplyDevices()
 
+    def _isSupplyDevice(self, inst):
+        """Every terminal of this device on one net, and that net a supply.
+
+        The netlist's own way of saying "this is a dummy". Which nets
+        count comes from supply_nets(): a net on a BODY terminal is a
+        supply by construction, so this does not grep for "VDD".
+        """
+        from .mazerouter import supply_nets
+        nets = {self._terminal_net(inst, t) for t in ("D", "G", "S", "B")}
+        nets.discard(None)
+        nets.discard("")
+        if len(nets) != 1:
+            return False
+        return next(iter(nets)) in supply_nets(self.layout)
+
     def routeSupplyDevices(self, instances=None):
         """Strap devices whose every terminal rides the supply.
 
@@ -1362,9 +1348,23 @@ class StackGroup(CellGroup):
         D/G/S into one node, and one finger into the adjacent tap
         row to put that node on the supply the taps carry.
         """
-        fills = instances if instances is not None else [
-            i for i in self.instances
-            if (getattr(i, "instanceName", "") or "").startswith("xfill_")]
+        fills = instances if instances is not None else (
+            [i for i in self.instances
+             if (getattr(i, "instanceName", "") or "").startswith("xfill_")]
+            #- ...AND the netlist's own supply devices. A dummy does not
+            #- have to be layout-generated to need the strap: a
+            #- schematic that carries its fills explicitly (xn_mirr_load0
+            #- on VSS, xp_diff3<0..3> on VDD) names them like any other
+            #- instance, so the xfill_ test misses them and their D/G/S
+            #- is left floating against the guard. Measured: the two
+            #- columns of LELOTEMP_CMPR holding such devices were the
+            #- two whose supply split -- VDD_1V8 into 2 components in
+            #- p_diff, VSS into 8 in n_mirr_load -- and the only two
+            #- that failed LVS, while the two columns without them
+            #- matched uniquely.
+            + [i for i in self.instances
+               if not (getattr(i, "instanceName", "") or "").startswith("xfill_")
+               and self._isSupplyDevice(i)])
         for inst in fills:
             self.routeDummyTerminals(inst)
         #- Dummies are SUPPLY devices, not floating ones: a PMOS dummy

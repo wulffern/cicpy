@@ -1184,3 +1184,49 @@ def simplify(nodes):
         if p != dedup[-1]:
             dedup.append(p)
     return dedup
+
+
+#- ------------------------------------------------------------------
+#- the declarative form: anchors a DESIGN FILE can name
+#- ------------------------------------------------------------------
+#- A story told through `p.pin(...)` is a method call on a path that
+#- does not exist until something builds it, so it can only live
+#- inside a hook -- which is why every crossing net in a top cell was
+#- imperative code in a `beforeRoute`. These are the same
+#- constructors, reachable before there is a path, so the story can be
+#- DECLARED on the class beside the placement that it depends on.
+#-
+#- Anchors and not tuples on purpose. `astuple()` renders an anchor
+#- with repr() for a human to read, and that is not a form anything
+#- reads back; the objects are the machine form, and they already
+#- round-trip through toJson/fromJson into a .cic.
+
+PITCH = Path.PITCH
+SPACE = Path.SPACE
+
+
+def pin(instance, terminal, axis="x"):
+    """The coordinate of a placed instance's terminal."""
+    return _PinAnchor(instance, terminal, axis)
+
+
+def track(channel, index):
+    """Lane `index` of a named routing channel."""
+    return _TrackAnchor(channel, index)
+
+
+def landing(axis="y"):
+    """Where the path is going: the stop rect's own coordinate."""
+    return _LandingAnchor(axis)
+
+
+def tab_lane():
+    return _TrunkAnchor("trunktab")
+
+
+def right_of_pins():
+    return _TrunkAnchor("trunkright")
+
+
+def left_of_pins():
+    return _TrunkAnchor("trunkleft")

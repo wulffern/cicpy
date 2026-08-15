@@ -199,6 +199,95 @@ class SidecarPycell:
                                          int(st.x1), int(st.x2),
                                          horizontal=False)
 
+    #- ------------------------------------------------------------
+    #- the crossing nets, DECLARED
+    #- ------------------------------------------------------------
+
+    @staticmethod
+    def declaredPort(layout, instanceName, port):
+        """A placed block's published pin, by instance and port name."""
+        inst = layout.getInstanceFromInstanceName(instanceName)
+        if inst is None:
+            return None
+        rs = [c.get() for c in (getattr(inst, "children", []) or [])
+              if getattr(c, "isPort", lambda: False)()
+              and getattr(c, "name", "") == port]
+        rs = [r for r in rs if r is not None]
+        return rs[0] if rs else None
+
+    def routePaths(self, layout):
+        """Lay every path this cell DECLARES, in the order declared.
+
+        A story told through `p.movex(p.track(...))` is a method call
+        on a path that does not exist until something builds it, so it
+        could only live inside a hook -- and the crossing nets of a top
+        cell were four hundred lines of `beforeRoute` sitting beside a
+        placement that was pure declaration. The steps are the same;
+        what changes is that they are now DATA on the class, next to
+        the `rows` they depend on, and they round-trip into the .cic
+        through the anchors' own toJson.
+
+        An entry is a dict:
+
+            net      the net, and the name the router uses
+            start    (instanceName, port) the path leaves
+            stop     (instanceName, port) it lands on
+            layer    the routing layer; the start pin's own by default
+            at       which edge of the start rect to leave from
+            options  cut options, "1cuts,2vcuts" by default
+            steps    [(stepName, *args)], applied in order
+
+        `paths_only` names the nets to draw and skips the rest -- the
+        gate a bisect needs, in one place rather than in each story.
+        """
+        entries = getattr(self, "paths", None) or []
+        only = getattr(self, "paths_only", None)
+        for e in entries:
+            net = e["net"]
+            if only is not None and net not in only:
+                continue
+            a = self.declaredPort(layout, *e["start"])
+            b = self.declaredPort(layout, *e["stop"])
+            if a is None or b is None:
+                missing = e["start"] if a is None else e["stop"]
+                layout.log.error(
+                    f"paths: {net} has no pin at {missing[0]}.{missing[1]}")
+                continue
+            p = layout.path(net, e.get("layer") or a.layer,
+                            start=[a], stop=[b],
+                            options=e.get("options", "1cuts,2vcuts"))
+            p.start(at=e.get("at"))
+            for st in e.get("steps", []):
+                name, args = st[0], tuple(st[1:])
+                fn = getattr(p, name, None)
+                if not callable(fn):
+                    layout.log.error(f"paths: {net} names no step {name!r}")
+                    continue
+                fn(*args)
+
+    def routeMazes(self, layout):
+        """The searched nets, declared the same way.
+
+        A maze route is not a Path and cannot become one -- it is a
+        SEARCH, and what it takes is a budget of layers and two rects
+        rather than a story. It is declared beside the paths so that
+        `paths_only` gates both and a cell's crossing nets are all in
+        one place:
+
+            net, layers, between = [(inst, port), (inst, port)]
+        """
+        only = getattr(self, "paths_only", None)
+        for e in getattr(self, "mazes", None) or []:
+            net = e["net"]
+            if only is not None and net not in only:
+                continue
+            rects = [self.declaredPort(layout, *r) for r in e["between"]]
+            if any(r is None for r in rects):
+                layout.log.error(f"mazes: {net} is not on both blocks")
+                continue
+            layout.addMazeRoute(f"^{net}$", layers=list(e["layers"]),
+                                rects=rects)
+
     def beforeRoute(self, layout):
         """The supplies, and the stack-level router.
 
@@ -210,6 +299,11 @@ class SidecarPycell:
         used to carry its own copy of this loop, so the two drifted:
         one grew `guard_exclude` and the other did not.
         """
+        #- BEFORE the supplies, which is where the hand-written
+        #- crossing-net hook used to run: a declared path lands on a
+        #- block's published pin, and the rings are attached after.
+        self.routePaths(layout)
+        self.routeMazes(layout)
         devices = bool(self.spec.get("stacks"))
         for s in self.spec.get("supplies", []):
             net = s["net"]

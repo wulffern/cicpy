@@ -914,13 +914,39 @@ class LayoutCell(Cell):
         ang = (getattr(inst, "angle", "") or "").upper()
         if ang not in ("MX", "MY"):
             return
-        x1, y1 = int(inst.x1), int(inst.y1)
-        x2, y2 = int(inst.x2), int(inst.y2)
+        cell = (getattr(inst, "layoutcell", None)
+                or getattr(inst, "_cell_obj", None))
+        if cell is None:
+            return
+        #- THE FOLD IS THE CELL'S, NOT THE INSTANCE BOX'S.
+        #-
+        #- ciccreator, which has had this right all along, mirrors a
+        #- rect about ZERO in the child's own frame and then corrects
+        #- by the CELL's extent (Instance::setAngle / ::transform):
+        #-
+        #-     MX:  ycell += cell->y1() + cell->y2()
+        #-          r->mirrorX(0); r->translate(xcell, ycell);
+        #-          r->translate(x1, y1)
+        #-
+        #- Folding about the instance's placed box instead -- which is
+        #- what this did -- agrees with that ONLY when the cell's own
+        #- y1 is 0. For any cell whose content does not start at the
+        #- origin the two differ by exactly cell.y1, and every rect
+        #- inside the mirror lands that far out: far enough to sit on
+        #- the neighbouring device's bar, which is how a mirrored
+        #- comparator came to report VDD_1V8 shorted to VSS.
+        #-
+        #- The rects here are already translated by ty = dy + inst.y1,
+        #- so the same fold in this frame is
+        #-     y' = 2*ty + cell.y1 + cell.y2 - y
+        tx, ty = int(inst.x1), int(inst.y1)
+        cx = int(cell.x1) + int(cell.x2)
+        cy = int(cell.y1) + int(cell.y2)
         for r in out[start:]:
             if ang == "MX":
-                r.moveTo(int(r.x1), y1 + y2 - int(r.y2))
+                r.moveTo(int(r.x1), 2 * ty + cy - int(r.y2))
             else:
-                r.moveTo(x1 + x2 - int(r.x2), int(r.y1))
+                r.moveTo(2 * tx + cx - int(r.x2), int(r.y1))
             #- AND SAY SO, FOR EVERY ANCESTOR. Skipping body
             #- attribution on the mirrored instance itself is not
             #- enough: the instance's own unmirrored PARENT runs the

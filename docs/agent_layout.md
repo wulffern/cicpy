@@ -637,14 +637,22 @@ layer; the local M1 tie inside a stack is the connection you want and
 short by taking the supply out of the stack -- that removes the right
 connection along with the wrong one.
 
-### checkroutes used to read the .cic and nothing else
+### checkroutes used to read ONE .cic and nothing else
 
 A `.cic` records a device instance as **four Port rects and a
-reference**; the cell's own metal stays in the library, which for a
-Magic-based flow is a `.mag` that no `.cic` mentions. So a checker
-reading only the `.cic` saw ~4 rects where the cell has ~42, and
+reference**; the cell's own metal stays in the LIBRARY, and the library is a
+different repo reached through a symlink. So a checker reading only
+the design's own `.cic` saw ~4 rects where the cell has ~40, and
 anything a route collided with that was not one of those four was
 invisible.
+
+The library's `.cic` was there the whole time --
+`rey_atr_sky130a/design/REY_ATR_SKY130A.cic`, 210 cells. What made it
+easy to miss is where it sits: `design/REY_ATR_SKY130A` in the design
+repo is a symlink to the library repo's *directory*, and the `.cic`
+holding the cells is BESIDE that directory, named after it, one level
+up from where the symlink lands. Resolve the symlink and it is one
+join away -- which is what `_libraryCandidates` now does.
 
 Measured on LELOTEMP_CMPR's `n_mirr_load`: `checkroutes` reported
 **0 shorts** while the extracted netlist had three nets merged into
@@ -654,9 +662,9 @@ invented OPENS -- VSS came back "split into 8 components" because the
 metal joining those pieces lives inside the cells.
 
 `Design.loadMissingFromLibraries` now loads them automatically: the
-instance already records `libpath`, and the `.mag` names its own
-technology, so nothing has to be passed on the command line and the
-blind configuration is not reachable by forgetting a flag. What that
+instance already records `libpath`, so nothing has to be passed on the
+command line and the blind configuration is not reachable by
+forgetting a flag. What that
 changed, same layouts, before -> after:
 
 | cell | before | after |

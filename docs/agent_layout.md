@@ -637,6 +637,50 @@ layer; the local M1 tie inside a stack is the connection you want and
 short by taking the supply out of the stack -- that removes the right
 connection along with the wrong one.
 
+### checkroutes used to read the .cic and nothing else
+
+A `.cic` records a device instance as **four Port rects and a
+reference**; the cell's own metal stays in the library, which for a
+Magic-based flow is a `.mag` that no `.cic` mentions. So a checker
+reading only the `.cic` saw ~4 rects where the cell has ~42, and
+anything a route collided with that was not one of those four was
+invisible.
+
+Measured on LELOTEMP_CMPR's `n_mirr_load`: `checkroutes` reported
+**0 shorts** while the extracted netlist had three nets merged into
+VSS. The cause was an M2 rail lying on the M1 tab column that every
+cell in the library carries and no `.cic` mentions. The same blindness
+invented OPENS -- VSS came back "split into 8 components" because the
+metal joining those pieces lives inside the cells.
+
+`Design.loadMissingFromLibraries` now loads them automatically: the
+instance already records `libpath`, and the `.mag` names its own
+technology, so nothing has to be passed on the command line and the
+blind configuration is not reachable by forgetting a flag. What that
+changed, same layouts, before -> after:
+
+| cell | before | after |
+| :--- | :--- | :--- |
+| LELOTEMP_CMP | 0 shorts 0 opens | 0 shorts 0 opens |
+| LELOTEMP_OTAR | 0 / 9 | 0 / **2** |
+| LELOTEMP_BIAS_IBP | 3 / 7 | 3 / **4** |
+| LELOTEMP_CCMP | 4 / 3 | 4 / **1** |
+| LELOTEMP_CMPR | 1 / 10 | **1** / **0** |
+| ..._N_MIRR_LOAD | **0** / 3 | **1** / **0** |
+
+Most of the opens were never real, and one short was. Shape counts
+went up 10x to 50x; that is the geometry the checker had been ignoring.
+
+Two rules follow:
+
+- **A "0 shorts" beside a split supply is not a result.** If the
+  checker also reports the supply in N components, it is not modelling
+  the cells, and it cannot see anything merging INTO a net it has
+  already fragmented.
+- **Compare shape counts when a checker surprises you.** 41 shapes for
+  an eight-device column is the tell that the library is missing;
+  873 is the real number.
+
 **Check the placement for shorts before you route.** One
 `checkroutes` on the bare placement is seconds and it is the only
 moment when a short can only be the placement's. Everything after it

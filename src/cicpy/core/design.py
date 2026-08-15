@@ -158,6 +158,9 @@ class Design():
                 self.fromJsonFiles(fname)
                 loaded.add(os.path.abspath(fname))
 
+        #- ...and the library cells, which are .mag and not .cic
+        self.loadMissingFromLibraries(cicfile)
+
     def _indexSiblingCicFiles(self, cicfile):
         cicfile = os.path.abspath(cicfile)
         root = os.path.dirname(cicfile)
@@ -179,15 +182,79 @@ class Design():
             self._collectInstanceCells(cell, refs)
         return refs - set(self.cells.keys())
 
-    def _collectInstanceCells(self, obj, refs):
+    def _collectInstanceCells(self, obj, refs, libs=None):
         if obj is None:
             return
         if obj.isInstance() or obj.isCut():
             name = getattr(obj, "cell", "")
             if name:
                 refs.add(name)
+                if libs is not None:
+                    lib = getattr(obj, "libpath", "") or ""
+                    if lib and name not in libs:
+                        libs[name] = lib
         for child in getattr(obj, "children", []):
-            self._collectInstanceCells(child, refs)
+            self._collectInstanceCells(child, refs, libs)
+
+    def _missingInstanceCellLibraries(self):
+        """{cell name: libpath} for the cells still not loaded."""
+        refs, libs = set(), {}
+        for cell in self.cells.values():
+            self._collectInstanceCells(cell, refs, libs)
+        missing = refs - set(self.cells.keys())
+        return {n: libs[n] for n in missing if n in libs}
+
+    def loadMissingFromLibraries(self, cicfile):
+        """Load referenced cells that are .mag in a sibling LIBRARY.
+
+        A .cic records a device instance as four Port rects and a
+        reference; the cell's own metal stays in the library. So a
+        checker reading only the .cic sees ~4 rects where the cell has
+        ~42, and anything a route collides with that is not one of
+        those four is invisible to it. Measured: LELOTEMP_CMPR's
+        n_mirr_load reported "0 shorts" from its .cic while the
+        extracted netlist had three nets merged into VSS -- an M2 rail
+        lying on the M1 tab column that every cell in the library
+        carries and no .cic mentions.
+
+        The instance already says where to look: `libpath` names the
+        library and the .mag sits beside or one level up from the .cic.
+        Nothing has to be passed on the command line, so a tool cannot
+        be run in the blind configuration by forgetting a flag.
+        """
+        root = os.path.dirname(os.path.abspath(cicfile))
+        libs = self._missingInstanceCellLibraries()
+        if not libs:
+            return 0
+        from .layoutcell import LayoutCell
+        loaded = 0
+        for name, libpath in sorted(libs.items()):
+            for cand in (os.path.join(root, libpath, name + ".mag"),
+                         os.path.join(root, "..", libpath, name + ".mag"),
+                         os.path.join(root, name + ".mag")):
+                if not os.path.exists(cand):
+                    continue
+                try:
+                    #- the .mag names its own technology on line 2, so
+                    #- the reader needs nothing from the caller
+                    from cicpy.eda.magic import Magic
+                    techlib = ""
+                    with open(cand) as fh:
+                        for ln in fh:
+                            if ln.startswith("tech "):
+                                techlib = ln.split()[1].strip()
+                                break
+                    lay = Magic(techlib)
+                    lay.readFromFile(cand)
+                    lay.name = name
+                    lay.updateBoundingRect()
+                    self.add(lay)
+                    loaded += 1
+                except Exception as e:
+                    logging.getLogger("Design").warning(
+                        f"{name}: could not read {cand}: {e}")
+                break
+        return loaded
         
 
 

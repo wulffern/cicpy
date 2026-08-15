@@ -1694,9 +1694,38 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         skey = stack_key(members)
         keys_by_stack[stack] = skey
         declared = wires_lookup(spec_subcells.get(stack), skey, members)
+        #- AND THE DECLARED PATHS, which are not the search's business
+        #- at all. A `wires` entry is this function's own conclusion
+        #- handed back to it, so it is replayed HERE; a path is drawn
+        #- by the cell (SidecarPycell.routePaths) before this runs, and
+        #- all that is wanted here is for the search to leave the net
+        #- alone. Searching it anyway lays a second conductor over the
+        #- first -- which is the same fault a pycell-routed stack is
+        #- already guarded against, one level down.
+        #-
+        #- NOT gated by `paths_only`. A net a bisect has switched off
+        #- is meant to be UNDRAWN, and if the search picked it up
+        #- instead the experiment would measure the search.
+        _e = spec_subcells.get(stack) or {}
+        declared_paths = {str(p.get("net")) for p in (_e.get("paths") or [])}
+        declared_paths |= {str(p.get("net")) for p in (_e.get("mazes") or [])}
+        declared_blocked = {}
+        for b in (_e.get("blocked") or []):
+            b = tuple(b) if isinstance(b, (list, tuple)) else (b,)
+            declared_blocked[str(b[0])] = (str(b[1]) if len(b) > 1
+                                           else "blocked")
         pin_layer_guess = None
         for net in order:
             rects = subs[net]
+            if net in declared_paths:
+                log.info(f"{stack}/{net}: declared as a path; not searching")
+                routed.append((stack, net))
+                continue
+            if net in declared_blocked:
+                blocked.append((stack, net, declared_blocked[net]))
+                log.warning(f"{stack}/{net}: {declared_blocked[net]} "
+                            f"(declared)")
+                continue
             #- REPLAY: the sidecar already states this net's wire.
             #- Draw it (route.py redraws under today's rules), restore
             #- its claims for any net that still has to search, and

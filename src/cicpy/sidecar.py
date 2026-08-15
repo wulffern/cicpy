@@ -97,8 +97,18 @@ _counter = itertools.count()
 #- class actually states reach the spec: presence matters downstream
 #- (the assembly registers a channel only for a subcell that names
 #- one).
+#-
+#- `paths`/`mazes`/`paths_only`/`blocked` are the DECLARED form of the
+#- same decision `wires` records. A wires block is the search's
+#- conclusion in resolved terms, guarded by a placement fingerprint; a
+#- path names pins and lanes, so it is recomputed every run and a
+#- resize moves it instead of invalidating it. `blocked` is the one
+#- part of a wires block that carried no geometry to begin with -- this
+#- net is not for the maze router to draw -- and it keeps working the
+#- same way, without a key, because there is nothing in it to go stale.
 _SUBCELL_KEYS = ("match", "group", "channel", "order", "fill", "xspace",
-                 "wires", "wires_key")
+                 "wires", "wires_key",
+                 "paths", "mazes", "paths_only", "blocked")
 def _user_bases(cls):
     """The design-authored classes of cls's MRO, base first.
 

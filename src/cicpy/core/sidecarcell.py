@@ -237,26 +237,61 @@ class SidecarPycell:
             options  cut options, "1cuts,2vcuts" by default
             steps    [(stepName, *args)], applied in order
 
+        TWO SCOPES, because a cell has two kinds of net. A crossing net
+        between two BLOCKS names its two ends -- `start`/`stop`, one
+        published pin each -- and the story runs from one to the other.
+        A net INSIDE a column has no two ends: it is a rail over every
+        pin of that net in the column, which is what `||` means and
+        what the search draws. Naming two of N pins to stand for the
+        rail makes the declaration depend on which two, so an entry
+        that omits `start`/`stop` is COLLECTED instead: every pin of
+        the net in scope, through the same collector
+        `addConnectivityRoute` uses. Add a device to the column and the
+        rail grows over it with nothing in the file changing.
+
+            net      the net, and the name the router uses
+            layer    required when the pins are collected; there is no
+                     start pin to take it from
+            pins     an instance-name regex narrowing the collection
+                     (default: every instance of the cell)
+
         `paths_only` names the nets to draw and skips the rest -- the
         gate a bisect needs, in one place rather than in each story.
         """
-        entries = getattr(self, "paths", None) or []
-        only = getattr(self, "paths_only", None)
-        for e in entries:
+        for e, only in self.pathEntries():
             net = e["net"]
             if only is not None and net not in only:
                 continue
-            a = self.declaredPort(layout, *e["start"])
-            b = self.declaredPort(layout, *e["stop"])
-            if a is None or b is None:
-                missing = e["start"] if a is None else e["stop"]
-                layout.log.error(
-                    f"paths: {net} has no pin at {missing[0]}.{missing[1]}")
-                continue
-            p = layout.path(net, e.get("layer") or a.layer,
-                            start=[a], stop=[b],
-                            options=e.get("options", "1cuts,2vcuts"))
-            p.start(at=e.get("at"))
+            if e.get("start") or e.get("stop"):
+                a = self.declaredPort(layout, *e["start"])
+                b = self.declaredPort(layout, *e["stop"])
+                if a is None or b is None:
+                    missing = e["start"] if a is None else e["stop"]
+                    layout.log.error(
+                        f"paths: {net} has no pin at "
+                        f"{missing[0]}.{missing[1]}")
+                    continue
+                p = layout.path(net, e.get("layer") or a.layer,
+                                start=[a], stop=[b],
+                                options=e.get("options", "1cuts,2vcuts"))
+                p.start(at=e.get("at"))
+            else:
+                layer = e.get("layer")
+                if not layer:
+                    layout.log.error(
+                        f"paths: {net} collects its pins and so must "
+                        f"name a layer; there is no start pin to take "
+                        f"one from")
+                    continue
+                p = layout.path(net, layer,
+                                options=e.get("options", "1cuts,2vcuts"),
+                                includeInstances=e.get("pins", ""),
+                                excludeInstances=e.get("not_pins", ""))
+                if not p.stopRects:
+                    layout.log.error(
+                        f"paths: {net} has no pin on {layer} in "
+                        f"{e.get('pins') or 'this cell'}")
+                    continue
             for st in e.get("steps", []):
                 name, args = st[0], tuple(st[1:])
                 fn = getattr(p, name, None)
@@ -264,6 +299,34 @@ class SidecarPycell:
                     layout.log.error(f"paths: {net} names no step {name!r}")
                     continue
                 fn(*args)
+
+    def pathEntries(self):
+        """Every declared path with the `paths_only` that gates it.
+
+        The cell's own, and then its columns'. A column is built as a
+        cell of its own, so its class's declarations arrive here as the
+        one entry in `spec["stacks"]` -- the same list the flat recipe
+        reads for `order` and `wires`. One walk serves both, which is
+        why a cell that places its own devices and one assembled from
+        columns declare routing the same way.
+        """
+        out = [(e, getattr(self, "paths_only", None))
+               for e in (getattr(self, "paths", None) or [])]
+        for s in self.spec.get("stacks", []) or []:
+            only = s.get("paths_only")
+            for e in s.get("paths", []) or []:
+                out.append((e, only))
+        return out
+
+    def mazeEntries(self):
+        """Every declared maze search, the same way."""
+        out = [(e, getattr(self, "paths_only", None))
+               for e in (getattr(self, "mazes", None) or [])]
+        for s in self.spec.get("stacks", []) or []:
+            only = s.get("paths_only")
+            for e in s.get("mazes", []) or []:
+                out.append((e, only))
+        return out
 
     def routeMazes(self, layout):
         """The searched nets, declared the same way.
@@ -276,8 +339,7 @@ class SidecarPycell:
 
             net, layers, between = [(inst, port), (inst, port)]
         """
-        only = getattr(self, "paths_only", None)
-        for e in getattr(self, "mazes", None) or []:
+        for e, only in self.mazeEntries():
             net = e["net"]
             if only is not None and net not in only:
                 continue

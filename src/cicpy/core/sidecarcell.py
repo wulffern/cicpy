@@ -204,8 +204,43 @@ class SidecarPycell:
     #- ------------------------------------------------------------
 
     @staticmethod
-    def declaredPort(layout, instanceName, port):
-        """A placed block's published pin, by instance and port name."""
+    def declaredPort(layout, *where):
+        """An end of a story: a block's published pin, or a named rect.
+
+        TWO KINDS OF END, because a cell has two kinds of thing worth
+        landing on.
+
+        ``("xbias", "VSS")`` is a placed block's published pin, which is
+        what a crossing net between two blocks joins.
+
+        ``"ring_b_VSS"`` is one of THIS cell's own named rects -- a ring
+        side, a rail, anything `named_rects` holds. A supply ring is not
+        an instance and has no port, so a story could not name it and
+        the only way to reach one was `addPowerConnection`, which copies
+        each published supply rect and stretches it on that rect's own
+        layer. That is a blunt instrument: it shorts any block whose
+        pins overhang, which is why it is opt-in.
+
+        A path is the precise alternative and always was -- `layout.path`
+        takes RECTS, not instances. This is only the declarative form
+        catching up, so a design can say "from the ring to this block's
+        supply pin, on M1, turning where it needs to" as an ordinary
+        entry in `paths` instead of a hook.
+
+        Measured, and the reason it is wanted: LELO_TEMP's bottom ring
+        runs y 0..9000 and xbias publishes VSS at 15000..24000. The
+        ring and the block it rings never touch.
+        """
+        if len(where) == 1:
+            name = where[0]
+            r = (getattr(layout, "named_rects", {}) or {}).get(name)
+            if r is None:
+                layout.log.error(
+                    f"paths: no named rect {name!r} on {layout.name}; "
+                    f"a ring side is named ring_b_<net> / ring_t_<net> "
+                    f"and exists only after the rings are laid")
+            return r
+        instanceName, port = where
         inst = layout.getInstanceFromInstanceName(instanceName)
         if inst is None:
             return None
@@ -263,13 +298,18 @@ class SidecarPycell:
             if only is not None and net not in only:
                 continue
             if e.get("start") or e.get("stop"):
-                a = self.declaredPort(layout, *e["start"])
-                b = self.declaredPort(layout, *e["stop"])
+                #- A STRING IS ONE NAME, not a sequence of letters.
+                #- `*e["start"]` on "ring_b_VSS" unpacks eleven
+                #- characters and calls declaredPort with all of them.
+                def _end(v):
+                    return (v,) if isinstance(v, str) else tuple(v)
+                a = self.declaredPort(layout, *_end(e["start"]))
+                b = self.declaredPort(layout, *_end(e["stop"]))
                 if a is None or b is None:
                     missing = e["start"] if a is None else e["stop"]
                     layout.log.error(
-                        f"paths: {net} has no pin at "
-                        f"{missing[0]}.{missing[1]}")
+                        f"paths: {net} has no end at "
+                        f"{missing if isinstance(missing, str) else '.'.join(missing)}")
                     continue
                 p = layout.path(net, e.get("layer") or a.layer,
                                 start=[a], stop=[b],
@@ -343,7 +383,9 @@ class SidecarPycell:
             net = e["net"]
             if only is not None and net not in only:
                 continue
-            rects = [self.declaredPort(layout, *r) for r in e["between"]]
+            rects = [self.declaredPort(
+                         layout, *((r,) if isinstance(r, str) else tuple(r)))
+                     for r in e["between"]]
             if any(r is None for r in rects):
                 layout.log.error(f"mazes: {net} is not on both blocks")
                 continue

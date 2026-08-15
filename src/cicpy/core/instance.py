@@ -195,6 +195,36 @@ class Instance(Cell):
             return c.isLayoutCell()
         return False
 
+    def resolvedCell(self):
+        """The cell this instance places, resolved LATE if it must be.
+
+        `fromJson` resolves it when it can, but a `.cic` names cells in
+        file order and an instance read before its own cell was loaded
+        keeps a name and no object. So every walk over the hierarchy
+        has to be able to resolve late -- and each walk that forgot
+        answered as if the instance were EMPTY, which is the worst
+        possible failure for a question like "what is in the way".
+
+        `_collectPhysicalRects` carried its own copy of this and
+        `BlockCell.build` did not, so the two disagreed about the same
+        design: measured on LELO_TEMP_CCMP, the collector found 52 M4
+        rects and the block view found 2, because the view skipped
+        both LELOTEMP_CCMPR instances and with them the entire
+        comparator. `freeRows("M4")` then called 487000..555000 clear
+        with a via stack's M4 enclosure sitting at 516400..526000
+        inside it, and a route asked to cross there landed on VSS.
+        """
+        cell = self.layoutcell if self.layoutcell is not None else self._cell_obj
+        if cell is not None:
+            return cell
+        design = getattr(self, "design", None)
+        if self.cell and design is not None:
+            cell = design.cells.get(self.cell)
+            if cell is not None:
+                self.layoutcell = cell
+                self._cell_obj = cell
+        return cell
+
     def portPairs(self):
         """(parent net, child port name) for each of this instance's ports.
 

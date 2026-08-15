@@ -826,14 +826,14 @@ class LayoutCell(Cell):
                 continue
 
             if child.isInstance():
-                child_cell = getattr(child, "layoutcell", None)
-                if child_cell is None:
-                    child_cell = getattr(child, "_cell_obj", None)
-                # Lazy resolve from the design — instances loaded from JSON
-                # may reference cells that hadn't been loaded yet at
-                # ``fromJson`` time. Without this fallback the connectivity
-                # check misses every metal/via inside the instance body and
-                # nets fragment into separate components.
+                #- `Instance.resolvedCell` does the late lookup, and it
+                #- lives there rather than here because the block view
+                #- needs the same one and had its own answer -- which
+                #- was to skip the instance.
+                child_cell = child.resolvedCell() \
+                    if hasattr(child, "resolvedCell") \
+                    else (getattr(child, "layoutcell", None)
+                          or getattr(child, "_cell_obj", None))
                 if child_cell is None:
                     cell_name = getattr(child, "cell", "")
                     design = getattr(self, "design", None)

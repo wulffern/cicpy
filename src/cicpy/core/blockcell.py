@@ -100,16 +100,18 @@ class BlockCellInstance(Instance):
         self.moveTo(int(dx), int(dy))
         self.mx = bool(mx)
         self.my = bool(my)
+        #- THROUGH setAngle, not by assigning `angle`. setAngle is what
+        #- computes xcell/ycell from the CELL's extent, and
+        #- `_transformRect` is nothing without them -- assigning the
+        #- string alone leaves a mirror that folds about zero.
         if mx:
-            self.angle = "MY"
+            self.setAngle("MY")
         elif my:
-            self.angle = "MX"
+            self.setAngle("MX")
 
-    def rects(self, dx=0, dy=0, mx=False, my=False):
-        """This instance's contents, in the caller's frame."""
-        out = self.block.rects(dx + int(self.x1), dy + int(self.y1),
-                               mx != self.mx, my != self.my,
-                               frame=True)
+    def rects(self, xforms=()):
+        """This instance's contents, in the frame `xforms` leads to."""
+        out = self.block.rects(tuple(xforms) + (self,))
         if self.net:
             for r in out:
                 r.device_metal = False
@@ -162,7 +164,17 @@ class BlockCell(LayoutCell):
 
     @staticmethod
     def stamp(cell):
-        return (len(getattr(cell, "children", []) or []),
+        #- AND HOW MANY INSTANCES STILL HAVE NO CELL. A view built
+        #- while the design was still loading is not wrong about the
+        #- box or the child count, so neither would invalidate it --
+        #- it is wrong about what those children CONTAIN. Once they
+        #- resolve, the stamp moves and the view is rebuilt.
+        unresolved = sum(
+            1 for c in (getattr(cell, "children", []) or [])
+            if c is not None and hasattr(c, "isInstance") and c.isInstance()
+            and getattr(c, "layoutcell", None) is None
+            and getattr(c, "_cell_obj", None) is None)
+        return (len(getattr(cell, "children", []) or []), unresolved,
                 int(cell.x1), int(cell.y1), int(cell.x2), int(cell.y2))
 
     def build(self, cell, into=None):
@@ -179,8 +191,18 @@ class BlockCell(LayoutCell):
             if child is None:
                 continue
             if hasattr(child, "isInstance") and child.isInstance():
-                sub = (getattr(child, "layoutcell", None)
-                       or getattr(child, "_cell_obj", None))
+                #- RESOLVED LATE IF IT MUST BE. An instance read out of
+                #- a .cic before its own cell was loaded keeps a name
+                #- and no object, and skipping it silently answers as
+                #- if it were empty -- which for "what is in the way"
+                #- is the worst answer there is. Measured on
+                #- LELO_TEMP_CCMP: both LELOTEMP_CCMPR instances were
+                #- dropped and the view lost the whole comparator, so
+                #- freeRows("M4") reported a corridor with a via
+                #- stack's M4 enclosure standing in it.
+                sub = child.resolvedCell() if hasattr(child, "resolvedCell") \
+                    else (getattr(child, "layoutcell", None)
+                          or getattr(child, "_cell_obj", None))
                 if sub is None or sub is cell:
                     continue
                 angle = getattr(child, "angle", "") or ""
@@ -242,58 +264,39 @@ class BlockCell(LayoutCell):
     #- asking
     #- -----------------------------------------------------------------
 
-    def rects(self, dx=0, dy=0, mx=False, my=False, hidden_only=False,
-              frame=False):
-        """Every conductor below this cell, in the caller's frame.
+    def rects(self, xforms=(), hidden_only=False):
+        """Every conductor below this cell, in the frame `xforms` leads to.
 
         The copies happen HERE, once per question, from a structure
         that holds each cell's metal exactly once.
 
-        `frame` says dx/dy place the cell's BOX, which is what an
-        instance does -- a placed cell puts its box corner at the
-        instance position, whatever its own origin is. Asked of the
-        top of a view (`frame=False`) the answer stays in the cell's
-        own coordinates, which is what its owner means by "in this
-        cell's frame".
+        ONE TRANSFORM PER LEVEL, COMPOSED ON THE WAY DOWN. This used to
+        carry (dx, dy) and a pair of mirror flags, accumulating the
+        offsets as it descended and folding the result about the LEAF
+        cell's box at the bottom. That is right for one level and wrong
+        for two: an instance inside a mirrored instance had its offset
+        added unmirrored and then folded about the wrong box. Measured
+        on LELO_TEMP_CCMP -- the via stack in the mirrored comparator
+        came back at y 531000..540600 where the layout has it at
+        501400..511000, exactly the fold about the 1042000-tall box
+        that was never applied.
+
+        `Instance._transformRect` is the one that agrees with the mask,
+        and `BlockCellInstance` is an `Instance`, so the view composes
+        the same transform the rect collector does and the two answer
+        alike.
         """
+        from .layoutcell import LayoutCell
         out = []
-        box = (int(self.x1), int(self.y1), int(self.x2), int(self.y2)) \
-            if frame else None
         if not hidden_only:
             for r in self.own:
-                out.append(self.moved(r, dx, dy, mx, my, box))
+                rr = r.getCopy()
+                rr.device_metal = True
+                LayoutCell._applyTransformChain(rr, xforms)
+                out.append(rr)
         for inst in self.places:
             if hidden_only and not getattr(inst, "hidden", False):
                 continue
-            out += inst.rects(dx, dy, mx, my)
+            out += inst.rects(xforms)
         return out
 
-    @staticmethod
-    def moved(rect, dx, dy, mx, my, box=None):
-        """One rect, placed.
-
-        MIRROR ABOUT THE CELL'S OWN BOX, not about zero. The two are
-        the same for a cell whose box starts at its origin and differ
-        by x1/y1 for every other -- and a block with a supply ring
-        below y=0 is one. Measured on LELO_TEMP_CCMP: the mirrored
-        comparator's metal came back 24000 low, and with it every
-        answer this view gives about what is free up there.
-        """
-        r = rect.getCopy()
-        r.device_metal = True
-        x1, y1, x2, y2 = box if box else (0, 0, 0, 0)
-        #- x2 (not x1 + x2) for the mirror, -x1 for the plain case:
-        #- both put the box's own corner at the instance position,
-        #- which is what a placed cell does.
-        if mx:
-            r.mirrorY(0)
-            r.translate(x2, 0)
-        elif box:
-            r.translate(-x1, 0)
-        if my:
-            r.mirrorX(0)
-            r.translate(0, y2)
-        elif box:
-            r.translate(0, -y1)
-        r.translate(int(dx), int(dy))
-        return r

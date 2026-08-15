@@ -905,6 +905,163 @@ a bar over their own pins and meet only if those spans happen to
 overlap -- measured, a bias-side bar 0.88 um wide in a 34 um cell,
 with the net in four components.
 
+### A port in the middle of a block cannot be left
+
+A port the parent has to *reach* must be somewhere the parent can get
+to: an edge, or metal high enough to fly over what is in the way. Left
+mid-row, the router climbs the block to find it, and climbing means M4
+or M5 across everything the block owns up there -- a 72 um M4 riser
+straight through a MiM cap bank, in the measured case.
+
+The fix is an **edge port**: make a pad at the edge in the ROUTING
+phase, path to it, and name it in `afterPorts`.
+
+```python
+def _crossings(self, layout):
+    from cicpy.core.rect import Rect as _Rect
+    self._edge_ports = {}
+    for net, layer, xlane, edge in self._EDGE_PORTS:
+        r = self._port(inst, net)
+        x = int(inst.x1) + xlane
+        y = int(layout.y1) if edge == "bottom" else int(layout.y2) - 4000
+        pad = _Rect(layer, x, y, 3200, 4000)
+        pad.setNet(net)
+        layout.add(pad)
+        p = layout.path(net, "M1", start=[r], stop=[pad],
+                        options="1cuts,2vcuts")
+        p.start(); p.up(); p.up()        #- M2, then M3 across
+        p.movex(p.landing("x"))
+        p.down()                         #- M2, and down the lane
+        p.movey(p.landing("y"))
+        p.end()
+        self._edge_ports[net] = pad
+
+def afterPorts(self, layout):
+    super().afterPorts(layout)
+    for net, pad in self._edge_ports.items():
+        layout.updatePort(net, pad, routeLayer=pad.layer)
+```
+
+Both halves matter. **A path created in `afterPorts` never routes** --
+the phase is over, and the port comes out as a rect with nothing under
+it. And `afterPorts` must not *compute* the pad either: a pad derived
+from a story's `endsAt` matched nothing at all in netgen.
+
+### Which edge is decided by the mirror, not by the pin
+
+When the parent stacks two copies and mirrors the upper one `MX`, the
+two **top** edges meet at the seam and the two **bottom** edges become
+the pair's outer faces. So the edge to choose follows the net, not the
+geometry:
+
+| the net is | put it on | because |
+|---|---|---|
+| shared between the halves | the top edge | the two pads come out adjacent at the seam and abut with nothing drawn |
+| per-half (`RST_A`/`RST_B`) | the bottom edge | the outer face is the only place the level above can still see it |
+
+Getting this right deletes seam stories rather than rewriting them.
+Three went in one edit, and `_emptyColumn` -- a heuristic that read
+the cap bank as the block's right wall -- went with them.
+
+### A pin can be too small for the parent's via
+
+A pin 3200 x 4000 is smaller than every M1M2 cut in one direction:
+`1cuts,2vcuts` overhangs 4400 in y, the default `2cuts,1vcuts`
+overhangs 5200 in x. The child can land on it because the child knows
+what is beside it; the **parent** cannot, and its pad falls on the
+neighbouring device's M1. Nothing is wrong in the child -- 0 DRC,
+shorts=0 -- and LVS at the top says the pin is tied to a source.
+
+Lift it **in place**: make the cut in the child, publish the port on
+the M3 above it, and let the parent arrive on metal with room around
+it. In place, not at an edge -- a port list the parent depends on does
+not move.
+
+```python
+pad = _Rect("M3", ..., w, 4000)
+p = layout.path(net, "M1", start=[r], stop=[pad], options="1cuts,2vcuts")
+p.start(); p.up(); p.up(); p.end()
+layout.add(pad)
+layout.updatePort(net, pad, routeLayer=pad.layer)   #- in afterPorts
+```
+
+Size the pad off the **pin**, with a floor for the narrow ones:
+`w = max(8000, pin.x2 - pin.x1)`. A fixed 8000 stub beside a
+16000-wide bar runs met2.2 against the block's own M3.
+
+And this symptom has a twin that is NOT the same bug. If the pin is
+already wide -- a 16000 bar -- and the parent's pad still lands on a
+neighbour, look at *where*: a pad 2900 below the bar, overlapping by
+300, is the parent aiming low, not the pin being too small. Lifting
+that one only moves the fault.
+
+### Match the child's cut ORIENTATION at a shared pin
+
+`cut_M1M4_1x2` (one wide, two tall) and `cut_M1M4_2x1` at the same pin
+overlap *partially*, and that is precisely what magic means by "this
+layer can't abut or partially overlap between subcells". It is a
+hierarchy rule, not a spacing one, and no amount of moving fixes it.
+Read the cut the child used and ask for the same shape.
+
+Rule of thumb: `1cuts,2vcuts` for a gate tab, the default for a wide
+bar.
+
+### Detour, do not climb
+
+A net that has to cross a row of cells has two ways past: up to a free
+layer, or sideways by a whole PITCH to a row that is free. Prefer the
+detour. Climbing to M5 costs a via stack at both ends and M5 costs 1000
+in the router's own cost table; a `+ 3 * q.PITCH` offset on the row
+costs nothing and keeps the net on M2/M3. Seven crossings in
+LELOTEMP_CMPR came out with no M5 at all on offsets of -1, +1 and +3.
+
+Also: when a story steps between layers, work out the direction rather
+than assuming.
+
+```python
+step = q.up if x > v else q.down
+back = q.down if x > v else q.up
+for _ in range(abs(x - v)): step()
+```
+
+`range(x - v)` silently does nothing when the crossing layer is below
+the vertical one, and the net then runs along its neighbour's rail
+with no error printed anywhere.
+
+### A step takes something named in the design, never a coordinate
+
+The same rule as *Aim at a channel, never at a coordinate* above, now
+enforced: `p.movex(66000)` is rejected outright. Register the column as a channel and ask
+for its track:
+
+```python
+lay.addRoutingChannel(net, x0, x0 + 12000, horizontal=False)
+...
+p.movex(p.track(net, 0))
+```
+
+### `channel` is two different knobs
+
+`place = {"channel": N}` is the FLAT recipe's. A hierarchical cell --
+one with `rows` -- is placed by `placeHier`, which reads a **class
+level** `channel` attribute and defaults to 8 um:
+
+```python
+class MYCELL(SidecarCell):
+    rows = [[caps], [core]]
+    channel = 2          #- um between the rows
+```
+
+Setting `place["channel"]` on such a cell changes nothing at all, and
+the rows stay 8 um apart while you sweep it.
+
+### The .subckt line wraps at 80 columns
+
+Grepping the extracted netlist for a port and reading only the first
+line of `.subckt` is how a working approach gets reverted. Two ports
+looked missing, and the pin table said "Cell pin lists are equivalent"
+the whole time. Read the **pin table**.
+
 ## Verification beyond DRC
 
 **LVS is the verdict. `checkroutes` is a lead.** Take that literally:

@@ -1278,16 +1278,24 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def plateRail(self, net, layer, widthmult=3, inset=5000):
-        """A plain bar down the column, joining every member's plate.
+    def plateRail(self, net, layer, widthmult=3, inset=5000,
+                  direction="v"):
+        """A plain bar along the bank, joining every member's plate.
 
-        For MiM cap columns: the plates span the cell on their own
-        layer, so a vertical bar over the column IS the connection --
-        no cuts, no router. Computed from the INSTANCE boxes (the
-        stored pin rects live in another frame after the floorplan
-        moves the column); ``inset`` keeps the bar ends on the end
-        members' plates. The same ownership mechanics as the dummy
-        straps: the bar belongs to the stack and publishes with it.
+        For MiM cap banks: the plates span the cell on their own
+        layer, so a bar over the bank IS the connection -- no cuts, no
+        router. Computed from the INSTANCE boxes (the stored pin rects
+        live in another frame after the floorplan moves the bank);
+        ``inset`` keeps the bar ends on the end members' plates. The
+        same ownership mechanics as the dummy straps: the bar belongs
+        to the stack and publishes with it.
+
+        ``direction`` follows the bank, not the stack: a `Stack` puts
+        its members in a column and the bar runs down it, but a bank
+        laid side by side in a beforePlace hook needs the bar to run
+        ACROSS. Measured on LELOTEMP_CCMPR, whose five caps sit in a
+        row under the comparator: the vertical bar joined the middle
+        cap to nothing and the net came back in four components.
         """
         insts = self.instances
         if len(insts) < 2:
@@ -1295,6 +1303,22 @@ class StackGroup(CellGroup):
                 f"plateRail {self.name}/{net}: only {len(insts)} members")
             return None
         w = Rules.getInstance().get(layer, "width") * widthmult
+        if direction == "h":
+            y = (min(int(i.y1) for i in insts)
+                 + max(int(i.y2) for i in insts)) / 2
+            x1 = min(int(i.x1) for i in insts) + inset
+            x2 = max(int(i.x2) for i in insts) - inset
+            bar = Rect(layer, int(x1), int(y - w / 2),
+                       int(x2 - x1), int(w))
+            bar.setNet(net)
+            self.layout.add(bar)
+            self.layout.detachPlacementChild(bar, keepParent=self)
+            self.add(bar)
+            self.dummy_routes.append(bar)
+            self.layout.log.info(
+                f"plateRail {self.name}/{net}: {layer} bar "
+                f"{bar.x1},{bar.y1}..{bar.x2},{bar.y2}")
+            return bar
         x = (min(int(i.x1) for i in insts)
              + max(int(i.x2) for i in insts)) / 2
         y1 = min(int(i.y1) for i in insts) + inset

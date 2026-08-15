@@ -1987,7 +1987,7 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
-    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="", widthmult:int=1):
+    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="", widthmult:int=1, options:str=""):
         """Tie every device source on a power net to that device's own bulk
         guard ring, locally, on the layer the pins already live on.
 
@@ -2007,6 +2007,20 @@ class LayoutCell(Cell):
         Only devices that have both the power net on ``terminals`` and the
         same net on ``bulk`` are connected: a cascode whose source is an
         internal node is left alone for the signal router.
+
+        ``options`` takes ``offsetlow``/``offsethigh``, which shift the
+        jog ONE ROUTING WIDTH. Note that this is not the route
+        language's half a wire, and the difference is measured: the jog
+        is a rect rather than a route, and half a width left it 0.15 um
+        from the shape below where li.3 wants 0.17, trading a short for
+        two spacing errors. A full width clears both.
+
+        What it is for: the jog is centred on the SOURCE pin, so a cell
+        whose poly contacts reach that row gets its GATE tied to the
+        supply by it. Measured on REYATR_NCH_2C1F2 -- L=0.22, so its
+        poly bars are 2.2 um where the L=0.94 cells' are 9.4, and the
+        contact column reaches the jog. Offset that one device type and
+        nothing else in the column moves.
         """
         #- default to the technology's pin layer rather than to "M1"
         layer = layer or self._pinLayer()
@@ -2058,6 +2072,15 @@ class LayoutCell(Cell):
                 x1, x2 = sorted((int(b.centerX()), int(s.centerX())))
                 h = int(s.height()) * widthmult
                 y1 = int(s.centerY() - h // 2)
+                #- half a routing width, the same "offset" the route
+                #- language means by it
+                if options:
+                    rules = Rules.getInstance()
+                    step = int(rules.get(layer, "width")) if rules else h
+                    if re.search(r"offsetlow(,|\s|$)", options):
+                        y1 -= step
+                    elif re.search(r"offsethigh(,|\s|$)", options):
+                        y1 += step
                 r = Rect(layer, x1, y1, x2 - x1, h)
                 r.net = name
                 self.add(r)

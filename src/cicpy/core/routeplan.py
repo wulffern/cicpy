@@ -193,10 +193,37 @@ def replay_claims(rects, layer, pin_layer, opts):
 
 
 def format_wires_block(stack, entries, key):
-    """One subcell's conclusions as the paste-ready declaration."""
+    """One subcell's conclusions as the paste-ready declaration.
+
+    A COORDINATE IS NEVER WRITTEN. `anchored_options` turns a searched
+    trunk into `trunkright`/`trunkleft`/`trunktab` whenever one of them
+    resolves to exactly the lane the search chose; when none does, this
+    used to fall back to `trunkx=<n>` and hand the design a number.
+    That number survives neither a resize nor another technology, says
+    nothing about why the wire is there, and -- because the fingerprint
+    guarding a wires block is deliberately translation-invariant --
+    replays silently against a placement it was never computed for.
+
+    So the fallback refuses instead: the net comes out as a `blocked`
+    triple naming the lane the search wanted and the anchors it was
+    not. That is visible in every check, where a stale coordinate is
+    visible in none, and it tells the designer exactly what to fix --
+    move the pins until an anchor lands on that lane, or route the net
+    by hand.
+    """
     lines = [f"# class {stack}:",
              "    wires = ["]
     for e in entries:
+        e = tuple(e)
+        opts = e[3] if len(e) > 3 else ""
+        m = re.search(r"trunkx=(-?[0-9.]+)", opts or "")
+        if m and len(e) > 3:
+            e = (e[0], "blocked",
+                 f"the search put this trunk at {int(float(m.group(1)))}, "
+                 f"which is not a pin anchor -- and a coordinate is not "
+                 f"written into a design. Move the pins so trunkright/"
+                 f"trunkleft/trunktab lands on that lane, or route it "
+                 f"by hand.")
         lines.append("        " + repr(tuple(e)) + ",")
     lines.append("    ]")
     lines.append(f'    wires_key = "{key}"')

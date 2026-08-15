@@ -826,6 +826,7 @@ class LayoutCell(Cell):
                 if child_cell is not None:
                     start = len(out)
                     self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
+                    self._aliasChildPortNets(child, out, start)
                     self._attributeInstanceBody(child, out, start, dx, dy)
                     #- AND WHAT THAT CELL PLACES, which its children do
                     #- not say. A cell read from a .mag keeps its own
@@ -865,6 +866,50 @@ class LayoutCell(Cell):
 
         active.remove(obj_id)
         return out
+
+    def _aliasChildPortNets(self, inst, out, start):
+        """A child's boundary net is the PARENT's net, under its name.
+
+        A subcell paints its rects with its own net names and the
+        parent wires those to nets of its own, so the same conductor
+        arrives here twice named -- and the connectivity flood puts
+        both names in one component and calls it a SHORT. Measured,
+        five at once on LELOTEMP_CCMPR and three on LELOTEMP_BIAS_IBP,
+        every one false:
+
+            IBP_1U<0>|VIP  CMPO|VO  VC|VIN
+            PWRUP_1V8|PWRUP_B_1V8   IBP_1U|IBP_1U<1>
+
+        netgen matched the same layouts uniquely, which is what said
+        they were not geometry. They had been written off as a known
+        false positive, and that is worse than the noise: a checker
+        that cries short on a correct cell teaches you to skim it.
+
+        The pairing is `InstancePort.childName`, which is what the C++
+        original keeps too -- a pointer to the child port, asked for
+        its name. It cannot be recovered from geometry: a wrapper
+        republishes its ports where it likes, so the instance port's
+        rect and the child port's rect are not the same rectangle
+        (measured: LELOTEMP_CMPR's VIP sits at y 137000 in its own
+        frame and the instance port for it resolves to y 77000).
+        """
+        alias = {}
+        for ip in getattr(inst, "children", []) or []:
+            if ip is None:
+                continue
+            if not ((hasattr(ip, "isPort") and ip.isPort())
+                    or (hasattr(ip, "isInstancePort") and ip.isInstancePort())):
+                continue
+            child_net = getattr(ip, "childName", "") or ""
+            parent_net = getattr(ip, "name", "") or ""
+            if child_net and parent_net and child_net != parent_net:
+                alias[child_net] = parent_net
+        if not alias:
+            return
+        for rr in out[start:]:
+            n = getattr(rr, "net", "")
+            if n in alias:
+                rr.setNet(alias[n])
 
     def _attributeInstanceBody(self, inst, out, start, dx=0, dy=0):
         """Resolve the rects inside one instance: a net, or an obstacle.

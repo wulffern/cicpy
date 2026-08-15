@@ -145,8 +145,10 @@ class Instance(Cell):
             c = None
             if cl in ("Port", "InstancePort"):
                 # Reconstruct as Port — InstancePort needs constructor args
-                # we don't have, but for connectivity purposes Port suffices
-                # (the net name lives in ``name`` either way).
+                # we don't have. Its CHILD NAME is carried across by hand
+                # though: it is the only record of which child port this
+                # parent net is wired to, and connectivity needs it to tell
+                # one conductor named twice from two conductors shorted.
                 c = Port()
             elif cl == "Rect":
                 c = Rect()
@@ -157,6 +159,8 @@ class Instance(Cell):
                 c.fromJson(child)
             except Exception:
                 continue
+            if child.get("childName"):
+                c.childName = child["childName"]
             self.add(c)
         # Resolve the referenced layout cell. Without this,
         # ``_collectPhysicalRects`` never descends into the instance's body,

@@ -354,12 +354,21 @@ class SidecarPycell:
                 pr = min(cands, key=lambda r: r.y1)
             else:
                 pr = max(cands, key=lambda r: r.y2)
-            #- clipped to the column: the bulk columns straddle the
-            #- cell edge, and a port poking past the box inflates it,
-            #- which moves the origin every parent track was tuned to
+            #- AS WIDE AS THE GUARD. The bulk columns straddle the
+            #- cell edge -- every one of them is 9600 wide against a
+            #- box that cuts at 4800 -- so clipping in x published half
+            #- a guard: one 0.48 um place for the parent to land on,
+            #- for the net it has to reach everywhere. The guard is
+            #- what the supply IS in this library, and the half outside
+            #- the box is not spare, it is the half the abutted
+            #- neighbour shares.
+            #-
+            #- Still clipped in Y, which is what the original guard was
+            #- against: a port running past the top or bottom of the
+            #- column inflates the box and moves the origin every
+            #- parent track was tuned to. X does not, because the
+            #- column's own guard is already there.
             pr = pr.getCopy()
-            pr.x1 = max(pr.x1, box.x1)
-            pr.x2 = min(pr.x2, box.x2)
             pr.y1 = max(pr.y1, box.y1)
             pr.y2 = min(pr.y2, box.y2)
             layout.updatePort(net, pr)

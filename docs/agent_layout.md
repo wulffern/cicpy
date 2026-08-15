@@ -24,7 +24,46 @@ page in the same commit. Check `git log -- docs/agent_layout.md` against
 `git log src/cicpy/core/` before trusting a section you are about to
 lean on.
 
-## The sidecar flow — the current best method
+## Start here: a cell is a SidecarCell unless you know why not
+
+**Write every new cell as a `SidecarCell`.** Not "for a large analog
+cell" — for all of them. The classic pycell (module-level hooks and
+`data`) still works and is still the escape hatch, but it is no longer
+the thing to reach for first, and choosing it is a decision that needs
+a reason.
+
+The reason is not style, it is what the router can see. A flat cell is
+routed by the connectivity router, which draws a shape from a net's
+own pins and a lane you name; it cannot see what is already there, so
+two nets are kept apart only by the lanes you assign them. That works
+until the cell has more nets than obvious lanes, and then every fix
+moves the collision instead of removing it. Measured on LELOTEMP_CMPR
+— four columns, seven crossing nets, M2/M3/M4 free — about twenty
+builds took it from six merged nets to one and never to zero, and not
+one of the shorts was two wires crossing on a layer. They were via
+COLUMNS and rails sitting on foreign pins, which no track map shows
+and no lane assignment prevents.
+
+A SidecarCell splits the same netlist into one cell per column and
+hands each to the stack-level maze router, which *is* space-aware and
+writes its conclusions back into the design as `wires`. What you
+declare at the top is only the nets that cross between columns, one
+bar each on its own channel track. A bar in a channel cannot land on
+a pin, because a channel is the place where there are none.
+
+Two things to carry into it, both measured:
+
+- **The drops are where a channel design still shorts.** The bars sit
+  on their own tracks and stay apart; the vertical drops from a bar
+  into a column do not, because every net whose pins are on one
+  terminal of that column publishes its port at the same x. Two nets
+  on the same terminal drop in the same lane, and a via pad is 0.88 um
+  against a 0.6 um lane, so even neighbouring lanes overhang. Give
+  the drops `align` and `cuts`, or publish the subcell's ports at
+  distinct x.
+- **Supplies are not part of this.** See "Supplies go to the guard".
+
+## The sidecar flow — how it works
 
 Everything below this section still works and is still the reference
 for the primitives, but since 2026-08 the way to lay out a large
@@ -558,6 +597,55 @@ nets and the python callsite that drew the offending route. For opens and
 split nets run `sch2mag --check-connectivity`, it is slower and not the
 default loop.
 
+## Supplies go to the guard, not up a strap
+
+**Do not call `addPowerConnection` on a library whose pins overhang
+their abutment box.** It copies the PIN rectangle and stretches it to
+the ring *on the pin's own layer*, so the source of an upper device
+drags that layer down across the drain and gate of everything below
+it. On REY_ATR it shorted every signal in a cell to a supply. Measured
+on LELOTEMP_CMPR, on the BARE PLACEMENT with not one signal route
+anywhere in the cell, `checkroutes` reported two components of 31
+rects each:
+
+    VBN1,VBP2,VDD_1V8,VIN,VIP,VO,VO1,VS
+    IBP_1U,VBN1,VBP2,VIP,VO,VO1,VSS
+
+JNW_ATR's 2.56 um cells do not overhang, which is why the older
+designs got away with it and why the failure looks like a routing bug
+in a cell that has no routes.
+
+The pair to call instead, and what each is for:
+
+    layout.addRouteRing("M1", net, side, widthmult=3, spacemult=2)
+    layout.addPowerGuardConnection(net)
+    layout.addPowerStrap(net, "", side, terminals=("B",))
+
+`addPowerGuardConnection` is the whole connection for a library that
+rings each device in its own tap: the source sits a fraction of a
+micron from the guard column beside it, on the same layer, and the tap
+cells already tie the guard up, down and across. So it is a jog at the
+device's own row instead of a rail the height of the column, and every
+layer above stays empty for signals. `addPowerStrap` then carries only
+the BULK terminal out to the ring, one routing width wide rather than
+one pin wide, with the via down on the pin.
+
+**The stack routers do not rail supplies either.** `routeParallel`'s
+default terminals include S, which on a stack whose sources are the
+supply laid a power route down the middle of the signal space --
+a second path to a node that was already connected. `_ports_by_net`
+now skips the supply nets, so `routeParallel` and `routeMirror` leave
+them to the guard. Pass `includeSupplies=True` to get the old
+behaviour for a cell that really wants the rail: a decap column, or a
+library with no guard to jog to. Which nets count comes from
+`supply_nets()` -- a net on a BODY terminal is a supply by
+construction, so this does not grep for "VDD".
+
+**Check the placement for shorts before you route.** One
+`checkroutes` on the bare placement is seconds and it is the only
+moment when a short can only be the placement's. Everything after it
+is two error sources mixed.
+
 ## Look before you route
 
 A track number is an *offset from the net's own pins*:
@@ -681,6 +769,93 @@ Two facts that fall out of it and are worth carrying:
   A hint on where to look: when magic complains and klayout's deck does
   not, suspect a HIERARCHY rule like this one rather than a spacing
   rule, and go straight to the cut layers.
+
+### Read the BRIDGE lines, not the track map
+
+`checkroutes` names the exact pair of shapes that merged:
+
+    BRIDGE VIP|VS: M3 (183200,240100)-(246900,243100) [VIP]
+                   touches VIA2 (215800,241400)-(218600,244200)
+                   [cut_M1M4_2x1]
+
+Every short measured in LELOTEMP_CMPR looked like that -- a bar
+through somebody's via COLUMN, or a rail sitting on a foreign pin --
+and **not one was two wires crossing on a layer**. The track maps
+stayed clean the whole time the cell was shorted, because a track map
+answers "what else is on this layer at this coordinate" and that was
+never the question.
+
+Two habits follow:
+
+- **Bisect with a per-net switch.** A three-line harness in the
+  sidecar (`CMPR_ONLY="VBN1,VS"` builds only those routes) attributes
+  a short in one build instead of five. Its most useful result on
+  CMPR: no PAIR of the four M4 nets shorted, but any THREE did --
+  which is the signature of a via column, not of a wire.
+- **Naming the trunk is half a route.** `vchannel` alone leaves the
+  bar wherever the net's own pins put it, and a bar leaving lane 0
+  rightwards runs straight through the trunks in lanes 1 and 2 (16
+  measured VBN1 x VO1 pairs). Name `hchannel`/`htrack` too, so the
+  two indices make each crossing a single point of one layer over
+  another.
+
+### A via pad is taller than a lane
+
+A lane is width+space, 0.6 um on sky130 metal; a via pad is 0.88 um.
+So a device row is *not* six free lanes when two nets share it -- it
+is however many the pads leave. Measured: VO1's bar at r5 track 4
+landed inside VBN1's gate pad on `xn_mirr_load3`, the one device that
+carries both nets.
+
+### A rail on the pins cannot be moved by a channel
+
+A net with a pin on several rows of one column gets a vertical down
+that terminal's lane whatever the trunk option says -- the trunk is
+where the net *stands*, the rail is where its *pins* are. VBP2 has a
+pin on every row of `p_mirr_tail`, so it laid M2
+(304900,60700)-(307900,366300) down the whole column with two other
+nets' drain stacks inside it, and no lane assignment could help. The
+fixes that do work are a different lane **on the pin layer**
+(`trunktab`, the gate-tab lane, which is what `routeMirror` and
+LELOTEMP_OTAR's `p_bias` use) or a layer change.
+
+And check the rail's ends: excluding one device is often the whole
+fix. That tab rail then landed on the one device in the column whose
+gate is a different net, a 6-rect PWRUP_1V8|VBP2 component; excluding
+it and picking its drain up separately closed it.
+
+### A port leaves on the layer its net is routed on
+
+`addPortOnEdge` draws a bare run from the port rect to the edge on the
+layer it is given and adds **no via** to whatever the net is actually
+built from. Ask for M2 on a net with an M4 trunk and you get a riser
+lying beside its own net, touching nothing: VIP came out M2
+(121300,2000)-(124300,139000) with its M4 rail at 124900. netgen says
+it as "Top level cell failed pin matching", and magic says it more
+plainly in the extraction log -- `Ports "A" and "B" are electrically
+shorted` is worth grepping for after every run.
+
+### netgen's net count means nothing if pin matching failed
+
+A run that prints
+
+    Circuit 1 contains 13 nets, Circuit 2 contains 13 nets
+    Final result: Top level cell failed pin matching
+
+has **not** compared the connectivity -- it bailed at the ports. Do
+not read matching counts there as evidence that a `checkroutes` short
+was a false positive. Measured: it was real, and magic's extraction
+log named the same three nets.
+
+### Attaching one net group by group
+
+`addChannelConnection(vLayer, hLayer, regex, channel, track, ...)`
+exists for the net that has to be picked up in two places: successive
+calls for the same net on the same channel track extend ONE shared bar
+across the union of their spans. Two plain orthogonal routes each draw
+a bar over their own pins and meet only if those spans happen to
+overlap -- measured, a bias-side bar 0.88 um wide in a 34 um cell,
+with the net in four components.
 
 ## Verification beyond DRC
 

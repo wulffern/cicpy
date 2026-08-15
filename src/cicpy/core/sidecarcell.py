@@ -225,8 +225,42 @@ class SidecarPycell:
                         net, "", s["strap"], terminals=("B",),
                         excludeInstances=s.get("strap_exclude", ""))
             elif side:
-                layout.addPowerConnection(
-                    net, "", "top" if "t" in side else "bottom")
+                #- addPowerStrap, NOT addPowerConnection. The one this
+                #- replaces copies each published supply RECT and
+                #- stretches it to the ring on that rect's own layer,
+                #- so a child's supply pin drags its layer across
+                #- everything between it and the ring. On a library
+                #- whose pins overhang their abutment box that shorts
+                #- the block: measured on a REY_ATR cell, on the bare
+                #- placement with no signal route anywhere, every
+                #- signal in the cell was already tied to VDD or VSS.
+                #- addPowerStrap carries the same net to the same ring
+                #- one ROUTING width wide instead of one pin wide, on
+                #- the ring's layer, with the via down on the pin.
+                #-
+                #- `pin_strap: true` on the supply entry restores the
+                #- old call for a design that depends on its geometry.
+                #- MEASURED, and it is why this is opt-in rather than
+                #- swapped: addPowerStrap is NOT a drop-in here. An
+                #- assembly has no device terminals to strap, and
+                #- substituting it on LELOTEMP_BIAS_IBP produced a real
+                #- LPI,VCP,VDD_1V8 component of 242 rects -- a supply
+                #- short where there had been none. So the default is
+                #- to draw NOTHING and say so: an open is visible in
+                #- every check, a supply short is invisible to DRC.
+                where = s.get("strap") or ("top" if "t" in side else "bottom")
+                if s.get("pin_strap"):
+                    layout.addPowerConnection(net, "", where)
+                else:
+                    layout.log.warning(
+                        f"supplies: {net} has a ring but no connection to "
+                        f"it. addPowerConnection is opt-in -- it copies "
+                        f"each published supply rect and stretches it to "
+                        f"the ring on that rect's own layer, which shorts "
+                        f"a block whose pins overhang. Say "
+                        f"'pin_strap': True on this supply entry to keep "
+                        f"it, or connect {net} in the cell's own "
+                        f"beforeRoute.")
         if not devices:
             return
         from cicpy.core.mazerouter import route_stack_level

@@ -2031,7 +2031,7 @@ class LayoutCell(Cell):
         if graph is None:
             return
 
-        sources, bulks = {}, {}
+        sources, bulks, insts = {}, {}, {}
         for port in getattr(graph, "ports", []):
             inst = getattr(port, "parent", None)
             if inst is None or not inst.isInstance():
@@ -2041,6 +2041,7 @@ class LayoutCell(Cell):
             child = getattr(port, "childName", "")
             if child in terminals:
                 sources.setdefault(id(inst), []).append(port)
+                insts[id(inst)] = inst
             elif child == bulk:
                 bulks.setdefault(id(inst), []).append(port)
 
@@ -2072,14 +2073,25 @@ class LayoutCell(Cell):
                 x1, x2 = sorted((int(b.centerX()), int(s.centerX())))
                 h = int(s.height()) * widthmult
                 y1 = int(s.centerY() - h // 2)
-                #- half a routing width, the same "offset" the route
-                #- language means by it
-                if options:
+                #- A CELL THAT NEEDS THE OFFSET ASKS FOR IT BY ITS NAME.
+                #- The jog lands on the source pin's row, and a short
+                #- channel cell's poly contact column reaches that row --
+                #- so the jog ties the GATE to the supply. That is a
+                #- property of the CELL, not of the design placing it, so
+                #- the rule belongs here rather than in every sidecar that
+                #- ever instantiates one. `1F2` is the width/finger suffix
+                #- these libraries use for the short channel device; an
+                #- explicit `options` still wins.
+                opts = options
+                if not opts and re.search(
+                        r"1F2", getattr(insts.get(key), "name", "") or ""):
+                    opts = "offsetlow"
+                if opts:
                     rules = Rules.getInstance()
                     step = int(rules.get(layer, "width")) if rules else h
-                    if re.search(r"offsetlow(,|\s|$)", options):
+                    if re.search(r"offsetlow(,|\s|$)", opts):
                         y1 -= step
-                    elif re.search(r"offsethigh(,|\s|$)", options):
+                    elif re.search(r"offsethigh(,|\s|$)", opts):
                         y1 += step
                 r = Rect(layer, x1, y1, x2 - x1, h)
                 r.net = name

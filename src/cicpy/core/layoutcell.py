@@ -847,7 +847,7 @@ class LayoutCell(Cell):
                     start = len(out)
                     inner = tuple(xforms) + (child,)
                     self._collectPhysicalRects(child_cell, inner, out, active, include_ports)
-                    self._aliasChildPortNets(child, out, start)
+                    self._resolveChildNets(child, out, start)
                     #- ALWAYS, mirrored or not. The body is now in the
                     #- same frame as the instance's own pins -- both got
                     #- there through `Instance._transformRect`, the pins
@@ -897,8 +897,8 @@ class LayoutCell(Cell):
         active.remove(obj_id)
         return out
 
-    def _aliasChildPortNets(self, inst, out, start):
-        """A child's boundary net is the PARENT's net, under its name.
+    def _resolveChildNets(self, inst, out, start):
+        """A child's boundary net is the PARENT's net; the rest are the CHILD's.
 
         A subcell paints its rects with its own net names and the
         parent wires those to nets of its own, so the same conductor
@@ -922,18 +922,47 @@ class LayoutCell(Cell):
         rect and the child port's rect are not the same rectangle
         (measured: LELOTEMP_CMPR's VIP sits at y 137000 in its own
         frame and the instance port for it resolves to y 77000).
+
+        AND THE OTHER HALF: a net that is NOT on the boundary is the
+        child's own, and its name means nothing outside the child. Left
+        bare it collides with whatever the parent happens to call a net
+        of its own, and two unrelated conductors come back under one
+        label -- which reads as a net that is OPEN, split across two
+        components that never touch. Measured on LELOTEMP_BIAS_IBP:
+        `VD1` and `VD2` are top-level nets there, and they are ALSO the
+        names LELOTEMP_OTAR uses for its own internal drain nodes, four
+        levels down and wired to nothing of the sort (BIAS_IBP's VD1
+        arrives at OTAR as VIN). netgen matched the same layout
+        uniquely. Qualifying the child's internal nets by instance name
+        is what makes the label mean one conductor again.
+
+        Only when the pairing is COMPLETE. Without it the boundary set
+        is a guess, and qualifying a net that is really on the boundary
+        would split a net that is whole -- trading a false open for a
+        false open. Alias-only is the safe degradation.
         """
         pairs = inst.portPairs() if hasattr(inst, "portPairs") else []
         alias = {}
+        boundary = set()
         for parent_net, child_net in pairs:
-            if child_net and parent_net and child_net != parent_net:
+            if not child_net:
+                continue
+            boundary.add(child_net)
+            if parent_net and child_net != parent_net:
                 alias[child_net] = parent_net
-        if not alias:
+        complete = bool(pairs) and all(cn for _, cn in pairs)
+        if not alias and not complete:
             return
+        iname = (getattr(inst, "instanceName", "")
+                 or getattr(inst, "cell", "") or "")
         for rr in out[start:]:
             n = getattr(rr, "net", "")
+            if not n:
+                continue
             if n in alias:
                 rr.setNet(alias[n])
+            elif complete and iname and n not in boundary:
+                rr.setNet(f"{iname}/{n}")
 
     def _attributeInstanceBody(self, inst, out, start, xforms=()):
         """Resolve the rects inside one instance: a net, or an obstacle.
@@ -1186,7 +1215,11 @@ class LayoutCell(Cell):
         return anchors
 
     def _ignoreConnectivityNet(self, net_name):
-        return bool(net_name) and str(net_name).startswith("xfill_")
+        #- the LAST segment: a child's internal net is qualified by the
+        #- instance it belongs to (`x1/x2/xfill_...`), and testing the
+        #- whole string would stop ignoring fill the moment it came from
+        #- one level down
+        return bool(net_name) and str(net_name).rsplit("/", 1)[-1].startswith("xfill_")
 
     def _findRoot(self, parent, idx):
         while parent[idx] != idx:

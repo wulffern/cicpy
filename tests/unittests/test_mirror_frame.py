@@ -195,3 +195,83 @@ class NetlessBlobIsExplained(unittest.TestCase):
         self.assertIn("CHAIN A|B", line)
         self.assertIn("(0,0)-(10000,2000)", line)
         self.assertIn("(30000,0)-(40000,2000)", line)
+
+
+def _name_collision():
+    """A child with an internal net whose NAME the parent also uses.
+
+    LELOTEMP_OTAR calls its own internal drain nodes VD1 and VD2.
+    LELOTEMP_BIAS_IBP, four levels up, has top-level nets of those
+    names too -- and BIAS_IBP's VD1 arrives at OTAR as VIN, so the two
+    conductors have nothing to do with each other. Left bare, the
+    child's label collides with the parent's and the net is reported
+    OPEN, split across two components that never touch. netgen matched
+    the same layout uniquely.
+
+    Here: LEAF has a boundary net IN and an internal net VD1. TOP wires
+    LEAF's IN to a net of its own called VD1, and has a second, separate
+    piece of real VD1 elsewhere. Three conductors, and only two of them
+    are the same net.
+    """
+    from cicpy.core.port import Port
+
+    leaf = LayoutCell()
+    leaf.name = "COLLIDE_LEAF"
+    leaf.add(_rect("M1", 0, 0, 10000, 2000, "IN"))
+    leaf.add(_rect("M1", 0, 10000, 10000, 12000, "OUT"))
+    #- INTERNAL: no port publishes it, so its name is the child's alone
+    leaf.add(_rect("M1", 0, 20000, 10000, 22000, "VD1"))
+    for name, y in (("IN", 0), ("OUT", 10000)):
+        p = Port(name, "M1", _rect("M1", 1000, y, 9000, y + 2000))
+        leaf.ports[name] = p
+        leaf.add(p)
+    leaf.updateBoundingRect()
+
+    top = LayoutCell()
+    top.name = "COLLIDE_TOP"
+    xl = Instance()
+    xl.instanceName = "XL"
+    xl.setCell(leaf)
+    xl.layoutcell = leaf
+    xl.updateBoundingRect()
+    xl.moveTo(0, 0)
+    #- the wiring: LEAF's IN is what TOP calls VD1
+    for pname, cname, y in (("VD1", "IN", 0), ("Q", "OUT", 10000)):
+        ip = Port(pname, "M1", _rect("M1", 1000, y, 9000, y + 2000))
+        ip.childName = cname
+        xl.add(ip)
+    top.add(xl)
+    #- the parent's own VD1, joined to the child's IN by a real bar:
+    #- ONE conductor, so any split reported is the checker's doing
+    top.add(_rect("M1", 10000, 0, 50000, 2000, "VD1"))
+    top.add(_rect("M1", 50000, 0, 60000, 2000, "VD1"))
+    p = Port("VD1", "M1", _rect("M1", 51000, 0, 59000, 2000))
+    top.ports["VD1"] = p
+    top.add(p)
+    top.updateBoundingRect()
+    top.nodeGraphList = ["VD1"]
+    return top
+
+
+class InternalNetNameCollision(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        Rules(_tech())
+        cls.top = _name_collision()
+        cls.result = cls.top.checkConnectivity()
+
+    def test_the_childs_internal_net_is_qualified(self):
+        nets = {getattr(r, "net", "")
+                for r in self.top._collectPhysicalRects()}
+        self.assertIn("XL/VD1", nets)
+        #- the boundary net took the parent's name, so the child's own
+        #- copy of it is the only VD1 left inside XL
+        self.assertNotIn("VD1", {n for n in nets if n.startswith("XL")})
+
+    def test_no_false_open(self):
+        """The whole point: one label, one conductor."""
+        self.assertEqual([o["net"] for o in self.result["opens"]], [])
+
+    def test_no_false_short(self):
+        self.assertEqual(self.result["shorts"], [])

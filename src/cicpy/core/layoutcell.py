@@ -1455,6 +1455,15 @@ class LayoutCell(Cell):
         #- which seeded only from rect nets -- then had nothing to say
         #- about it at all. A component of 868 rectangles with no bridge
         #- line is not a lead, it is noise.
+        #- EVERY component the anchor reaches, not the first one found.
+        #-
+        #- A terminal is a rectangle, not a point, and a rectangle can
+        #- sit across a gap: the pin is then itself the place the net
+        #- comes apart. Stopping at the first component hid exactly that
+        #- case -- the split the reader most wants to be told about is
+        #- the one where the break is under the pin -- and it made the
+        #- report depend on the order components happened to be built
+        #- in, which is no property of the layout at all.
         anchor_seed = {}
         for net_name, anchor in anchors:
             matched = False
@@ -1472,8 +1481,6 @@ class LayoutCell(Cell):
                     component_nets[comp_id].add(net_name)
                     anchor_seed.setdefault(idx, net_name)
                     matched = True
-                    break
-                if matched:
                     break
             if not matched:
                 unmatched[net_name].append(anchor)

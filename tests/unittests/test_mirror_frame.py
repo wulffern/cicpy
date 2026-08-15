@@ -275,3 +275,47 @@ class InternalNetNameCollision(unittest.TestCase):
 
     def test_no_false_short(self):
         self.assertEqual(self.result["shorts"], [])
+
+
+def _pin_over_a_gap():
+    """A terminal that sits across the break in its own net.
+
+    The anchor loop used to stop at the first component a terminal
+    touched. A terminal is a RECTANGLE though, and a rectangle can span
+    a gap -- so the one case where the break is directly under the pin,
+    which is the case a reader most wants pointed at, was the one case
+    that reported nothing.
+
+    Two pieces of metal with a gap between them and a port lying over
+    both. cicpy draws a pin as a marker and the metal separately, so the
+    port itself is not a conductor: the net really is open here.
+    """
+    from cicpy.core.port import Port
+
+    cell = LayoutCell()
+    cell.name = "PIN_OVER_GAP"
+    cell.add(_rect("M1", 0, 0, 10000, 2000))
+    cell.add(_rect("M1", 20000, 0, 30000, 2000))
+    p = Port("N", "M1", _rect("M1", 5000, 0, 25000, 2000))
+    cell.ports["N"] = p
+    cell.add(p)
+    cell.updateBoundingRect()
+    cell.nodeGraphList = ["N"]
+    return cell
+
+
+class TerminalAcrossASplit(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        Rules(_tech())
+        cls.result = _pin_over_a_gap().checkConnectivity()
+
+    def test_the_split_is_reported(self):
+        opens = self.result["opens"]
+        self.assertEqual([o["net"] for o in opens], ["N"])
+        self.assertEqual(opens[0]["type"], "split")
+
+    def test_both_sides_are_named(self):
+        """Binding to one side would have called the net whole."""
+        self.assertEqual(len(self.result["opens"][0]["components"]), 2)

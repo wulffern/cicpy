@@ -1,5 +1,11 @@
 # Layout Flow
 
+> The current way to write a cell is the **SidecarCell** — one
+> declarative class per cell — described in the
+> [field guide](/cicpy/agent_layout). This page documents the
+> underlying machinery, which the sidecar is built on and which
+> classic pycells still use.
+
 This page explains how `cicpy sch2mag` actually builds layout, and where placement and routing intent is supposed to live.
 
 ## Entry Points

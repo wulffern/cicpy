@@ -28,7 +28,19 @@ make build
 
 ## Docs
 
-- [Routing examples](/cicpy/routes)
+Start here:
+
+- **[Layout with cicpy, a field guide](/cicpy/agent_layout)** — the
+  sidecar, the routing loop (search → emit → import → verify), and
+  every measured trap. The one document to read before laying out.
+- [Routing](/cicpy/routes) — the Path story API and the canned shapes
+- [MCP server](/cicpy/mcp) — the same inspection as tools for an agent
+- [Layout flow internals](/cicpy/layout) — what sch2mag actually does
+- [Pycell API](/cicpy/pycell) — the classic hook protocol (the
+  sidecar in the field guide is the current form)
+
+Examples and views:
+
 - [jcell test](/cicpy/jcell)
 - [svg test](/cicpy/svg)
 - [transpile test](/cicpy/transpile)
@@ -48,6 +60,18 @@ make build
 - `orc` [Deprecated]: expand ORC recipes into grouped `.json` and `.spi` output files.
 - `filter` [Deprecated]: currently a parse-only placeholder command that loads a `.cic` file, optionally merges included libraries through `--I`, and exits.
 
+Inspection commands — ask before you draw, no regeneration needed:
+
+- `checkroutes`: shorts and opens in a built `.cic`, with BRIDGE/CHAIN attribution of what touches what.
+- `tracks`: which routing tracks are occupied, and by what; `--free LO:HI` reports usable spans.
+- `blockers`: what stops a net dropping a via column in a box — the check no same-layer scan can do.
+- `findroute`: search a path for a net and report it without drawing.
+- `stackorder`: which columns are interleaved on a terminal, and what reordering them would buy.
+- `cost`: what a cell's routing costs — wire length, vias, pieces.
+- `gui`: Qt viewer for `.cic` files (`pip install cicpy[gui]`).
+
+The same inspection is available to MCP clients: see [MCP server](/cicpy/mcp).
+
 ## Library Includes
 
 Commands that read `.cic` data can load extra library files with `--I`.
@@ -66,75 +90,3 @@ For command help:
 cicpy --help
 cicpy <command> --help
 ```
-
-# Custom IC Creator Python
-
-Python toolbox for transpiling [ciccreator](https://github.com/wulffern/ciccreator) output to other IC design formats.
-
-## Install
-
-Latest from git:
-```sh
-git clone https://github.com/wulffern/cicpy
-cd cicpy
-pip install -e .
-```
-
-Stable release from PyPI:
-```sh
-pip install cicpy
-```
-
-## Commands
-
-```
-cicpy [OPTIONS] COMMAND [ARGS]...
-```
-
-| Command | Description |
-|---------|-------------|
-| `transpile` | Translate `.cic` to SKILL layout/schematic, SPICE, Verilog, Xschem, Magic, SVG |
-| `jcell` | Extract a single cell from a `.cic` file as JSON |
-| `sch2mag` | Netlist an Xschem schematic to SPICE, then place and route to Magic |
-| `spi2mag` | Place and route a SPICE subcircuit to Magic |
-| `svg` | Generate SVG views from a `.cic` library |
-| `minecraft` | Emit a Minecraft build script from a layout cell |
-| `gui` | Open a Qt layout viewer (requires `pip install -e '.[gui]'`) |
-| `place` | *(Deprecated)* Place transistors by pattern |
-| `orc` | *(Deprecated)* Orchestration runner |
-| `filter` | *(Deprecated)* Parse-only placeholder |
-
-For full option lists: `cicpy --help` and `cicpy <command> --help`
-
-### Common `transpile` options
-
-```sh
-cicpy transpile SAR9B.cic.gz demo.tech SAR9B \
-  --layskill    # Cadence SKILL layout
-  --schskill    # Cadence SKILL schematic
-  --spice       # ngspice + CDL netlists
-  --xschem      # Xschem schematics
-  --magic       # Magic .mag layout
-  --verilog     # Verilog (experimental)
-```
-
-### Extra library includes
-
-Commands that read `.cic` data accept multiple `--I` flags to merge library cells:
-
-```sh
-cicpy svg top.cic tech/cic/sky130A.tech TOP \
-  --I analog_lib.cic \
-  --I digital_lib.cic
-```
-
-## Changelog
-
-| Version | Comment |
-|---------|---------|
-| 0.0.1 | First version |
-| 0.1.5 | First PyPI release |
-| 0.1.8 | Added cicspi dependency and subpackages |
-| 0.1.9 | Routing, Magic layout, and connectivity improvements |
-
-

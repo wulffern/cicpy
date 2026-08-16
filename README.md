@@ -66,3 +66,4 @@ cicpy svg top.cic tech/cic/sky130A.tech TOP \
 | 0.1.5 | First PyPI release |
 | 0.1.8 | Added cicspi dependency and subpackages |
 | 0.1.9 | Routing, Magic layout, and connectivity improvements |
+| 0.2.0 | Declarative routing: `paths`/`blocked` on sidecar cells, anchored stories with no coordinates, the search emits paste-ready path entries, stacked supply rings, trustworthy checkroutes, MCP server |

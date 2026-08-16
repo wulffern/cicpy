@@ -1,5 +1,11 @@
 # Custom Pycell API
 
+> The current way to write a cell is the **SidecarCell** — one
+> declarative class per cell — described in the
+> [field guide](/cicpy/agent_layout). This page documents the
+> underlying machinery, which the sidecar is built on and which
+> classic pycells still use.
+
 When `cicpy sch2mag` or `cicpy spi2mag` processes a cell, it looks for a Python file named `<CELL>.py` in the cell's library directory. If found, the file is imported and its hook functions are called at defined points in the layout pipeline.
 
 If the file does not exist, `spi2mag`/`sch2mag` creates a default commented template with the available hooks. Existing files are never overwritten.

@@ -21,6 +21,52 @@ The transistor used in every example is the real `NCHDL` cell from the SVG regre
 
 ## Preferred APIs
 
+### Paths: a route as a story
+
+The twelfth shape, and the one to reach for when the canned strings
+below run out — or whenever the route should *say why it is where it
+is*. A `Path` is a sequence of steps, each aimed at something **named
+in the design**; there is deliberately no way to write a coordinate.
+
+```python
+p = layout.path("RST_A", "M2", start=[pin_a], stop=[pin_b])
+p.movey(p.track("cband", 2))     # a channel lane
+p.up("M4")                       # layer change (largest cut that fits)
+p.movex(p.track("dband", 2))
+p.movey(p.landing("y"))          # the stop rect's row
+p.movex(p.landing("x"))          # ...and its column
+p.end()                          # land on the stop rect
+```
+
+**Steps**: `start(at=)` / `end(at=)` (the ends are PORTS, used where
+they are; `at="n|s|e|w"` picks an edge of the rect), `movex(anchor)` /
+`movey(anchor)`, `up(layer=)` / `down(layer=)`, `trunk(at=)` (ride a
+lane the length of the route's own pins), `comb` (one trunk, a stub
+per pin), `merge` (bring every pin sideways onto one lane, no vias),
+`taps` (come back DOWN onto every pin from the lane being ridden — the
+other half of a flyover).
+
+**Anchors**: `pin(inst, net, axis)`, `track(channel, index)`,
+`landing(axis)`, `tab_lane()`, `right_of_pins()`, `left_of_pins()` —
+each may take `± n*PITCH` or `± SPACE`, units read from the
+technology. All resolve at draw time, so a story survives a resize
+and another technology.
+
+**Options** are the same string the canned shapes take — cut counts
+(`1cuts,2vcuts`), and `noendcut` when the story lands where the child
+has already brought the net up (a second stack on one pin is a
+partial overlap magic tolerates and klayout does not).
+
+The declarative form lives on the sidecar classes as `paths` entries
+— including the collected-pin form for column rails, where no
+start/stop is named and the rail grows over any device added to the
+column. The loop that produces these entries from a search — emit,
+import, verify — is the
+[field guide](/cicpy/agent_layout)'s own section.
+
+`CICPY_TRACE=<net>` prints where every step of that net resolved.
+
+
 ### `addConnectivityRoute(...)`
 
 ```python

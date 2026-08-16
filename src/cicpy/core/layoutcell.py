@@ -1414,7 +1414,7 @@ class LayoutCell(Cell):
             out.append(rect)
         return out
 
-    def addRouteRingOnRect(self, layer:str, name:str, rect:Rect, location:str="rtbl", widthmult:int=1, spacemult:int=2, useGridForSpace:bool=True, exportPort:bool=False):
+    def addRouteRingOnRect(self, layer:str, name:str, rect:Rect, location:str="rtbl", widthmult:int=1, spacemult:int=2, useGridForSpace:bool=True, exportPort:bool=False, straps=None):
         self.log.info(
             f"addRouteRingOnRect(layer={layer}, name={name}, location={location}, widthmult={widthmult}, spacemult={spacemult}, useGridForSpace={useGridForSpace}, exportPort={exportPort})"
         )
@@ -1428,7 +1428,7 @@ class LayoutCell(Cell):
         else:
             xgrid = Rules.getInstance().get(layer, "space")*spacemult + mw
             ygrid = Rules.getInstance().get(layer, "space")*spacemult + mw
-        rr = RouteRing(layer, name, rect.getCopy(), location, ygrid, xgrid, mw)
+        rr = RouteRing(layer, name, rect.getCopy(), location, ygrid, xgrid, mw, straps=straps)
         if rr:
             self.named_rects[f"ring_{name}"] = rr
             self.named_rects[f"ring_b_{name}"] = rr.getPointer("bottom")
@@ -2085,7 +2085,7 @@ class LayoutCell(Cell):
             self.updatePort(name, rr.getDefault())
             self.add(rr)
 
-    def addRouteRing(self, layer:str, name:str, location:str="rtbl", widthmult:int=1, spacemult:int=2, useGridForSpace:bool=True):
+    def addRouteRing(self, layer:str, name:str, location:str="rtbl", widthmult:int=1, spacemult:int=2, useGridForSpace:bool=True, straps=None):
         self.log.info(f"addRouteRing(layer={layer}, name={name}, location={location}, widthmult={widthmult}, spacemult={spacemult}, useGridForSpace={useGridForSpace})")
         mw = Rules.getInstance().get(layer, "width")*widthmult
         if useGridForSpace:
@@ -2094,7 +2094,7 @@ class LayoutCell(Cell):
         else:
             xgrid = Rules.getInstance().get(layer, "space")*spacemult + mw
             ygrid = Rules.getInstance().get(layer, "space")*spacemult + mw
-        rr = RouteRing(layer, name, self.getCopy(), location, ygrid, xgrid, mw)
+        rr = RouteRing(layer, name, self.getCopy(), location, ygrid, xgrid, mw, straps=straps)
         if rr:
             rail = f"rail_{name}"
             self.updatePort(name, rr.getDefault())

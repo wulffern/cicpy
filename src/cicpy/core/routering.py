@@ -2,12 +2,83 @@ from .cell import Cell
 from .rect import Rect
 from .rules import Rules
 
+
+def strap_over(cell, r, layers, gaps=None):
+    """Stack `r` with `layers`, stitched full length with cut arrays.
+
+    `gaps` is [(lo, hi)] along the bar's long axis -- the spans to
+    leave open. A ring row is also where a cell publishes its edge
+    ports (measured on LELOTEMP_CCMPR: VC, RST and CMPO are M2 pads
+    ON the ring rows, and a full-length M2 strap shorted all three),
+    so the strap is laid as segments between the things that were
+    there first. A cut ARRAY's intermediate metal is continuous, so
+    gapping the cuts alone is not enough -- the metal is gapped too.
+    """
+    from .cut import Cut
+    horizontal = (r.x2 - r.x1) >= (r.y2 - r.y1)
+    lo, hi = (int(r.x1), int(r.x2)) if horizontal else (int(r.y1), int(r.y2))
+    spans, at = [], lo
+    for g1, g2 in sorted(gaps or []):
+        if g1 > at:
+            spans.append((at, min(g1, hi)))
+        at = max(at, g2)
+    if at < hi:
+        spans.append((at, hi))
+    #- THE STITCH IS CONTACT PAINT, NOT CUT INSTANCES. Magic fractures
+    #- a contact rect into as many legal cuts as its own rules admit --
+    #- which is the maximum-lowness stitch by definition -- and paint
+    #- in the SAME cell merges with whatever cut a supply tie already
+    #- landed on the ring. A Cut instance is a child cell, and two
+    #- cells' contacts may not partially overlap: the array form cost
+    #- 16 mcon/met1 errors where four ring legs' own cuts sat
+    #- (measured on LELO_TEMP).
+    rules = Rules.getInstance()
+    out = []
+    for a, b in spans:
+        if horizontal:
+            seg = Rect(r.layer, a, int(r.y1), b - a, int(r.y2 - r.y1))
+        else:
+            seg = Rect(r.layer, int(r.x1), a, int(r.x2 - r.x1), b - a)
+        below = r.layer
+        for lay in layers:
+            sr = Rect(lay, seg.x1, seg.y1,
+                      seg.x2 - seg.x1, seg.y2 - seg.y1)
+            cell.add(sr)
+            out.append(sr)
+            #- the cut layer between the two metals, from the
+            #- technology's own chain
+            stack_layers = rules.getConnectStack(below, lay)
+            cuts = [l.name for l in stack_layers
+                    if "CUT" in str(getattr(l, "material", "")).upper()]
+            for cname in cuts:
+                #- Rules.get RAISES on a missing rule -- an `or 0`
+                #- default never runs, and the first build died
+                #- mid-write and deleted the .mag it was replacing.
+                #- The cut layers here carry width/space but no
+                #- enclosure rule, so the metal's own margin is used.
+                try:
+                    enc = int(rules.get(cname, "enclosure"))
+                except Exception:
+                    enc = 0
+                enc = max(enc, 700)
+                cr = Rect(cname, seg.x1 + enc, seg.y1 + enc,
+                          (seg.x2 - seg.x1) - 2 * enc,
+                          (seg.y2 - seg.y1) - 2 * enc)
+                if cr.x2 > cr.x1 and cr.y2 > cr.y1:
+                    cell.add(cr)
+                    out.append(cr)
+            below = lay
+    return out
+
+
 class RouteRing(Cell):
 
     def __init__(self, layer:str = None, name:str = None, rect:Rect = None, location:str = None, 
-                 xgrid:int = None, ygrid:int = None, metalwidth:int = None):
+                 xgrid:int = None, ygrid:int = None, metalwidth:int = None,
+                 straps=None):
         super().__init__()
         self.ignoreBoundaryRouting = False
+        self.straps = list(straps or [])
         
         # Default constructor
         if layer is None:
@@ -51,6 +122,31 @@ class RouteRing(Cell):
         if "r" in location:
             self.add(self.right)
             self.default_rectangle = self.right
+
+        self._strapSides()
+
+    def _strapSides(self):
+        """Copy every drawn side onto the strap layers, stitched full
+        length with cut arrays.
+
+        THE RING LAYER IS NOT A CONDUCTOR TO LEAN ON. These rings are
+        laid on the pin layer, which in sky130 is LOCALI at ~12.8
+        ohm/sq -- measured on LELO_TEMP, one 0.9 um side is 172
+        squares, 2.2 kilo-ohm end to end, and that bar was the tile's
+        entire supply spine. One met1 strap over it is 100x lower, and
+        the stitch is not a tap every so often but a single cut array
+        the LENGTH of the bar -- as many cuts as the cut layer's own
+        width and space rules admit, which is what "as the technology
+        dictates" means here. The strap is part of the ring, so
+        wherever the ring is re-laid the strap re-lays with it.
+        """
+        if not self.straps:
+            return
+        for side in ("bottom", "top", "left", "right"):
+            r = getattr(self, side, None)
+            if r is None or r not in self.children:
+                continue
+            strap_over(self, r, self.straps)
 
     def getDefault(self):
         """Get the default rectangle"""

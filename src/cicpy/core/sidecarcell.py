@@ -413,8 +413,17 @@ class SidecarPycell:
             net = s["net"]
             side = s.get("ring")
             if side:
+                #- `straps` on a supplies entry stacks the ring: the
+                #- same box on each named layer, stitched full length
+                #- with cut arrays. The ring layer is the PIN layer,
+                #- and in sky130 that is locali at ~12.8 ohm/sq -- a
+                #- ring that is the cell's supply spine wants the
+                #- strap, and it is declared rather than default
+                #- because core/ is shared and a strap lands metal
+                #- over whatever the design routed beside its ring.
                 layout.addRouteRing("M1", net, side,
-                                    widthmult=3, spacemult=2)
+                                    widthmult=3, spacemult=2,
+                                    straps=s.get("straps"))
             if devices:
                 layout.addPowerGuardConnection(
                     net, excludeInstances=s.get("guard_exclude", ""))

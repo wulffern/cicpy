@@ -690,6 +690,10 @@ class MazeRouter:
         start = (*self.pin_centre(a_rect), a_layer)
         goal = (*self.pin_centre(b_rect), b_layer)
         path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))
+        #- kept for the caller that wants to RE-TELL the search: the
+        #- suggestion writer resolves these nodes back to anchors and
+        #- hands the design a paths entry instead of a coordinate
+        self.last_path = path
         return self.emit(layout, path, width=width)
 
     def emit(self, layout, path, width=None):
@@ -1562,7 +1566,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     #- which are the whole cost of this function. What still searches
     #- has its conclusions written out as a paste-ready block.
     from .routeplan import (stack_key, wires_lookup, replay_claims,
-                            write_suggestions)
+                            write_suggestions, write_path_suggestions)
     _spec = getattr(layout, "_sidecar_spec", None) or {}
     spec_subcells = {e.get("name", ""): e
                      for e in _spec.get("stacks", [])}
@@ -1932,6 +1936,13 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             pth.fromNodes(nodes, aa, bb)
                         log.info(f"{net}: {why}; drawn as {len(searched)} "
                                  f"leg(s) of the searched shape")
+                        try:
+                            write_path_suggestions(
+                                layout, net,
+                                [(aa, bb, nodes) for aa, bb, nodes
+                                 in searched if nodes], log=log)
+                        except Exception as e:
+                            log.warning(f"{net}: no path suggestion: {e}")
                     routed.append((stack, net))
 
                 def try_split(why):
@@ -2377,6 +2388,7 @@ class MazeRoute(Route):
         #- link is drawn it is metal of this net, so the next search
         #- can land on it instead of running back to the first pin.
         drawn = 0
+        links = []
         for a, b in zip(self.rects, self.rects[1:]):
             tm = TrackMap(cell, block_pins=True).build()
             r = MazeRouter(tm, self.net, stack=self.layers)
@@ -2384,6 +2396,8 @@ class MazeRoute(Route):
                 r.connect(cell, a, b, layer=self.mazeLayer,
                           width=self.width, own=self.rects)
                 drawn += 1
+                if getattr(r, "last_path", None):
+                    links.append((a, b, r.last_path))
             except Blocked as e:
                 #- a blocked link is named, with how far it got. It is
                 #- not raised: the rest of the net may still be worth
@@ -2393,3 +2407,15 @@ class MazeRoute(Route):
                           f"nodes")
         log.info(f"MazeRoute: net={self.net} links={drawn}"
                  f"/{len(self.rects) - 1} layers={self.layers or 'tech'}")
+        #- and the search's conclusion, given back as a STORY. What it
+        #- drew is coordinates; the suggestion resolves every corner to
+        #- a pin or a channel track and lands in <CELL>.routes.py as a
+        #- paths entry -- paste-ready when every corner anchors, marked
+        #- UNANCHORED where one does not.
+        if links:
+            try:
+                from .routeplan import write_path_suggestions
+                write_path_suggestions(cell, self.net, links, log=log)
+            except Exception as e:
+                log.warning(f"{self.net}: could not write the path "
+                            f"suggestion: {e}")

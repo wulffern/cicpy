@@ -268,3 +268,188 @@ def write_suggestions(layout, captured_by_stack, keys_by_stack):
     log.info(f"route conclusions for {len(captured_by_stack)} "
              f"stack(s) written to {path}; paste the blocks into "
              f"{owner}.py to replay them")
+
+
+#- --------------------------------------------------------------------
+#- searched polylines, given back as STORIES
+#- --------------------------------------------------------------------
+#- The search already emits paths -- Path.fromNodes turns its node list
+#- into drawn geometry -- but their corners are coordinates, and a
+#- coordinate may not enter a design file. This is the last mile: each
+#- corner is resolved back to something the design can NAME -- a pin of
+#- the net (plus whole PITCHes), or a track of a registered channel
+#- (plus a SPACE) -- and the whole route is written to <CELL>.routes.py
+#- as a paste-ready `paths` entry. A corner that resolves to nothing is
+#- written as UNANCHORED, loudly, so the suggestion is a draft to
+#- finish and not a number smuggled in through a comment.
+#-
+#- This is the same discipline anchored_options applies to a straight
+#- trunk, extended to an arbitrary polyline; PWRUP_B_1V8 in LELO_TEMP
+#- was exactly this process done by hand, and is the shape of output
+#- this aims to produce.
+
+def _grid(cell):
+    try:
+        from .gridcheck import gridFromRules
+        from .rules import Rules
+        return gridFromRules(Rules.getInstance()) or 50
+    except Exception:
+        return 50
+
+
+def _net_pins(cell, net):
+    """[(instanceName, rect)] of every published pin of `net`."""
+    out = []
+    for inst in cell.iterInstances():
+        nm = getattr(inst, "instanceName", "") or ""
+        for ch in getattr(inst, "children", []) or []:
+            if (getattr(ch, "isPort", lambda: False)()
+                    and getattr(ch, "name", "") == net):
+                r = ch.get() if hasattr(ch, "get") else None
+                if r is not None:
+                    out.append((nm, r))
+    return out
+
+
+def _anchor_coord(cell, net, coord, axis, pins):
+    """One coordinate as the anchor that reproduces it, or None.
+
+    Preference order is meaning, not distance: a pin of the net says
+    WHY the wire is there, a channel track says WHERE the floorplan
+    allows it, and an offset in whole PITCHes or one SPACE keeps
+    either honest. Anything else is not an anchor.
+    """
+    pitch = cell._lanePitch(None)
+    #- a QUARTER LANE, not the manufacturing grid. The search walks its
+    #- own grid, which is finer than a lane, so a corner lands NEAR the
+    #- track or pin that explains it rather than on it -- measured on
+    #- LELO_TEMP's PWRUP_B, 400 units off dband track 0 and 1400 off
+    #- the strip pin it was landing on, both refused at grid tolerance.
+    #- A quarter lane still cannot confuse two neighbouring tracks.
+    tol = max(_grid(cell), pitch // 4)
+    space = 0
+    try:
+        from .rules import Rules
+        space = int(Rules.getInstance().get("M4", "space"))
+    except Exception:
+        pass
+    #- the net's own pins first, exact then in whole PITCHes
+    for nm, r in pins:
+        c = int(r.centerX()) if axis == "x" else int(r.centerY())
+        d = coord - c
+        if abs(d) <= tol:
+            return f'pin("{nm}", "{net}", "{axis}")'
+        k = round(d / pitch)
+        if k != 0 and abs(k) <= 4 and abs(d - k * pitch) <= tol:
+            sign = "+" if k > 0 else "-"
+            return (f'pin("{nm}", "{net}", "{axis}") {sign} '
+                    f'{abs(k)} * PITCH')
+    #- then the registered channels: a vertical channel anchors an x,
+    #- a horizontal one a y (channelTrackCoord: lo + (i + 0.5) * pitch)
+    for name, (lo, hi, horizontal) in sorted(
+            (getattr(cell, "_routing_channels", {}) or {}).items()):
+        if horizontal == (axis == "x"):
+            continue
+        for extra, suffix in ((0, ""), (space, " + SPACE"),
+                              (-space, " - SPACE")):
+            f = (coord - extra - lo) / pitch - 0.5
+            i = round(f)
+            if i < 0 or i >= max(1, int((hi - lo) // pitch)):
+                continue
+            if abs(coord - extra - (lo + (i + 0.5) * pitch)) <= tol:
+                return f'track("{name}", {i}){suffix}'
+    return None
+
+
+def _end_name(cell, rect, net):
+    """(instanceName, net) of the pin `rect` is, or None."""
+    if rect is None:
+        return None
+    for nm, r in _net_pins(cell, net):
+        if (abs(int(r.x1) - int(rect.x1)) < 2 and
+                abs(int(r.y1) - int(rect.y1)) < 2):
+            return nm
+    return None
+
+
+def path_suggestion(cell, net, links):
+    """One searched net as a paste-ready `paths` entry, as text.
+
+    `links` is [(a_rect, b_rect, nodes)] -- what the search proved,
+    link by link. Returns (text, unanchored_count).
+    """
+    from .path import simplify
+    lines = []
+    unanchored = 0
+    for a, b, nodes in links:
+        corners = simplify(nodes)
+        if len(corners) < 2:
+            continue
+        pins = _net_pins(cell, net)
+        an = _end_name(cell, a, net)
+        bn = _end_name(cell, b, net)
+        head = f'        dict(net="{net}"'
+        if an and bn:
+            head += (f',\n             start=("{an}", "{net}"),'
+                     f' stop=("{bn}", "{net}")')
+        lines.append(head + ",")
+        lines.append("             steps=[")
+        cur = corners[0]
+        order = {"M1": 0, "M2": 1, "M3": 2, "M4": 3, "M5": 4}
+        for nxt in corners[1:]:
+            if nxt[2] != cur[2]:
+                #- the declarative form spells a layer change as the
+                #- direction it goes, with the target named -- there is
+                #- no "layer" step a design file can call
+                word = ("up" if order.get(nxt[2], 0) > order.get(cur[2], 0)
+                        else "down")
+                lines.append(f'                    ("{word}", "{nxt[2]}"),')
+            for axis, idx in (("x", 0), ("y", 1)):
+                if nxt[idx] == cur[idx]:
+                    continue
+                anch = _anchor_coord(cell, net, int(nxt[idx]), axis, pins)
+                if anch is None:
+                    unanchored += 1
+                    lines.append(
+                        f'                    #- UNANCHORED: the search '
+                        f'chose {axis}={int(nxt[idx])} and no pin or '
+                        f'channel reproduces it. Name a channel there, '
+                        f'or move the pins.')
+                    lines.append(
+                        f'                    ("move{axis}", None),  '
+                        f'#- {axis}={int(nxt[idx])}')
+                else:
+                    lines.append(
+                        f'                    ("move{axis}", {anch}),')
+            cur = nxt
+        lines.append('                    ("end",)]),')
+    return "\n".join(lines), unanchored
+
+
+def write_path_suggestions(layout, net, links, log=log):
+    """Append a `paths` suggestion for a searched net to
+    <routes_owner>.routes.py, beside the wires suggestions."""
+    dirname = getattr(layout, "dirname", "") or ""
+    name = getattr(layout, "name", "") or ""
+    if not dirname or not name or not links:
+        return
+    text, unanchored = path_suggestion(layout, net, links)
+    if not text:
+        return
+    owner = getattr(layout, "routes_owner", "") or name
+    path = os.path.join(dirname, owner + ".routes.py")
+    state = ("NOT paste-ready: finish the UNANCHORED steps first"
+             if unanchored else "paste-ready")
+    block = (f"\n#- SEARCHED route for {net}, told as a story "
+             f"({state}).\n"
+             f"#- Add to a `paths` declaration and gate with "
+             f"paths_only while verifying.\n"
+             f"{text}\n")
+    try:
+        with open(path, "a") as f:
+            f.write(block)
+    except Exception as e:
+        log.warning(f"{path}: could not write path suggestion: {e}")
+        return
+    log.info(f"{net}: searched route written to {path} as a paths "
+             f"entry ({state})")

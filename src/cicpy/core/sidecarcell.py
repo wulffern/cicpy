@@ -199,6 +199,199 @@ class SidecarPycell:
                                          int(st.x1), int(st.x2),
                                          horizontal=False)
 
+    #- ------------------------------------------------------------
+    #- the crossing nets, DECLARED
+    #- ------------------------------------------------------------
+
+    @staticmethod
+    def declaredPort(layout, *where):
+        """An end of a story: a block's published pin, or a named rect.
+
+        TWO KINDS OF END, because a cell has two kinds of thing worth
+        landing on.
+
+        ``("xbias", "VSS")`` is a placed block's published pin, which is
+        what a crossing net between two blocks joins.
+
+        ``"ring_b_VSS"`` is one of THIS cell's own named rects -- a ring
+        side, a rail, anything `named_rects` holds. A supply ring is not
+        an instance and has no port, so a story could not name it and
+        the only way to reach one was `addPowerConnection`, which copies
+        each published supply rect and stretches it on that rect's own
+        layer. That is a blunt instrument: it shorts any block whose
+        pins overhang, which is why it is opt-in.
+
+        A path is the precise alternative and always was -- `layout.path`
+        takes RECTS, not instances. This is only the declarative form
+        catching up, so a design can say "from the ring to this block's
+        supply pin, on M1, turning where it needs to" as an ordinary
+        entry in `paths` instead of a hook.
+
+        Measured, and the reason it is wanted: LELO_TEMP's bottom ring
+        runs y 0..9000 and xbias publishes VSS at 15000..24000. The
+        ring and the block it rings never touch.
+        """
+        if len(where) == 1:
+            name = where[0]
+            r = (getattr(layout, "named_rects", {}) or {}).get(name)
+            if r is None:
+                layout.log.error(
+                    f"paths: no named rect {name!r} on {layout.name}; "
+                    f"a ring side is named ring_b_<net> / ring_t_<net> "
+                    f"and exists only after the rings are laid")
+            return r
+        instanceName, port = where
+        inst = layout.getInstanceFromInstanceName(instanceName)
+        if inst is None:
+            return None
+        rs = [c.get() for c in (getattr(inst, "children", []) or [])
+              if getattr(c, "isPort", lambda: False)()
+              and getattr(c, "name", "") == port]
+        rs = [r for r in rs if r is not None]
+        return rs[0] if rs else None
+
+    def routePaths(self, layout):
+        """Lay every path this cell DECLARES, in the order declared.
+
+        A story told through `p.movex(p.track(...))` is a method call
+        on a path that does not exist until something builds it, so it
+        could only live inside a hook -- and the crossing nets of a top
+        cell were four hundred lines of `beforeRoute` sitting beside a
+        placement that was pure declaration. The steps are the same;
+        what changes is that they are now DATA on the class, next to
+        the `rows` they depend on, and they round-trip into the .cic
+        through the anchors' own toJson.
+
+        An entry is a dict:
+
+            net      the net, and the name the router uses
+            start    (instanceName, port) the path leaves
+            stop     (instanceName, port) it lands on
+            layer    the routing layer; the start pin's own by default
+            at       which edge of the start rect to leave from
+            options  cut options, "1cuts,2vcuts" by default
+            steps    [(stepName, *args)], applied in order
+
+        TWO SCOPES, because a cell has two kinds of net. A crossing net
+        between two BLOCKS names its two ends -- `start`/`stop`, one
+        published pin each -- and the story runs from one to the other.
+        A net INSIDE a column has no two ends: it is a rail over every
+        pin of that net in the column, which is what `||` means and
+        what the search draws. Naming two of N pins to stand for the
+        rail makes the declaration depend on which two, so an entry
+        that omits `start`/`stop` is COLLECTED instead: every pin of
+        the net in scope, through the same collector
+        `addConnectivityRoute` uses. Add a device to the column and the
+        rail grows over it with nothing in the file changing.
+
+            net      the net, and the name the router uses
+            layer    required when the pins are collected; there is no
+                     start pin to take it from
+            pins     an instance-name regex narrowing the collection
+                     (default: every instance of the cell)
+
+        `paths_only` names the nets to draw and skips the rest -- the
+        gate a bisect needs, in one place rather than in each story.
+        """
+        for e, only in self.pathEntries():
+            net = e["net"]
+            if only is not None and net not in only:
+                continue
+            if e.get("start") or e.get("stop"):
+                #- A STRING IS ONE NAME, not a sequence of letters.
+                #- `*e["start"]` on "ring_b_VSS" unpacks eleven
+                #- characters and calls declaredPort with all of them.
+                def _end(v):
+                    return (v,) if isinstance(v, str) else tuple(v)
+                a = self.declaredPort(layout, *_end(e["start"]))
+                b = self.declaredPort(layout, *_end(e["stop"]))
+                if a is None or b is None:
+                    missing = e["start"] if a is None else e["stop"]
+                    layout.log.error(
+                        f"paths: {net} has no end at "
+                        f"{missing if isinstance(missing, str) else '.'.join(missing)}")
+                    continue
+                p = layout.path(net, e.get("layer") or a.layer,
+                                start=[a], stop=[b],
+                                options=e.get("options", "1cuts,2vcuts"))
+                p.start(at=e.get("at"))
+            else:
+                layer = e.get("layer")
+                if not layer:
+                    layout.log.error(
+                        f"paths: {net} collects its pins and so must "
+                        f"name a layer; there is no start pin to take "
+                        f"one from")
+                    continue
+                p = layout.path(net, layer,
+                                options=e.get("options", "1cuts,2vcuts"),
+                                includeInstances=e.get("pins", ""),
+                                excludeInstances=e.get("not_pins", ""))
+                if not p.stopRects:
+                    layout.log.error(
+                        f"paths: {net} has no pin on {layer} in "
+                        f"{e.get('pins') or 'this cell'}")
+                    continue
+            for st in e.get("steps", []):
+                name, args = st[0], tuple(st[1:])
+                fn = getattr(p, name, None)
+                if not callable(fn):
+                    layout.log.error(f"paths: {net} names no step {name!r}")
+                    continue
+                fn(*args)
+
+    def pathEntries(self):
+        """Every declared path with the `paths_only` that gates it.
+
+        The cell's own, and then its columns'. A column is built as a
+        cell of its own, so its class's declarations arrive here as the
+        one entry in `spec["stacks"]` -- the same list the flat recipe
+        reads for `order` and `wires`. One walk serves both, which is
+        why a cell that places its own devices and one assembled from
+        columns declare routing the same way.
+        """
+        out = [(e, getattr(self, "paths_only", None))
+               for e in (getattr(self, "paths", None) or [])]
+        for s in self.spec.get("stacks", []) or []:
+            only = s.get("paths_only")
+            for e in s.get("paths", []) or []:
+                out.append((e, only))
+        return out
+
+    def mazeEntries(self):
+        """Every declared maze search, the same way."""
+        out = [(e, getattr(self, "paths_only", None))
+               for e in (getattr(self, "mazes", None) or [])]
+        for s in self.spec.get("stacks", []) or []:
+            only = s.get("paths_only")
+            for e in s.get("mazes", []) or []:
+                out.append((e, only))
+        return out
+
+    def routeMazes(self, layout):
+        """The searched nets, declared the same way.
+
+        A maze route is not a Path and cannot become one -- it is a
+        SEARCH, and what it takes is a budget of layers and two rects
+        rather than a story. It is declared beside the paths so that
+        `paths_only` gates both and a cell's crossing nets are all in
+        one place:
+
+            net, layers, between = [(inst, port), (inst, port)]
+        """
+        for e, only in self.mazeEntries():
+            net = e["net"]
+            if only is not None and net not in only:
+                continue
+            rects = [self.declaredPort(
+                         layout, *((r,) if isinstance(r, str) else tuple(r)))
+                     for r in e["between"]]
+            if any(r is None for r in rects):
+                layout.log.error(f"mazes: {net} is not on both blocks")
+                continue
+            layout.addMazeRoute(f"^{net}$", layers=list(e["layers"]),
+                                rects=rects)
+
     def beforeRoute(self, layout):
         """The supplies, and the stack-level router.
 
@@ -210,6 +403,11 @@ class SidecarPycell:
         used to carry its own copy of this loop, so the two drifted:
         one grew `guard_exclude` and the other did not.
         """
+        #- BEFORE the supplies, which is where the hand-written
+        #- crossing-net hook used to run: a declared path lands on a
+        #- block's published pin, and the rings are attached after.
+        self.routePaths(layout)
+        self.routeMazes(layout)
         devices = bool(self.spec.get("stacks"))
         for s in self.spec.get("supplies", []):
             net = s["net"]
@@ -225,8 +423,42 @@ class SidecarPycell:
                         net, "", s["strap"], terminals=("B",),
                         excludeInstances=s.get("strap_exclude", ""))
             elif side:
-                layout.addPowerConnection(
-                    net, "", "top" if "t" in side else "bottom")
+                #- addPowerStrap, NOT addPowerConnection. The one this
+                #- replaces copies each published supply RECT and
+                #- stretches it to the ring on that rect's own layer,
+                #- so a child's supply pin drags its layer across
+                #- everything between it and the ring. On a library
+                #- whose pins overhang their abutment box that shorts
+                #- the block: measured on a REY_ATR cell, on the bare
+                #- placement with no signal route anywhere, every
+                #- signal in the cell was already tied to VDD or VSS.
+                #- addPowerStrap carries the same net to the same ring
+                #- one ROUTING width wide instead of one pin wide, on
+                #- the ring's layer, with the via down on the pin.
+                #-
+                #- `pin_strap: true` on the supply entry restores the
+                #- old call for a design that depends on its geometry.
+                #- MEASURED, and it is why this is opt-in rather than
+                #- swapped: addPowerStrap is NOT a drop-in here. An
+                #- assembly has no device terminals to strap, and
+                #- substituting it on LELOTEMP_BIAS_IBP produced a real
+                #- LPI,VCP,VDD_1V8 component of 242 rects -- a supply
+                #- short where there had been none. So the default is
+                #- to draw NOTHING and say so: an open is visible in
+                #- every check, a supply short is invisible to DRC.
+                where = s.get("strap") or ("top" if "t" in side else "bottom")
+                if s.get("pin_strap"):
+                    layout.addPowerConnection(net, "", where)
+                else:
+                    layout.log.warning(
+                        f"supplies: {net} has a ring but no connection to "
+                        f"it. addPowerConnection is opt-in -- it copies "
+                        f"each published supply rect and stretches it to "
+                        f"the ring on that rect's own layer, which shorts "
+                        f"a block whose pins overhang. Say "
+                        f"'pin_strap': True on this supply entry to keep "
+                        f"it, or connect {net} in the cell's own "
+                        f"beforeRoute.")
         if not devices:
             return
         from cicpy.core.mazerouter import route_stack_level
@@ -320,12 +552,21 @@ class SidecarPycell:
                 pr = min(cands, key=lambda r: r.y1)
             else:
                 pr = max(cands, key=lambda r: r.y2)
-            #- clipped to the column: the bulk columns straddle the
-            #- cell edge, and a port poking past the box inflates it,
-            #- which moves the origin every parent track was tuned to
+            #- AS WIDE AS THE GUARD. The bulk columns straddle the
+            #- cell edge -- every one of them is 9600 wide against a
+            #- box that cuts at 4800 -- so clipping in x published half
+            #- a guard: one 0.48 um place for the parent to land on,
+            #- for the net it has to reach everywhere. The guard is
+            #- what the supply IS in this library, and the half outside
+            #- the box is not spare, it is the half the abutted
+            #- neighbour shares.
+            #-
+            #- Still clipped in Y, which is what the original guard was
+            #- against: a port running past the top or bottom of the
+            #- column inflates the box and moves the origin every
+            #- parent track was tuned to. X does not, because the
+            #- column's own guard is already there.
             pr = pr.getCopy()
-            pr.x1 = max(pr.x1, box.x1)
-            pr.x2 = min(pr.x2, box.x2)
             pr.y1 = max(pr.y1, box.y1)
             pr.y2 = min(pr.y2, box.y2)
             layout.updatePort(net, pr)

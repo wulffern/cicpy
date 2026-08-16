@@ -195,13 +195,26 @@ class MazeRouterTest(unittest.TestCase):
         self.assertEqual(vias, [])
 
     def test_detour_segments_into_runs_and_vias(self):
+        """One via per LAYER CHANGE -- which is not one per run.
+
+        This asserted len(vias) == len(runs) - 1, i.e. that every via
+        has a run either side of it. That holds only while the path
+        never changes layer twice at the same coordinate, and a via
+        STACK (M3 -> M4 -> M5 at one x,y) is legal geometry that
+        produces two vias and no run between them. Re-pricing the
+        layers in the technology made the router stack one and the
+        test failed as if the router had regressed.
+
+        The invariant that is actually true: a via for every layer
+        change in the path, and no via anywhere else.
+        """
         r = self.router("VS")
         path = r.search((VDS_PIN[0], VDS_PIN[1], "M3"),
                         (VDS_PIN[0], VDS_PIN[1], "M4"))
         runs, vias = r.segments(path)
         self.assertGreater(len(runs), 1)
-        self.assertEqual(len(vias), len(runs) - 1,
-                         "one via per layer change")
+        changes = sum(1 for a, b in zip(path, path[1:]) if a[2] != b[2])
+        self.assertEqual(len(vias), changes, "one via per layer change")
 
     def test_every_emitted_via_is_at_a_legal_column(self):
         """The property that matters. If this fails the router has

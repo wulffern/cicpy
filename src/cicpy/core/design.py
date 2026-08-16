@@ -158,6 +158,9 @@ class Design():
                 self.fromJsonFiles(fname)
                 loaded.add(os.path.abspath(fname))
 
+        #- ...and the library cells, which are .mag and not .cic
+        self.loadMissingFromLibraries(cicfile)
+
     def _indexSiblingCicFiles(self, cicfile):
         cicfile = os.path.abspath(cicfile)
         root = os.path.dirname(cicfile)
@@ -179,17 +182,100 @@ class Design():
             self._collectInstanceCells(cell, refs)
         return refs - set(self.cells.keys())
 
-    def _collectInstanceCells(self, obj, refs):
+    def _collectInstanceCells(self, obj, refs, libs=None):
         if obj is None:
             return
         if obj.isInstance() or obj.isCut():
             name = getattr(obj, "cell", "")
             if name:
                 refs.add(name)
+                if libs is not None:
+                    lib = getattr(obj, "libpath", "") or ""
+                    if lib and name not in libs:
+                        libs[name] = lib
         for child in getattr(obj, "children", []):
-            self._collectInstanceCells(child, refs)
-        
+            self._collectInstanceCells(child, refs, libs)
 
+    def _missingInstanceCellLibraries(self):
+        """{cell name: libpath} for the cells still not loaded."""
+        refs, libs = set(), {}
+        for cell in self.cells.values():
+            self._collectInstanceCells(cell, refs, libs)
+        missing = refs - set(self.cells.keys())
+        return {n: libs[n] for n in missing if n in libs}
+
+    def loadMissingFromLibraries(self, cicfile):
+        """Load referenced cells from the LIBRARY they name.
+
+        `fromJsonFilesWithDependencies` resolves a missing cell from a
+        sibling .cic, which covers a design's own subcells and nothing
+        else: a device comes from a library that is a different repo,
+        reached through a symlink, and the .cic that holds it is not a
+        sibling of anything.
+
+        The instance says where to look. `libpath` names the library
+        directory -- design/REY_ATR_SKY130A, usually a symlink into the
+        library's own repo -- and the library .cic sits BESIDE that
+        directory, named after it: design/REY_ATR_SKY130A.cic, 210
+        cells. Resolve the symlink and it is one join away.
+
+        This matters because a .cic records a device instance as four
+        Port rects and a reference; the cell's own metal is in the
+        library. Without it a checker sees ~4 rects where the cell has
+        ~40, and anything a route collides with that is not one of
+        those four is invisible. Measured: LELOTEMP_CMPR's n_mirr_load
+        reported "0 shorts" while the extracted netlist had three nets
+        merged into VSS, and the same blindness invented opens -- a
+        supply came back "split into 8 components" because the metal
+        joining those pieces lives inside the cells.
+
+        Nothing is passed on the command line, so the blind
+        configuration cannot be reached by forgetting a flag.
+        """
+        root = os.path.dirname(os.path.abspath(cicfile))
+        tried = set()
+        loaded = 0
+        while True:
+            libs = self._missingInstanceCellLibraries()
+            if not libs:
+                break
+            progress = False
+            for name, libpath in sorted(libs.items()):
+                for cand in self._libraryCandidates(root, libpath, name):
+                    if cand in tried or not os.path.exists(cand):
+                        continue
+                    tried.add(cand)
+                    try:
+                        self.fromJsonFiles(cand)
+                        loaded += 1
+                        progress = True
+                    except Exception as e:
+                        logging.getLogger("Design").warning(
+                            f"{name}: could not read {cand}: {e}")
+                    break
+            if not progress:
+                break
+        return loaded
+
+    def _libraryCandidates(self, root, libpath, name):
+        """Where a library cell's .cic might be, most likely first."""
+        out = []
+        for base in (os.path.join(root, libpath),
+                     os.path.join(root, "..", libpath)):
+            libdir = os.path.realpath(base)
+            if not os.path.isdir(libdir):
+                continue
+            parent = os.path.dirname(libdir)
+            stem = os.path.basename(libdir)
+            #- the library .cic BESIDE the library directory, named
+            #- after it -- design/REY_ATR_SKY130A.cic for the cells in
+            #- design/REY_ATR_SKY130A/
+            out.append(os.path.join(parent, stem + ".cic"))
+            out.append(os.path.join(parent, stem + ".cic.gz"))
+            #- ...or one file per cell inside it
+            out.append(os.path.join(libdir, name + ".cic"))
+            out.append(os.path.join(libdir, name + ".cic.gz"))
+        return out
 
     def toJson(self):
         obj = dict()

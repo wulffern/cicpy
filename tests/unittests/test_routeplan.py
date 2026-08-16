@@ -81,10 +81,18 @@ class RoutePlan(unittest.TestCase):
         self.assertIsNone(wires_lookup(None, "abc"))
 
     def test_block_formats_as_pasteable_python(self):
+        """A COORDINATE IS NEVER WRITTEN. This test used to assert
+        that trunkx=1000 came through verbatim -- which is exactly the
+        stale-replay hazard the module docstring retires: the writer
+        now refuses the fallback and emits the net as a blocked triple
+        naming the lane, so the designer moves the pins or routes by
+        hand instead of inheriting a number."""
         from cicpy.core.routeplan import format_wires_block
         block = format_wires_block("p_in", WIRES, "abc123")
         self.assertIn("wires = [", block)
-        self.assertIn("('VD1', 'M1', '||', 'trunkx=1000'),", block)
+        self.assertNotIn("trunkx=1000", block.split("blocked", 1)[0])
+        self.assertIn("'VD1', 'blocked'", block)
+        self.assertIn("1000", block)
         self.assertIn('wires_key = "abc123"', block)
         #- the body must be legal python when indented under a class
         src = "class p_in:\n" + "\n".join(

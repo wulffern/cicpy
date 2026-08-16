@@ -134,8 +134,23 @@ class TechDriven(unittest.TestCase):
         self.assertEqual(self._map().pin_layer, "M1")
 
     def test_directions_come_from_the_tech(self):
-        self.assertEqual(self._map().directions,
-                         {"M2": "v", "M3": "h", "M4": "v", "M5": "h"})
+        """FROM the tech -- so the expectation is read, not written down.
+
+        This asserted a literal {M2..M5}, which made it a test of what
+        sky130A.tech happened to say the day it was written: adding
+        "M1" : "h" to the technology failed it, and a technology change
+        reads as a trackmap regression. The tech is the fixture here,
+        so ask it.
+        """
+        route = self._map().rules.getValue("rules", "ROUTE")
+        expected = dict(route["directions"])
+        got = self._map().directions
+        for layer, d in expected.items():
+            self.assertEqual(got.get(layer), d, layer)
+        #- and nothing invented: every direction traces to the tech or
+        #- to the pin layer, which joins the map so pins can be modelled
+        extra = set(got) - set(expected) - {route.get("pinlayer")}
+        self.assertEqual(extra, set())
 
     def test_stack_order_follows_the_layer_chain_not_the_names(self):
         """sorted() happens to work for M1..M5 and puts M10 between M1

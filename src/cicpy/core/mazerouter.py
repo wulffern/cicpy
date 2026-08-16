@@ -218,9 +218,14 @@ class MazeRouter:
         That is what shorts two nets a track apart: each is legal on its own
         track, which is all is_free used to check, and touched the
         neighbour's.
+
+        It is THIS net's width, not the technology's: a supply widened
+        by its NETS rule reaches further from its centreline, and a
+        search that reserved the minimum would draw it straight over
+        the neighbouring track.
         """
         if layer not in self._clearance:
-            self._clearance[layer] = (self.rule(layer, "width")
+            self._clearance[layer] = (self.net_width(layer)
                                       + self.rule(layer, "space"))
         return self._clearance[layer]
 
@@ -247,6 +252,83 @@ class MazeRouter:
             if t.crosses_pin(self.net, lo, hi):
                 return False
         return near
+
+    def net_width(self, layer):
+        """The width a SEARCHED route of this net is drawn at.
+
+        `widthmult` in the NETS table: a supply carries real current and
+        wants the metal, and the technology minimum is a minimum and not
+        an intent. Rings and straps do not come through here -- they are
+        laid by addRouteRing with their own widthmult, and are already
+        wide -- so this only widens what the maze router draws.
+
+        The clearance the search reserved comes from the same rule, so a
+        widened wire still owns the tracks it covers.
+        """
+        w = self.rule(layer, "width")
+        mult = self.tm.net_rule(self.net).get("widthmult")
+        if mult:
+            try:
+                w = int(round(w * float(mult)))
+            except (TypeError, ValueError):
+                pass
+        return w
+
+    def keepaway_penalty(self, layer, coord, lo, hi):
+        """How much this step should cost EXTRA for running too close.
+
+        A PENALTY, not an exclusion. `keepaway` says a net is sensitive,
+        not that its neighbourhood is illegal -- make it illegal and a
+        crowded column has no path at all, and "unroutable" is a much
+        worse answer than "routed, but it went the long way". The search
+        pays a multiple of the step and takes the detour when one
+        exists.
+
+        It is symmetric: the clearance is wanted whether the sensitive
+        net is the one being routed or the one already there, so the
+        wider of the two nets' `keepaway` decides.
+
+        Returns 0 when nothing near is sensitive, so a technology with
+        no such rule pays one attribute lookup and nothing else.
+        """
+        if not self.tm.has_keepaway():
+            return 0
+        mine = self.tm.keepaway_tracks(self.net)
+        tracks = self.tm.tracks.get(layer)
+        if not tracks:
+            return 0
+        pitch = self.tm.hpitch if self.tm.directions.get(layer) == "h" \
+            else self.tm.vpitch
+        #- the widest clearance any rule asks for bounds the scan; a
+        #- narrower rule is then filtered per net below
+        reach = max(mine, self._max_keepaway()) * max(1, int(pitch))
+        if reach <= 0:
+            return 0
+        worst = 0
+        for t in self.tm.track_range(layer, coord - reach, coord + reach):
+            gap = abs(int(t.coord) - int(coord))
+            for other in set(t.wires) | set(t.pins):
+                if not other or other == self.net or other == "?":
+                    continue
+                want = max(mine, self.tm.keepaway_tracks(other))
+                if want <= 0 or gap > want * pitch:
+                    continue
+                spans = list(t.wires.get(other, ())) \
+                    + list(t.pins.get(other, ()))
+                if not any(s_lo < hi and lo < s_hi for s_lo, s_hi in spans):
+                    continue
+                #- closer is worse: touching the neighbouring track
+                #- costs the full `want`, the outermost one costs 1
+                worst = max(worst, want - gap // max(1, pitch))
+        return worst
+
+    def _max_keepaway(self):
+        m = getattr(self, "_maxka", None)
+        if m is None:
+            m = max([int(e.get("keepaway", 0) or 0)
+                     for _, e in self.tm.net_rules()] or [0])
+            self._maxka = m
+        return m
 
     def _via_layers(self, a_layer, b_layer):
         """The layers a via between a_layer and b_layer occupies."""
@@ -514,14 +596,17 @@ class MazeRouter:
         travel_ok = (layer not in self.pin_only
                      or getattr(self.tm, "pin_travel", ""))
         step = self.tm.hpitch if horizontal else self.tm.vpitch
-        weight = self.tm.layer_cost(layer)
+        weight = self.tm.layer_cost(layer, self.net)
         for delta in (-step, step) if travel_ok else ():
             nx, ny = (x + delta, y) if horizontal else (x, y + delta)
             if not self.in_bounds(nx, ny):
                 continue
             lo, hi = sorted(((x, nx) if horizontal else (y, ny)))
             if self.is_free(layer, y if horizontal else x, lo, hi):
-                out.append(((nx, ny, layer), abs(delta) * weight))
+                near = self.keepaway_penalty(layer, y if horizontal else x,
+                                             lo, hi)
+                out.append(((nx, ny, layer),
+                            abs(delta) * weight * (1 + near)))
 
         #- a via to an adjacent layer, if the column is clear. Asked
         #- once, not once per neighbouring layer: the column does not
@@ -605,6 +690,10 @@ class MazeRouter:
         start = (*self.pin_centre(a_rect), a_layer)
         goal = (*self.pin_centre(b_rect), b_layer)
         path = self.search(start, goal, self.manhattan_heuristic(self.snap(goal)))
+        #- kept for the caller that wants to RE-TELL the search: the
+        #- suggestion writer resolves these nodes back to anchors and
+        #- hands the design a paths entry instead of a coordinate
+        self.last_path = path
         return self.emit(layout, path, width=width)
 
     def emit(self, layout, path, width=None):
@@ -622,7 +711,7 @@ class MazeRouter:
             #- the technology's width, not the track pitch. They happen
             #- to be equal here, which is exactly why the two were
             #- confused and why adjacent tracks abutted.
-            w = width or self.rule(layer, "width")
+            w = width or self.net_width(layer)
             half = w // 2
             #- A run must be long enough to satisfy the layer's minimum
             #- area. The technology carries `minlength` for this --
@@ -1477,7 +1566,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
     #- which are the whole cost of this function. What still searches
     #- has its conclusions written out as a paste-ready block.
     from .routeplan import (stack_key, wires_lookup, replay_claims,
-                            write_suggestions)
+                            write_suggestions, write_path_suggestions)
     _spec = getattr(layout, "_sidecar_spec", None) or {}
     spec_subcells = {e.get("name", ""): e
                      for e in _spec.get("stacks", [])}
@@ -1609,9 +1698,38 @@ def route_stack_level(layout, margin=None, log=None, only=None,
         skey = stack_key(members)
         keys_by_stack[stack] = skey
         declared = wires_lookup(spec_subcells.get(stack), skey, members)
+        #- AND THE DECLARED PATHS, which are not the search's business
+        #- at all. A `wires` entry is this function's own conclusion
+        #- handed back to it, so it is replayed HERE; a path is drawn
+        #- by the cell (SidecarPycell.routePaths) before this runs, and
+        #- all that is wanted here is for the search to leave the net
+        #- alone. Searching it anyway lays a second conductor over the
+        #- first -- which is the same fault a pycell-routed stack is
+        #- already guarded against, one level down.
+        #-
+        #- NOT gated by `paths_only`. A net a bisect has switched off
+        #- is meant to be UNDRAWN, and if the search picked it up
+        #- instead the experiment would measure the search.
+        _e = spec_subcells.get(stack) or {}
+        declared_paths = {str(p.get("net")) for p in (_e.get("paths") or [])}
+        declared_paths |= {str(p.get("net")) for p in (_e.get("mazes") or [])}
+        declared_blocked = {}
+        for b in (_e.get("blocked") or []):
+            b = tuple(b) if isinstance(b, (list, tuple)) else (b,)
+            declared_blocked[str(b[0])] = (str(b[1]) if len(b) > 1
+                                           else "blocked")
         pin_layer_guess = None
         for net in order:
             rects = subs[net]
+            if net in declared_paths:
+                log.info(f"{stack}/{net}: declared as a path; not searching")
+                routed.append((stack, net))
+                continue
+            if net in declared_blocked:
+                blocked.append((stack, net, declared_blocked[net]))
+                log.warning(f"{stack}/{net}: {declared_blocked[net]} "
+                            f"(declared)")
+                continue
             #- REPLAY: the sidecar already states this net's wire.
             #- Draw it (route.py redraws under today's rules), restore
             #- its claims for any net that still has to search, and
@@ -1818,6 +1936,13 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             pth.fromNodes(nodes, aa, bb)
                         log.info(f"{net}: {why}; drawn as {len(searched)} "
                                  f"leg(s) of the searched shape")
+                        try:
+                            write_path_suggestions(
+                                layout, net,
+                                [(aa, bb, nodes) for aa, bb, nodes
+                                 in searched if nodes], log=log)
+                        except Exception as e:
+                            log.warning(f"{net}: no path suggestion: {e}")
                     routed.append((stack, net))
 
                 def try_split(why):
@@ -2263,6 +2388,7 @@ class MazeRoute(Route):
         #- link is drawn it is metal of this net, so the next search
         #- can land on it instead of running back to the first pin.
         drawn = 0
+        links = []
         for a, b in zip(self.rects, self.rects[1:]):
             tm = TrackMap(cell, block_pins=True).build()
             r = MazeRouter(tm, self.net, stack=self.layers)
@@ -2270,6 +2396,8 @@ class MazeRoute(Route):
                 r.connect(cell, a, b, layer=self.mazeLayer,
                           width=self.width, own=self.rects)
                 drawn += 1
+                if getattr(r, "last_path", None):
+                    links.append((a, b, r.last_path))
             except Blocked as e:
                 #- a blocked link is named, with how far it got. It is
                 #- not raised: the rest of the net may still be worth
@@ -2279,3 +2407,15 @@ class MazeRoute(Route):
                           f"nodes")
         log.info(f"MazeRoute: net={self.net} links={drawn}"
                  f"/{len(self.rects) - 1} layers={self.layers or 'tech'}")
+        #- and the search's conclusion, given back as a STORY. What it
+        #- drew is coordinates; the suggestion resolves every corner to
+        #- a pin or a channel track and lands in <CELL>.routes.py as a
+        #- paths entry -- paste-ready when every corner anchors, marked
+        #- UNANCHORED where one does not.
+        if links:
+            try:
+                from .routeplan import write_path_suggestions
+                write_path_suggestions(cell, self.net, links, log=log)
+            except Exception as e:
+                log.warning(f"{self.net}: could not write the path "
+                            f"suggestion: {e}")

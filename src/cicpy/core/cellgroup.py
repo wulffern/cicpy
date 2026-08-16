@@ -710,20 +710,49 @@ class StackGroup(CellGroup):
             out.append(RouteBundle(self.layout, f"{self.name}_{name}", instances))
         return out
 
-    def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True):
+    def _ports_by_net(self, instances, terminals=None, layer="M2", excludeInstances="", excludeNets="", sameTerminal=True, includeSupplies=False):
         """Resolve nodeGraph ports for ``instances`` into a per-net rect list
         on ``layer``. Pin geometry is read from ``port.get(layer)``; ports
         whose ``routeLayer`` doesn't match ``layer`` are skipped — those
         nets simply won't be tied at that layer (caller's responsibility to
         choose a layer the device actually exposes).
+
+        A SUPPLY IS NOT ROUTED IN THE STACK. The default terminals of
+        ``routeParallel`` include S, and on a stack whose sources are the
+        supply that laid a rail down the column on the routing layer --
+        a power route, drawn by the stack, in the middle of the signal
+        space. It is not needed and it is not free:
+
+        * the connection already exists a fraction of a micron away. A
+          library that rings each device in its own tap has the guard
+          column right beside the source pin, on the pin's own layer,
+          and the taps tie it up, down and across.
+          ``addPowerGuardConnection`` is that jog; the rail is a second
+          path to the same node.
+        * the rail spans the column, so every signal that wants to
+          cross the column has to cross it. Measured on LELOTEMP_CMPR,
+          a REY_ATR cell whose pins overhang their abutment box: with
+          no signal route anywhere in the cell, every signal net was
+          already shorted to VDD_1V8 or VSS.
+
+        So supplies are skipped here, which is one place rather than in
+        each caller. ``includeSupplies=True`` restores the old
+        behaviour for a cell that really does want the rail -- a decap
+        column, or a library with no guard to jog to. Which nets those
+        are comes from ``supply_nets``: a net on a BODY terminal is a
+        supply by construction, so this does not grep for "VDD".
         """
+        from .mazerouter import supply_nets
         terminal_set = set(terminals or [])
         member_names = {getattr(i, "instanceName", "") for i in instances}
         grouped = {}
         graph = getattr(self.layout, "nodeGraph", None)
         if graph is None:
             return grouped
+        supplies = set() if includeSupplies else supply_nets(self.layout)
         for net, node in graph.items():
+            if net in supplies:
+                continue
             if excludeNets and re.search(excludeNets, net):
                 continue
             terminal_rects = {}
@@ -918,10 +947,10 @@ class StackGroup(CellGroup):
             return Rect(layer, route_rect.x1, y, width, height)
         raise ValueError(f"Unsupported parallel port edge '{edge}'")
 
-    def routeParallel(self, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True):
+    def routeParallel(self, layer="M2", terminals=("D", "G", "S"), edge="top", edges=None, excludeInstances="", excludeNets="", minRects=None, sameTerminal=True, includeSupplies=False):
         """Join repeated device terminals inside the stack and expose one bundle port per net."""
         for bundle in self._parallel_instance_groups(excludeInstances=excludeInstances):
-            nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
+            nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal, includeSupplies=includeSupplies)
             required_rects = minRects if minRects is not None else len(bundle.members)
             required_rects = max(2, required_rects)
             for net, (terminal_name, rects) in nets.items():
@@ -946,7 +975,7 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, align="full"):
+    def routeMirror(self, layer="M2", terminals=("G", "S"), edge="top", edges=None, excludeInstances="^xfill_", excludeNets="", minRects=2, sameTerminal=True, align="full", includeSupplies=False):
         """Route common mirror terminals across the whole stack as one bundle.
 
         ``align`` is passed to the rail: ``"full"`` takes the pin's own
@@ -959,7 +988,7 @@ class StackGroup(CellGroup):
         if len(instances) < 2:
             return self
         bundle = RouteBundle(self.layout, f"{self.name}_mirror", sorted(instances, key=lambda inst: (inst.y1, inst.x1, getattr(inst, "instanceName", ""))))
-        nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal)
+        nets = self._ports_by_net(bundle.members, terminals=terminals, layer=layer, excludeInstances=excludeInstances, excludeNets=excludeNets, sameTerminal=sameTerminal, includeSupplies=includeSupplies)
         required_rects = minRects if minRects is not None else 2
         required_rects = max(2, required_rects)
         #- rails already placed in this column, so the next net can be
@@ -1249,16 +1278,24 @@ class StackGroup(CellGroup):
         self.updateBoundingRect()
         return self
 
-    def plateRail(self, net, layer, widthmult=3, inset=5000):
-        """A plain bar down the column, joining every member's plate.
+    def plateRail(self, net, layer, widthmult=3, inset=5000,
+                  direction="v"):
+        """A plain bar along the bank, joining every member's plate.
 
-        For MiM cap columns: the plates span the cell on their own
-        layer, so a vertical bar over the column IS the connection --
-        no cuts, no router. Computed from the INSTANCE boxes (the
-        stored pin rects live in another frame after the floorplan
-        moves the column); ``inset`` keeps the bar ends on the end
-        members' plates. The same ownership mechanics as the dummy
-        straps: the bar belongs to the stack and publishes with it.
+        For MiM cap banks: the plates span the cell on their own
+        layer, so a bar over the bank IS the connection -- no cuts, no
+        router. Computed from the INSTANCE boxes (the stored pin rects
+        live in another frame after the floorplan moves the bank);
+        ``inset`` keeps the bar ends on the end members' plates. The
+        same ownership mechanics as the dummy straps: the bar belongs
+        to the stack and publishes with it.
+
+        ``direction`` follows the bank, not the stack: a `Stack` puts
+        its members in a column and the bar runs down it, but a bank
+        laid side by side in a beforePlace hook needs the bar to run
+        ACROSS. Measured on LELOTEMP_CCMPR, whose five caps sit in a
+        row under the comparator: the vertical bar joined the middle
+        cap to nothing and the net came back in four components.
         """
         insts = self.instances
         if len(insts) < 2:
@@ -1266,6 +1303,22 @@ class StackGroup(CellGroup):
                 f"plateRail {self.name}/{net}: only {len(insts)} members")
             return None
         w = Rules.getInstance().get(layer, "width") * widthmult
+        if direction == "h":
+            y = (min(int(i.y1) for i in insts)
+                 + max(int(i.y2) for i in insts)) / 2
+            x1 = min(int(i.x1) for i in insts) + inset
+            x2 = max(int(i.x2) for i in insts) - inset
+            bar = Rect(layer, int(x1), int(y - w / 2),
+                       int(x2 - x1), int(w))
+            bar.setNet(net)
+            self.layout.add(bar)
+            self.layout.detachPlacementChild(bar, keepParent=self)
+            self.add(bar)
+            self.dummy_routes.append(bar)
+            self.layout.log.info(
+                f"plateRail {self.name}/{net}: {layer} bar "
+                f"{bar.x1},{bar.y1}..{bar.x2},{bar.y2}")
+            return bar
         x = (min(int(i.x1) for i in insts)
              + max(int(i.x2) for i in insts)) / 2
         y1 = min(int(i.y1) for i in insts) + inset

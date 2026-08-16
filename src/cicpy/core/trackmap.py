@@ -27,6 +27,7 @@ down.
 """
 
 import logging
+import re
 from collections import defaultdict
 
 #- the reserved owner of device-internal metal: not a net, never equal
@@ -243,7 +244,7 @@ class TrackMap:
             return "v" if d == "h" else "h"
         return "h"
 
-    def layer_cost(self, layer):
+    def layer_cost(self, layer, net=None):
         """The relative price of travelling on `layer`, from ROUTE.costs.
 
         The technology says what it wants used: here the pin layer is
@@ -251,14 +252,106 @@ class TrackMap:
         clear, and the attributed device metal is what keeps that
         honest. A layer the tech does not price costs the default 2 --
         more than a priced pin layer, less than a discouraged one.
+
+        `net` applies that net's own NETS rule on top, so a class of
+        signal can be priced differently from the rest without the
+        design saying anything: the rule is a property of the NAME.
         """
         costs = self._route_raw("costs")
+        base = 2
         if isinstance(costs, dict) and layer in costs:
             try:
-                return max(1, int(costs[layer]))
+                base = max(1, int(costs[layer]))
             except (TypeError, ValueError):
-                pass
-        return 2
+                base = 2
+        if net:
+            mult = self.net_rule(net).get("cost")
+            if mult:
+                try:
+                    base = max(1, int(round(base * float(mult))))
+                except (TypeError, ValueError):
+                    pass
+        return base
+
+    #-----------------------------------------------------------------
+    #- NETS: what a net's NAME says about how it wants to be routed
+    #-
+    #- ROUTE.costs and ROUTE.directions are per LAYER and never see the
+    #- net, so until this there was no way to say "the bias currents are
+    #- sensitive" or "the supplies carry real current" other than by
+    #- hand in every design that had one. The table is ordered and the
+    #- FIRST match wins, which is what lets `^(VDD|VSS)` claim VDD_1V8
+    #- before the `_1V8$` digital rule sees it.
+    #-----------------------------------------------------------------
+
+    def net_rules(self):
+        """The compiled NETS table, in declaration order."""
+        cached = getattr(self, "_net_rules", None)
+        if cached is not None:
+            return cached
+        rules = []
+        try:
+            raw = self.rules.getValue("rules", "NETS")
+        except Exception:
+            raw = None
+        if isinstance(raw, list):
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                pattern = entry.get("match")
+                if not pattern:
+                    continue
+                try:
+                    rx = re.compile(pattern)
+                except re.error:
+                    self.log.warning(
+                        "NETS: %r is not a regular expression, ignored",
+                        pattern)
+                    continue
+                rules.append((rx, dict(entry)))
+        self._net_rules = rules
+        return rules
+
+    def net_rule(self, net):
+        """The first NETS entry matching `net`, or an empty dict."""
+        if not net:
+            return {}
+        cache = getattr(self, "_net_rule_cache", None)
+        if cache is None:
+            cache = self._net_rule_cache = {}
+        if net in cache:
+            return cache[net]
+        found = {}
+        for rx, entry in self.net_rules():
+            if rx.search(net):
+                found = entry
+                break
+        cache[net] = found
+        return found
+
+    def net_class(self, net):
+        """The class name the technology gives this net, or ''."""
+        return self.net_rule(net).get("class", "") or ""
+
+    def keepaway_tracks(self, net):
+        """How many tracks this net wants between it and other nets."""
+        try:
+            return max(0, int(self.net_rule(net).get("keepaway", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def has_keepaway(self):
+        """Does any rule ask for clearance at all?
+
+        Asked once per search so the penalty scan can be skipped
+        entirely in a technology that declares no sensitive nets.
+        """
+        cached = getattr(self, "_has_keepaway", None)
+        if cached is None:
+            cached = any(entry.get("keepaway")
+                         for _, entry in self.net_rules())
+            self._has_keepaway = cached
+        return cached
 
     def metal_stack(self):
         """Metal layers in stack order, from the tech's own chain.

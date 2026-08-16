@@ -41,6 +41,7 @@ plausible.
 """
 import logging
 import os
+import re
 
 from .rect import Rect, HorizontalRectangleFromTo, VerticalRectangleFromTo
 from .route import Route
@@ -454,7 +455,18 @@ class End(Step):
             path.drawSegment(x, y, tx, y, layer)
         if y != ty:
             path.drawSegment(tx, y, tx, ty, layer)
-        if layer != r.layer:
+        #- `noendcut`, the same option the canned shapes take
+        #- (Route.addEndCuts). A story that lands where the CHILD has
+        #- already brought the net up does not need its own stack, and
+        #- drawing one anyway is not merely redundant -- the parent and
+        #- the child each centre a contact on their own copy of the
+        #- pin, and two contacts of one type that PARTIALLY overlap
+        #- have no legal form. Magic accepts it (the tiles resolve);
+        #- klayout reads the flattened GDS and sees one notched
+        #- polygon where a via must be a square. Measured on
+        #- LELOTEMP_CCMPR: two via2.1a, from an M1->M4 stack the
+        #- comparator already had at that pin.
+        if layer != r.layer and not re.search(r"noendcut", path.options or ""):
             path.drawVia(tx, ty, layer, r.layer)
         return (tx, ty, r.layer)
 
@@ -678,6 +690,9 @@ class Path(Route):
 
     def merge(self, at=None, direction="right"):
         return self._add(Merge(at, direction))
+
+    def taps(self, direction="v"):
+        return self._add(Taps(direction))
 
     #- -- what the steps use ----------------------------------------
     def cell(self):
@@ -1130,6 +1145,68 @@ class Comb(Step):
 
 
 @step
+class Taps(Step):
+    """Come back DOWN onto every pin, from the lane being ridden.
+
+    The other half of a flyover. A rail that has to serve pins it may
+    not run along -- gate tabs on non-adjacent rows, with other nets'
+    pins between them -- goes up a layer, rides the lane over the top
+    and touches down only at its own: that is
+    ``('PWRUP_N_1V8', 'M4', '||', 'trunktab')`` said as a story, where
+    `trunk` lays the rail and this lands it.
+
+    Only the LANDINGS are the point. A rail on the pins' own layer
+    needs none of this: it lies on them, and `trunk` alone is the whole
+    story. So this draws a cut per pin and, where the lane misses a pin
+    in x, the stub on the PIN's layer that reaches it -- never a leg on
+    the layer being flown, which is what would put metal back in the
+    lane the flyover exists to stay out of.
+    """
+    name = "taps"
+
+    def __init__(self, direction="v"):
+        self.direction = direction
+
+    def apply(self, path, cur):
+        x, y, layer = cur
+        rects = path.allRects()
+        if not rects:
+            return cur
+        lane = x if self.direction == "v" else y
+        if lane is None:
+            log.error(f"{path.net}: taps before the path is riding "
+                      f"anything; no landing placed")
+            return cur
+        for r in rects:
+            if self.direction == "v":
+                lo, hi, other = int(r.x1), int(r.x2), int(r.centerY())
+            else:
+                lo, hi, other = int(r.y1), int(r.y2), int(r.centerX())
+            #- ON the pin if the lane crosses it, otherwise a stub from
+            #- the pin's nearest edge, drawn on the pin's own layer
+            at = min(max(lane, lo), hi)
+            if at != lane:
+                if self.direction == "v":
+                    path.drawSegment(at, other, lane, other, r.layer)
+                else:
+                    path.drawSegment(other, at, other, lane, r.layer)
+            px, py = ((lane, other) if self.direction == "v"
+                      else (other, lane))
+            path.drawVia(px, py, layer, r.layer)
+        return cur
+
+    def _json(self):
+        return {"direction": self.direction}
+
+    @classmethod
+    def _make(cls, o):
+        return cls(o.get("direction", "v"))
+
+    def astuple(self):
+        return (self.name, self.direction)
+
+
+@step
 class _LayerTo(Step):
     """Change to a named layer. What `up`/`down` become once the search
     has already decided which layer it wants."""
@@ -1184,3 +1261,49 @@ def simplify(nodes):
         if p != dedup[-1]:
             dedup.append(p)
     return dedup
+
+
+#- ------------------------------------------------------------------
+#- the declarative form: anchors a DESIGN FILE can name
+#- ------------------------------------------------------------------
+#- A story told through `p.pin(...)` is a method call on a path that
+#- does not exist until something builds it, so it can only live
+#- inside a hook -- which is why every crossing net in a top cell was
+#- imperative code in a `beforeRoute`. These are the same
+#- constructors, reachable before there is a path, so the story can be
+#- DECLARED on the class beside the placement that it depends on.
+#-
+#- Anchors and not tuples on purpose. `astuple()` renders an anchor
+#- with repr() for a human to read, and that is not a form anything
+#- reads back; the objects are the machine form, and they already
+#- round-trip through toJson/fromJson into a .cic.
+
+PITCH = Path.PITCH
+SPACE = Path.SPACE
+
+
+def pin(instance, terminal, axis="x"):
+    """The coordinate of a placed instance's terminal."""
+    return _PinAnchor(instance, terminal, axis)
+
+
+def track(channel, index):
+    """Lane `index` of a named routing channel."""
+    return _TrackAnchor(channel, index)
+
+
+def landing(axis="y"):
+    """Where the path is going: the stop rect's own coordinate."""
+    return _LandingAnchor(axis)
+
+
+def tab_lane():
+    return _TrunkAnchor("trunktab")
+
+
+def right_of_pins():
+    return _TrunkAnchor("trunkright")
+
+
+def left_of_pins():
+    return _TrunkAnchor("trunkleft")

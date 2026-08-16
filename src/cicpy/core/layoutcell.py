@@ -760,7 +760,27 @@ class LayoutCell(Cell):
         out.sort(key=lambda r: (r.centerY(), r.centerX(), r.x1))
         return out
 
-    def _collectPhysicalRects(self, obj=None, dx=0, dy=0, out=None, active=None,
+    @staticmethod
+    def _applyTransformChain(rect, xforms):
+        """Place a rect through a chain of instances, innermost first.
+
+        `xforms` is the instance chain from the cell being asked down to
+        the cell the rect was drawn in, OUTERMOST FIRST. Each instance
+        maps its own cell's frame into its parent's, so composing them
+        from the inside out is the whole of the placement -- translation,
+        mirror and rotation together, applied ONCE.
+
+        This replaces `_applyInstanceAngle`, which translated on the way
+        down and folded the flat list on the way back up. The fold was
+        correct only relative to where the walk began, which is why
+        `checkroutes` gave one answer for a mirrored block asked directly
+        and another for the same block asked through its parent.
+        """
+        for inst in reversed(xforms):
+            inst._transformRect(rect)
+        return rect
+
+    def _collectPhysicalRects(self, obj=None, xforms=(), out=None, active=None,
                               include_ports=False):
         if out is None:
             out = []
@@ -793,7 +813,7 @@ class LayoutCell(Cell):
                 #- this `continue`.
                 if include_ports:
                     pr = child.getCopy()
-                    pr.translate(dx, dy)
+                    self._applyTransformChain(pr, xforms)
                     pr.parent = obj
                     pr.isPin = True
                     #- getCopy() returns a plain Rect and drops the
@@ -806,14 +826,14 @@ class LayoutCell(Cell):
                 continue
 
             if child.isInstance():
-                child_cell = getattr(child, "layoutcell", None)
-                if child_cell is None:
-                    child_cell = getattr(child, "_cell_obj", None)
-                # Lazy resolve from the design — instances loaded from JSON
-                # may reference cells that hadn't been loaded yet at
-                # ``fromJson`` time. Without this fallback the connectivity
-                # check misses every metal/via inside the instance body and
-                # nets fragment into separate components.
+                #- `Instance.resolvedCell` does the late lookup, and it
+                #- lives there rather than here because the block view
+                #- needs the same one and had its own answer -- which
+                #- was to skip the instance.
+                child_cell = child.resolvedCell() \
+                    if hasattr(child, "resolvedCell") \
+                    else (getattr(child, "layoutcell", None)
+                          or getattr(child, "_cell_obj", None))
                 if child_cell is None:
                     cell_name = getattr(child, "cell", "")
                     design = getattr(self, "design", None)
@@ -825,8 +845,19 @@ class LayoutCell(Cell):
                             child_cell = resolved
                 if child_cell is not None:
                     start = len(out)
-                    self._collectPhysicalRects(child_cell, dx + child.x1, dy + child.y1, out, active, include_ports)
-                    self._attributeInstanceBody(child, out, start, dx, dy)
+                    inner = tuple(xforms) + (child,)
+                    self._collectPhysicalRects(child_cell, inner, out, active, include_ports)
+                    self._resolveChildNets(child, out, start)
+                    #- ALWAYS, mirrored or not. The body is now in the
+                    #- same frame as the instance's own pins -- both got
+                    #- there through `Instance._transformRect`, the pins
+                    #- at `setAngle` time and the body just now -- so a
+                    #- mirrored instance no longer needs excusing from
+                    #- attribution. Skipping it (commit 60f968e) left the
+                    #- mirrored bodies netless, and a netless rect is not
+                    #- neutral to the connectivity flood: it is a
+                    #- conductor belonging to whatever it lies between.
+                    self._attributeInstanceBody(child, out, start, xforms)
                     #- AND WHAT THAT CELL PLACES, which its children do
                     #- not say. A cell read from a .mag keeps its own
                     #- paint and drops its `use` records, so a standard
@@ -844,19 +875,19 @@ class LayoutCell(Cell):
                     if flat is not None:
                         for r in flat(hidden_only=True):
                             rr = r.getCopy()
-                            rr.translate(dx + child.x1, dy + child.y1)
+                            self._applyTransformChain(rr, inner)
                             rr.parent = child
                             rr.device_metal = True
                             out.append(rr)
                 continue
 
             if child.isCell():
-                self._collectPhysicalRects(child, dx, dy, out, active, include_ports)
+                self._collectPhysicalRects(child, xforms, out, active, include_ports)
                 continue
 
             if child.isRect():
                 rr = child.getCopy()
-                rr.translate(dx, dy)
+                self._applyTransformChain(rr, xforms)
                 rr.parent = obj
                 if hasattr(child, "route_owner_info"):
                     rr.route_owner_info = child.route_owner_info
@@ -866,7 +897,74 @@ class LayoutCell(Cell):
         active.remove(obj_id)
         return out
 
-    def _attributeInstanceBody(self, inst, out, start, dx=0, dy=0):
+    def _resolveChildNets(self, inst, out, start):
+        """A child's boundary net is the PARENT's net; the rest are the CHILD's.
+
+        A subcell paints its rects with its own net names and the
+        parent wires those to nets of its own, so the same conductor
+        arrives here twice named -- and the connectivity flood puts
+        both names in one component and calls it a SHORT. Measured,
+        five at once on LELOTEMP_CCMPR and three on LELOTEMP_BIAS_IBP,
+        every one false:
+
+            IBP_1U<0>|VIP  CMPO|VO  VC|VIN
+            PWRUP_1V8|PWRUP_B_1V8   IBP_1U|IBP_1U<1>
+
+        netgen matched the same layouts uniquely, which is what said
+        they were not geometry. They had been written off as a known
+        false positive, and that is worse than the noise: a checker
+        that cries short on a correct cell teaches you to skim it.
+
+        The pairing is `InstancePort.childName`, which is what the C++
+        original keeps too -- a pointer to the child port, asked for
+        its name. It cannot be recovered from geometry: a wrapper
+        republishes its ports where it likes, so the instance port's
+        rect and the child port's rect are not the same rectangle
+        (measured: LELOTEMP_CMPR's VIP sits at y 137000 in its own
+        frame and the instance port for it resolves to y 77000).
+
+        AND THE OTHER HALF: a net that is NOT on the boundary is the
+        child's own, and its name means nothing outside the child. Left
+        bare it collides with whatever the parent happens to call a net
+        of its own, and two unrelated conductors come back under one
+        label -- which reads as a net that is OPEN, split across two
+        components that never touch. Measured on LELOTEMP_BIAS_IBP:
+        `VD1` and `VD2` are top-level nets there, and they are ALSO the
+        names LELOTEMP_OTAR uses for its own internal drain nodes, four
+        levels down and wired to nothing of the sort (BIAS_IBP's VD1
+        arrives at OTAR as VIN). netgen matched the same layout
+        uniquely. Qualifying the child's internal nets by instance name
+        is what makes the label mean one conductor again.
+
+        Only when the pairing is COMPLETE. Without it the boundary set
+        is a guess, and qualifying a net that is really on the boundary
+        would split a net that is whole -- trading a false open for a
+        false open. Alias-only is the safe degradation.
+        """
+        pairs = inst.portPairs() if hasattr(inst, "portPairs") else []
+        alias = {}
+        boundary = set()
+        for parent_net, child_net in pairs:
+            if not child_net:
+                continue
+            boundary.add(child_net)
+            if parent_net and child_net != parent_net:
+                alias[child_net] = parent_net
+        complete = bool(pairs) and all(cn for _, cn in pairs)
+        if not alias and not complete:
+            return
+        iname = (getattr(inst, "instanceName", "")
+                 or getattr(inst, "cell", "") or "")
+        for rr in out[start:]:
+            n = getattr(rr, "net", "")
+            if not n:
+                continue
+            if n in alias:
+                rr.setNet(alias[n])
+            elif complete and iname and n not in boundary:
+                rr.setNet(f"{iname}/{n}")
+
+    def _attributeInstanceBody(self, inst, out, start, xforms=()):
         """Resolve the rects inside one instance: a net, or an obstacle.
 
         An instance KNOWS what its terminals are wired to -- its
@@ -932,8 +1030,16 @@ class LayoutCell(Cell):
             if not net:
                 continue
             layer = getattr(pi, "routeLayer", "") or getattr(pi, "layer", "")
-            pins.append((net, layer,
-                         pi.x1 + dx, pi.y1 + dy, pi.x2 + dx, pi.y2 + dy))
+            #- AN INSTANCE'S PORT RECTS ARE ALREADY TRANSFORMED, and must
+            #- never be transformed a second time. `setAngle` mirrored
+            #- them when the instance was placed (as `InstancePort` does
+            #- in the C++ original), so they sit in the instance's PARENT
+            #- frame already. Getting them into the frame this list is
+            #- collected in therefore means the OUTER chain only -- the
+            #- instances above this one, not this one.
+            pr = pi.getCopy()
+            self._applyTransformChain(pr, xforms)
+            pins.append((net, layer, pr.x1, pr.y1, pr.x2, pr.y2))
         body = [rr for rr in out[start:]
                 if not getattr(rr, "net", "") and not getattr(rr, "isPin", False)]
         #- seed: the rect directly under a pin carries the pin's net
@@ -988,57 +1094,6 @@ class LayoutCell(Cell):
             if not getattr(rr, "net", ""):
                 rr.device_metal = True
 
-    def _getRouteSource(self, rect):
-        if hasattr(rect, "route_owner_info"):
-            return rect.route_owner_info
-        parent = getattr(rect, "parent", None)
-        seen = set()
-        while parent is not None and id(parent) not in seen:
-            seen.add(id(parent))
-            if hasattr(parent, "isRoute") and parent.isRoute():
-                return {
-                    "name": getattr(parent, "name", ""),
-                    "net": getattr(parent, "net", ""),
-                    "layer": getattr(parent, "routeLayer", ""),
-                    "route": getattr(parent, "route_", ""),
-                    "options": getattr(parent, "options", ""),
-                    "debug_api": getattr(parent, "debug_api", ""),
-                    "debug_callsite": getattr(parent, "debug_callsite", ""),
-                    "debug_command": getattr(parent, "debug_command", ""),
-                    "debug_internal": getattr(parent, "debug_internal", False),
-                }
-            parent = getattr(parent, "parent", None)
-        return None
-
-    @staticmethod
-    def _getShapeOwner(rect):
-        """Name the instance or cut a rect came out of.
-
-        A bridge whose two rects have no `route` is geometry somebody
-        PLACED, and without this the report says so only by omission --
-        which reads as "unknown" and sends the reader looking at the
-        router. Naming the instance turns four anonymous boxes into
-        "these two devices touch".
-        """
-        parent = getattr(rect, "parent", None)
-        seen = set()
-        chain = []
-        while parent is not None and id(parent) not in seen:
-            seen.add(id(parent))
-            if hasattr(parent, "isRoute") and parent.isRoute():
-                return None
-            iname = getattr(parent, "instanceName", "")
-            cname = getattr(parent, "name", "")
-            if iname and iname != cname:
-                chain.append(f"{iname}:{cname}" if cname else iname)
-            elif cname:
-                chain.append(str(cname))
-            parent = getattr(parent, "parent", None)
-        if not chain:
-            return None
-        #- innermost first, and drop the top cell: it is on every line
-        return " < ".join(chain[:3])
-
     def _captureRouteDebug(self, api_name, params):
         callsite = ""
         command = f"{api_name}(" + ", ".join(f"{k}={params[k]!r}" for k in params) + ")"
@@ -1067,357 +1122,40 @@ class LayoutCell(Cell):
         route.debug_internal = bool(params.get("internal", False))
         return route
 
-    def _collectNetAnchorRects(self, target_layer=""):
-        anchors = []
-        seen = set()
-        for node in self.nodeGraphList:
-            if self._ignoreConnectivityNet(node):
-                continue
-            graph = self.nodeGraph.get(node)
-            if graph is None:
-                continue
-            rects = []
-            if target_layer:
-                rects = graph.getRectangles("^xfill_", "", target_layer)
-            if len(rects) == 0:
-                rects = graph.getRectangles("^xfill_", "", "")
-            for rect in rects:
-                if rect is None:
-                    continue
-                rr = rect.getCopy()
-                key = (node, rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
-                if key in seen:
-                    continue
-                seen.add(key)
-                anchors.append((node, rr))
-        for node, port in self.ports.items():
-            if self._ignoreConnectivityNet(node):
-                continue
-            if port is None:
-                continue
-            rr = port.get(target_layer) if target_layer else port.get()
-            if rr is None:
-                rr = port.get()
-            if rr is None:
-                continue
-            rr = rr.getCopy()
-            key = (node, rr.layer, rr.x1, rr.y1, rr.x2, rr.y2)
-            if key in seen:
-                continue
-            seen.add(key)
-            anchors.append((node, rr))
-        return anchors
+    # ---- Connectivity ----
+    #
+    # The check itself lives in `core/connectivity.py`. What stays here
+    # is the geometry it reads (`_collectPhysicalRects`) and the layer
+    # rules it asks (`_layersConnectForConnectivity` and friends), both
+    # of which the track map and the router read too. These four are the
+    # surface everything else in the tree calls, so they keep their
+    # names: `cell.checkConnectivity()` means what it always did.
 
-    def _ignoreConnectivityNet(self, net_name):
-        return bool(net_name) and str(net_name).startswith("xfill_")
-
-    def _findRoot(self, parent, idx):
-        while parent[idx] != idx:
-            parent[idx] = parent[parent[idx]]
-            idx = parent[idx]
-        return idx
-
-    def _unionRoots(self, parent, a, b):
-        ra = self._findRoot(parent, a)
-        rb = self._findRoot(parent, b)
-        if ra != rb:
-            parent[rb] = ra
-
-    def _shortBridges(self, indices, adjacency, shapes, limit=8):
-        """Where two nets actually touch, rectangle by rectangle.
-
-        A shorted component says *that* two nets are joined. This says
-        *where*. Every rectangle that carries a net of its own is a seed;
-        a breadth first sweep from all seeds at once labels the rest with
-        whichever net reaches it first, so a wire with no net attribution
-        of its own — a via pad, a piece of a guard — belongs to whatever
-        it hangs off. Any adjacency whose two ends carry different labels
-        is then a place the short is made, and cutting all of them would
-        separate the nets.
-
-        The labels of unattributed metal are a guess, so the *rectangles*
-        reported are exact and the *net named on each side* is the nearest
-        attribution rather than a proof. That is still the difference
-        between a coordinate to look at and six hundred rectangles.
-        """
-        from collections import deque
-
-        label = {}
-        queue = deque()
-        for idx in indices:
-            net = getattr(shapes[idx], "net", "")
-            if net and not self._ignoreConnectivityNet(net):
-                label[idx] = net
-                queue.append(idx)
-        if not queue:
-            return []
-
-        while queue:
-            i = queue.popleft()
-            for j in adjacency.get(i, ()):
-                if j in label:
-                    continue
-                label[j] = label[i]
-                queue.append(j)
-
-        bridges = []
-        seen = set()
-        for i in indices:
-            li = label.get(i)
-            if li is None:
-                continue
-            for j in adjacency.get(i, ()):
-                lj = label.get(j)
-                if lj is None or lj == li or j < i:
-                    continue
-                a, b = shapes[i], shapes[j]
-                key = (li, lj, a.layer, b.layer,
-                       int(a.x1), int(a.y1), int(b.x1), int(b.y1))
-                if key in seen:
-                    continue
-                seen.add(key)
-                bridges.append({
-                    "nets": sorted((li, lj)),
-                    "a": {
-                        "layer": a.layer,
-                        "rect": [int(a.x1), int(a.y1), int(a.x2), int(a.y2)],
-                        "route": self._getRouteSource(a),
-                        "owner": self._getShapeOwner(a),
-                    },
-                    "b": {
-                        "layer": b.layer,
-                        "rect": [int(b.x1), int(b.y1), int(b.x2), int(b.y2)],
-                        "route": self._getRouteSource(b),
-                        "owner": self._getShapeOwner(b),
-                    },
-                })
-        #- the same pair of nets can meet in many places; show a few of
-        #- each rather than eight instances of one
-        bridges.sort(key=lambda x: (x["nets"], x["a"]["rect"]))
-        out, per_pair = [], defaultdict(int)
-        for bridge in bridges:
-            pair = tuple(bridge["nets"])
-            if per_pair[pair] >= 2:
-                continue
-            per_pair[pair] += 1
-            out.append(bridge)
-            if len(out) >= limit:
-                break
-        return out
+    def connectivity(self):
+        from .connectivity import Connectivity
+        return Connectivity(self)
 
     def checkConnectivity(self, target_layer=""):
-        shapes = [
-            rect for rect in self._collectPhysicalRects()
-            if self._isConnectivityPropagationLayer(getattr(rect, "layer", ""))
-        ]
-        parent = list(range(len(shapes)))
-        #- keep the edges, not just the union. A short report that says
-        #- which nets ended up in one component tells you nothing about
-        #- where they meet, and a component of six hundred rectangles is
-        #- not something you find the bridge in by eye
-        adjacency = defaultdict(list)
-
-        for i in range(len(shapes)):
-            for j in range(i + 1, len(shapes)):
-                if not self._rectsTouchOrOverlap(shapes[i], shapes[j]):
-                    continue
-                if not self._layersConnectForConnectivity(shapes[i].layer, shapes[j].layer):
-                    continue
-                adjacency[i].append(j)
-                adjacency[j].append(i)
-                self._unionRoots(parent, i, j)
-
-        components = defaultdict(list)
-        component_indices = defaultdict(list)
-        for idx, rect in enumerate(shapes):
-            root = self._findRoot(parent, idx)
-            components[root].append(rect)
-            component_indices[root].append(idx)
-
-        anchors = self._collectNetAnchorRects(target_layer)
-        net_components = defaultdict(set)
-        component_nets = defaultdict(set)
-        unmatched = defaultdict(list)
-
-        for comp_id, rects in components.items():
-            for rect in rects:
-                net_name = getattr(rect, "net", "")
-                if net_name and not self._ignoreConnectivityNet(net_name):
-                    component_nets[comp_id].add(net_name)
-
-        for net_name, anchor in anchors:
-            matched = False
-            if not self._isConnectivityPropagationLayer(anchor.layer):
-                unmatched[net_name].append(anchor)
-                continue
-            for comp_id, rects in components.items():
-                for rect in rects:
-                    if not self._layersConnectForConnectivity(anchor.layer, rect.layer):
-                        continue
-                    if not self._rectsTouchOrOverlap(anchor, rect):
-                        continue
-                    net_components[net_name].add(comp_id)
-                    component_nets[comp_id].add(net_name)
-                    matched = True
-                    break
-                if matched:
-                    break
-            if not matched:
-                unmatched[net_name].append(anchor)
-
-        shorts = []
-        for comp_id, nets in component_nets.items():
-            if len(nets) > 1:
-                rects = components[comp_id]
-                bounds = Cell.calcBoundingRectFromList(rects, False)
-                route_sources = []
-                route_seen = set()
-                for rect in rects:
-                    source = self._getRouteSource(rect)
-                    if source is None:
-                        continue
-                    source_name = source.get("name", "") or source.get("net", "")
-                    if source.get("debug_internal", False) or self._ignoreConnectivityNet(source_name):
-                        continue
-                    key = (
-                        source["name"],
-                        source["layer"],
-                        source["route"],
-                        source["options"],
-                        source.get("debug_callsite", ""),
-                        source.get("debug_command", ""),
-                    )
-                    if key in route_seen:
-                        continue
-                    route_seen.add(key)
-                    route_sources.append(source)
-                shorts.append({
-                    "component": comp_id,
-                    "nets": sorted(nets),
-                    "rect_count": len(rects),
-                    "bounds": bounds,
-                    "routes": route_sources,
-                    "bridges": self._shortBridges(
-                        component_indices[comp_id], adjacency, shapes),
-                })
-
-        opens = []
-        for net_name in self.nodeGraphList:
-            if self._ignoreConnectivityNet(net_name):
-                continue
-            comp_ids = sorted(
-                comp_id for comp_id, nets in component_nets.items() if net_name in nets
-            )
-            if len(comp_ids) == 0:
-                opens.append({
-                    "net": net_name,
-                    "type": "unmatched",
-                    "anchors": len(unmatched.get(net_name, [])),
-                })
-            elif len(comp_ids) > 1:
-                opens.append({
-                    "net": net_name,
-                    "type": "split",
-                    "components": comp_ids,
-                })
-
-        components_bbox = {
-            cid: Cell.calcBoundingRectFromList(rs, False)
-            for cid, rs in components.items()
-        }
-
-        # Per-net anchor rects (instance-port locations). Used by the GUI to
-        # draw flight lines between actual transistor ports instead of
-        # component bbox centres.
-        net_anchor_rects = defaultdict(list)
-        for net_name, rect in anchors:
-            net_anchor_rects[net_name].append(rect)
-
-        return {
-            "shorts": shorts,
-            "opens": opens,
-            "component_nets": component_nets,
-            "net_components": net_components,
-            "unmatched": unmatched,
-            "components_bbox": components_bbox,
-            "net_anchor_rects": net_anchor_rects,
-            "component_count": len(components),
-            "shape_count": len(shapes),
-        }
+        return self.connectivity().check(target_layer)
 
     def checkRouteShorts(self, target_layer=""):
-        result = self.checkConnectivity(target_layer)
-        route_shorts = []
-        for short in result.get("shorts", []):
-            routes = short.get("routes", [])
-            if not routes:
-                continue
-
-            external_routes = [route for route in routes if not route.get("debug_internal", False)]
-            if len(external_routes) == 0:
-                continue
-
-            external_nets = [net for net in short.get("nets", []) if not re.match(r"^xfill_.*_dummy_", net)]
-            if len(external_nets) < 2:
-                continue
-
-            filtered_short = dict(short)
-            filtered_short["nets"] = external_nets
-            filtered_short["routes"] = external_routes
-            filtered_short["route_count"] = len(external_routes)
-            route_shorts.append(filtered_short)
-        return {
-            "shorts": route_shorts,
-            "component_count": result.get("component_count", 0),
-            "shape_count": result.get("shape_count", 0),
-        }
+        return self.connectivity().routeShorts(target_layer)
 
     def reportShorts(self, target_layer=""):
-        result = self.checkConnectivity(target_layer)
-        for short in result["shorts"]:
-            bounds = short["bounds"]
-            route_desc = "none"
-            if short.get("routes"):
-                route_desc = "; ".join(
-                    f"{route['name']}[{route['layer']} {route['route']} {route['options']}]"
-                    + (f" cmd={route['debug_command']}" if route.get("debug_command") else "")
-                    + (f" at {route['debug_callsite']}" if route.get("debug_callsite") else "")
-                    for route in short["routes"]
-                )
-            self.log.warning(
-                f"SHORT component={short['component']} nets={','.join(short['nets'])} "
-                f"bounds=({bounds.x1},{bounds.y1})-({bounds.x2},{bounds.y2}) rects={short['rect_count']} "
-                f"routes={route_desc}"
-            )
-            for bridge in short.get("bridges", ()):
-                self.log.warning("  " + self.describeBridge(bridge))
-        return result["shorts"]
+        return self.connectivity().reportShorts(target_layer)
+
+    def reportOpens(self, target_layer=""):
+        return self.connectivity().reportOpens(target_layer)
 
     @staticmethod
     def describeBridge(bridge):
-        """One line naming the two rectangles a short is made across."""
-        def side(s):
-            text = (f"{s['layer']} ({s['rect'][0]},{s['rect'][1]})-"
-                    f"({s['rect'][2]},{s['rect'][3]})")
-            route = s.get("route")
-            if route:
-                where = route.get("debug_callsite", "")
-                text += f" [{route.get('name','')} {route.get('options','')}"
-                text += f" at {where}]" if where else "]"
-            elif s.get("owner"):
-                text += f" [{s['owner']}]"
-            return text
-        return (f"BRIDGE {'|'.join(bridge['nets'])}: "
-                f"{side(bridge['a'])} touches {side(bridge['b'])}")
+        from .connectivity import Connectivity
+        return Connectivity.describeBridge(bridge)
 
-    def reportOpens(self, target_layer=""):
-        result = self.checkConnectivity(target_layer)
-        for open_net in result["opens"]:
-            if open_net["type"] == "split":
-                self.log.warning(f"OPEN net={open_net['net']} split_components={open_net['components']}")
-            else:
-                self.log.warning(f"OPEN net={open_net['net']} unmatched_anchors={open_net['anchors']}")
-        return result["opens"]
+    @staticmethod
+    def describeChain(chain):
+        from .connectivity import Connectivity
+        return Connectivity.describeChain(chain)
 
     # ---- Translated utility methods from C++ ----
 
@@ -1987,7 +1725,7 @@ class LayoutCell(Cell):
             if ct:
                 routering.add(ct)
 
-    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="", widthmult:int=1):
+    def addPowerGuardConnection(self, name:str, includeInstances:str="", excludeInstances:str="", terminals=("S",), bulk:str="B", layer:str="", widthmult:int=1, options:str=""):
         """Tie every device source on a power net to that device's own bulk
         guard ring, locally, on the layer the pins already live on.
 
@@ -2007,6 +1745,20 @@ class LayoutCell(Cell):
         Only devices that have both the power net on ``terminals`` and the
         same net on ``bulk`` are connected: a cascode whose source is an
         internal node is left alone for the signal router.
+
+        ``options`` takes ``offsetlow``/``offsethigh``, which shift the
+        jog ONE ROUTING WIDTH. Note that this is not the route
+        language's half a wire, and the difference is measured: the jog
+        is a rect rather than a route, and half a width left it 0.15 um
+        from the shape below where li.3 wants 0.17, trading a short for
+        two spacing errors. A full width clears both.
+
+        What it is for: the jog is centred on the SOURCE pin, so a cell
+        whose poly contacts reach that row gets its GATE tied to the
+        supply by it. Measured on REYATR_NCH_2C1F2 -- L=0.22, so its
+        poly bars are 2.2 um where the L=0.94 cells' are 9.4, and the
+        contact column reaches the jog. Offset that one device type and
+        nothing else in the column moves.
         """
         #- default to the technology's pin layer rather than to "M1"
         layer = layer or self._pinLayer()
@@ -2017,7 +1769,7 @@ class LayoutCell(Cell):
         if graph is None:
             return
 
-        sources, bulks = {}, {}
+        sources, bulks, insts = {}, {}, {}
         for port in getattr(graph, "ports", []):
             inst = getattr(port, "parent", None)
             if inst is None or not inst.isInstance():
@@ -2027,6 +1779,7 @@ class LayoutCell(Cell):
             child = getattr(port, "childName", "")
             if child in terminals:
                 sources.setdefault(id(inst), []).append(port)
+                insts[id(inst)] = inst
             elif child == bulk:
                 bulks.setdefault(id(inst), []).append(port)
 
@@ -2058,6 +1811,26 @@ class LayoutCell(Cell):
                 x1, x2 = sorted((int(b.centerX()), int(s.centerX())))
                 h = int(s.height()) * widthmult
                 y1 = int(s.centerY() - h // 2)
+                #- A CELL THAT NEEDS THE OFFSET ASKS FOR IT BY ITS NAME.
+                #- The jog lands on the source pin's row, and a short
+                #- channel cell's poly contact column reaches that row --
+                #- so the jog ties the GATE to the supply. That is a
+                #- property of the CELL, not of the design placing it, so
+                #- the rule belongs here rather than in every sidecar that
+                #- ever instantiates one. `1F2` is the width/finger suffix
+                #- these libraries use for the short channel device; an
+                #- explicit `options` still wins.
+                opts = options
+                if not opts and re.search(
+                        r"1F2", getattr(insts.get(key), "name", "") or ""):
+                    opts = "offsetlow"
+                if opts:
+                    rules = Rules.getInstance()
+                    step = int(rules.get(layer, "width")) if rules else h
+                    if re.search(r"offsetlow(,|\s|$)", opts):
+                        y1 -= step
+                    elif re.search(r"offsethigh(,|\s|$)", opts):
+                        y1 += step
                 r = Rect(layer, x1, y1, x2 - x1, h)
                 r.net = name
                 self.add(r)
@@ -3873,11 +3646,19 @@ class LayoutCell(Cell):
                 if delta:
                     break
             if delta:
+                where = rects[0] if rects else None
                 cut.translate(delta[0], delta[1])
                 moved += 1
+                #- WHERE, not just how far. "cut moved 200,400" is true of
+                #- any cut in the cell and cannot be checked against the
+                #- geometry afterwards; the site and the layer can.
                 self.log.info(
-                    f"{self.name}: cut moved {delta[0]},{delta[1]} onto the "
-                    f"identical cut a subcell already has there")
+                    f"{self.name}: {getattr(cut, 'cell', '?')} moved "
+                    f"{delta[0]},{delta[1]} "
+                    f"({where[0] if where else '?'} at "
+                    f"{where[1] if where else '?'},"
+                    f"{where[2] if where else '?'}) onto the identical cut "
+                    f"a subcell already has there")
         if moved:
             self.updateBoundingRect()
 

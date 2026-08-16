@@ -708,6 +708,8 @@ def _report_connectivity(lcell):
         )
         for bridge in short.get("bridges", ()):
             log.warning("  " + cic.LayoutCell.describeBridge(bridge))
+        for chain in short.get("chains", ()):
+            log.warning("  " + cic.LayoutCell.describeChain(chain))
 
     for open_net in opens:
         if open_net["type"] == "split":

@@ -12,6 +12,7 @@
 
 import logging
 import re
+import traceback
 
 from .rect import Rect
 from .rules import Rules
@@ -499,14 +500,24 @@ def _run_stack_pycell(layout, entry, log, cell=None):
         #- ORDINARY POLYMORPHISM. The group IS the design's class and
         #- the base declares every phase, so these are method calls;
         #- there is nothing to look up and nothing to adapt.
+        #- WITH THE TRACEBACK. A hook that raises is caught so one bad
+        #- subcell does not take the build down -- but the message alone
+        #- names neither the line nor the call, and what follows is the
+        #- maze router failing on every net of that subcell, which reads
+        #- as a routing problem and not as a crash. Measured:
+        #- LELO_TEMP_DIG's ladder hook raised "'int' object is not
+        #- reversible", the strip went unrouted, and the top carried 7
+        #- open nets that looked like unfinished routing.
         try:
             grp.beforePlace(entry)
         except Exception as e:
-            log.error(f"{name}: beforePlace() raised: {e}")
+            log.error(f"{name}: beforePlace() raised: {e}\n"
+                      f"{traceback.format_exc()}")
         try:
             handled = bool(grp.beforeRoute(entry))
         except Exception as e:
-            log.error(f"{name}: beforeRoute() raised: {e}")
+            log.error(f"{name}: beforeRoute() raised: {e}\n"
+                      f"{traceback.format_exc()}")
             handled = False
         if handled:
             log.info(f"{name}: routed by its own pycell")

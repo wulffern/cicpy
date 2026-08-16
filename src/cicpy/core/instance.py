@@ -145,8 +145,10 @@ class Instance(Cell):
             c = None
             if cl in ("Port", "InstancePort"):
                 # Reconstruct as Port — InstancePort needs constructor args
-                # we don't have, but for connectivity purposes Port suffices
-                # (the net name lives in ``name`` either way).
+                # we don't have. Its CHILD NAME is carried across by hand
+                # though: it is the only record of which child port this
+                # parent net is wired to, and connectivity needs it to tell
+                # one conductor named twice from two conductors shorted.
                 c = Port()
             elif cl == "Rect":
                 c = Rect()
@@ -157,6 +159,8 @@ class Instance(Cell):
                 c.fromJson(child)
             except Exception:
                 continue
+            if child.get("childName"):
+                c.childName = child["childName"]
             self.add(c)
         # Resolve the referenced layout cell. Without this,
         # ``_collectPhysicalRects`` never descends into the instance's body,
@@ -191,6 +195,84 @@ class Instance(Cell):
             return c.isLayoutCell()
         return False
 
+    def resolvedCell(self):
+        """The cell this instance places, resolved LATE if it must be.
+
+        `fromJson` resolves it when it can, but a `.cic` names cells in
+        file order and an instance read before its own cell was loaded
+        keeps a name and no object. So every walk over the hierarchy
+        has to be able to resolve late -- and each walk that forgot
+        answered as if the instance were EMPTY, which is the worst
+        possible failure for a question like "what is in the way".
+
+        `_collectPhysicalRects` carried its own copy of this and
+        `BlockCell.build` did not, so the two disagreed about the same
+        design: measured on LELO_TEMP_CCMP, the collector found 52 M4
+        rects and the block view found 2, because the view skipped
+        both LELOTEMP_CCMPR instances and with them the entire
+        comparator. `freeRows("M4")` then called 487000..555000 clear
+        with a via stack's M4 enclosure sitting at 516400..526000
+        inside it, and a route asked to cross there landed on VSS.
+        """
+        cell = self.layoutcell if self.layoutcell is not None else self._cell_obj
+        if cell is not None:
+            return cell
+        design = getattr(self, "design", None)
+        if self.cell and design is not None:
+            cell = design.cells.get(self.cell)
+            if cell is not None:
+                self.layoutcell = cell
+                self._cell_obj = cell
+        return cell
+
+    def portPairs(self):
+        """(parent net, child port name) for each of this instance's ports.
+
+        `childName` is the join between a parent net and the child port
+        it is wired to, and geometry cannot recover it -- a wrapper
+        republishes its ports where it likes, so the instance port's
+        rect and the child port's rect need not be the same rectangle
+        (measured: LELOTEMP_CMPR's VIP sits at y 137000 in its own frame
+        and the instance port for it resolves to y 77000).
+
+        POSITION can, though, and position is how the pairing was made:
+        `setSubcktInstance` walks the subckt's nodes and the cell's
+        ports together, in order, and adds one InstancePort per pair.
+        A `.cic` written before `childName` was carried across (commit
+        384d88b) therefore still HAS the pairing -- in the order its
+        instance ports are written -- and every JNWTR standard cell in
+        the library is such a file.
+
+        Without the fallback the alias is a no-op inside those cells, so
+        one conductor comes back under every name any level gave it:
+        LELO_TEMP_DIG reported `CMPO_B,YN,net1` shorted, which is an OR
+        gate's own internal node named once by the NOR that drives it,
+        once by the OR that contains it and once by the netlist above.
+
+        Only when the counts agree exactly. A cell whose port was
+        dropped at build time (``getPort`` returned None) would shift
+        the whole list by one and alias two real nets together, and a
+        missed alias is noise where a wrong one is a lie.
+        """
+        ports = []
+        for c in self.children:
+            if c is None:
+                continue
+            if (hasattr(c, "isPort") and c.isPort()) or \
+               (hasattr(c, "isInstancePort") and c.isInstancePort()):
+                ports.append(c)
+        pairs = [(getattr(p, "name", "") or "",
+                  getattr(p, "childName", "") or "") for p in ports]
+        if not pairs or all(cn for _, cn in pairs):
+            return pairs
+        cell = self.layoutcell if self.layoutcell is not None else self._cell_obj
+        if cell is None:
+            return pairs
+        cellPorts = list(getattr(cell, "ports", {}).keys())
+        if len(cellPorts) != len(pairs):
+            return pairs
+        return [(pn, cn or cellPorts[i]) for i, (pn, cn) in enumerate(pairs)]
+
     def findRectanglesByNode(self,node:str,filterChild:str):
         rects = list()
         for pi in self.children:
@@ -222,6 +304,31 @@ class Instance(Cell):
             rr.parent = self
             rects.append(rr)
         return rects
+
+    def transform(self, rect):
+        """Map a rect from THIS instance's cell frame into the parent's.
+
+        The C++ original (``cIcCore::Instance::transform``) never
+        transforms a cell's contents. It keeps one authoritative
+        untransformed copy and maps a COPY on demand, per query --
+        ``getRect``, ``findRectanglesByRegex`` and the connectivity walk
+        all go through this one function.
+
+        cicpy had it the other way round: the hierarchy walk flattened
+        by translation and then folded the emitted list in place
+        afterwards. A fold applied to an already-flat list depends on
+        where the flatten STARTED, so the same geometry answered
+        differently depending on which cell you asked about -- measured
+        on LELO_TEMP, `shorts=0` for the comparator pair asked directly
+        and `shorts=2` for the same pair asked through the tile, with
+        nothing routed at either level.
+
+        Composing this per instance, down the hierarchy, at query time
+        cannot do that: the transform of a rect depends only on the
+        chain of instances between it and the cell being asked, and the
+        inner part of that chain is the same however far up you start.
+        """
+        return self._transformRect(rect)
 
     def _transformRect(self, rect):
         if rect is None:

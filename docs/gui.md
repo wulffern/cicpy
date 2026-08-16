@@ -1,3 +1,9 @@
+---
+layout: default
+title: GUI
+nav_order: 7
+---
+
 # gui
 
 `cicpy gui` opens a Qt viewer on a `.cic` file — the Python successor to ciccreator's C++ `cic-gui`. Phase 1 ships a layout-only viewer; a side-by-side schematic pane is planned for Phase 2 (see [`gui_plan`](/cicpy/gui_plan)).

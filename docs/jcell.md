@@ -1,3 +1,9 @@
+---
+layout: default
+title: jcell
+nav_order: 8
+---
+
 # jcell
 
 `jcell` extracts one cell from a `.cic` file and prints the JSON for that cell.

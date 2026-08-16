@@ -1,3 +1,9 @@
+---
+layout: default
+title: svg
+nav_order: 9
+---
+
 # svg
 
 `svg` renders every cell in a `.cic` library into standalone SVG files and an index HTML page.

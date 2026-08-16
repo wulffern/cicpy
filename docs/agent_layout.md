@@ -1,10 +1,8 @@
 ---
-layout: page
-title: Agent layout guide
+layout: default
+title: Layout, a field guide
+nav_order: 2
 ---
-
-* TOC
-{:toc}
 
 # Layout with cicpy, a field guide
 

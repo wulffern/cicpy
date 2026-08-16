@@ -1,3 +1,9 @@
+---
+layout: default
+title: Pycell API
+nav_order: 6
+---
+
 # Custom Pycell API
 
 > The current way to write a cell is the **SidecarCell** — one

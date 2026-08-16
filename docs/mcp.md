@@ -1,3 +1,9 @@
+---
+layout: default
+title: MCP server
+nav_order: 4
+---
+
 # MCP server
 
 `cicpy` ships an [MCP](https://modelcontextprotocol.io) server so an

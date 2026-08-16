@@ -1,3 +1,9 @@
+---
+layout: default
+title: transpile
+nav_order: 10
+---
+
 # transpile
 
 `transpile` fans a `.cic` design out into multiple downstream formats.

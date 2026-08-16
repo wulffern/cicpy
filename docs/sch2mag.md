@@ -1,3 +1,9 @@
+---
+layout: default
+title: sch2mag
+nav_order: 12
+---
+
 # sch2mag
 
 `sch2mag` is the schematic-to-layout entrypoint. It netlists the schematic, builds the connectivity graph, runs placement and routing, and writes both Magic and `.cic` layout output.

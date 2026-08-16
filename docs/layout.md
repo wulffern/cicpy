@@ -1,3 +1,9 @@
+---
+layout: default
+title: Layout flow internals
+nav_order: 5
+---
+
 # Layout Flow
 
 > The current way to write a cell is the **SidecarCell** — one

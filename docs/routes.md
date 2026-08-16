@@ -1,3 +1,9 @@
+---
+layout: default
+title: Routing
+nav_order: 3
+---
+
 # Routes
 
 Preferred routing APIs in `cicpy`:

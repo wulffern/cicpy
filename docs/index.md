@@ -1,3 +1,9 @@
+---
+layout: default
+title: Home
+nav_order: 1
+---
+
 # cicpy
 
 `cicpy` is the Python frontend around ciccreator data and layout flows.

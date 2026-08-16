@@ -1,3 +1,9 @@
+---
+layout: default
+title: minecraft
+nav_order: 11
+---
+
 # minecraft
 
 `minecraft` converts a layout cell into a stream of Minecraft `screen` commands.

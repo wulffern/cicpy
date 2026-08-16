@@ -313,7 +313,8 @@ class SidecarPycell:
                     continue
                 p = layout.path(net, e.get("layer") or a.layer,
                                 start=[a], stop=[b],
-                                options=e.get("options", "1cuts,2vcuts"))
+                                options=e.get("options", "1cuts,2vcuts"),
+                                width=e.get("width"))
                 p.start(at=e.get("at"))
             else:
                 layer = e.get("layer")
@@ -326,7 +327,8 @@ class SidecarPycell:
                 p = layout.path(net, layer,
                                 options=e.get("options", "1cuts,2vcuts"),
                                 includeInstances=e.get("pins", ""),
-                                excludeInstances=e.get("not_pins", ""))
+                                excludeInstances=e.get("not_pins", ""),
+                                width=e.get("width"))
                 if not p.stopRects:
                     layout.log.error(
                         f"paths: {net} has no pin on {layer} in "

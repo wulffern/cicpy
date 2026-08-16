@@ -2733,7 +2733,7 @@ class LayoutCell(Cell):
 
     def path(self, net, layer, start=None, stop=None, options="",
              includeInstances="", excludeInstances="",
-             includeGroups=""):
+             includeGroups="", width=None):
         """A route told as a story: anchored steps, spelled `~`.
 
         The twelfth shape, beside the eleven ASCII ones -- additive, so
@@ -2759,7 +2759,7 @@ class LayoutCell(Cell):
                 includeGroups=includeGroups, options=options)
             if not stop:
                 self.log.error(f"path: no rectangles on {net}")
-        p = Path(net, layer, start, stop, options)
+        p = Path(net, layer, start, stop, options, width=width)
         p.layoutcell = self
         self.add(p)
         return p

@@ -514,12 +514,20 @@ class Down(Up):
 
 @step
 class MoveX(Step):
-    """A horizontal leg to an anchored x."""
+    """A horizontal leg to an anchored x.
+
+    `noext` drops the half-width extension past the endpoint. The
+    extension fills the corner the NEXT leg turns through, so it is
+    right everywhere except on a leg nothing follows -- and there a
+    wide wire overshoots by half its own width, which for a supply tie
+    landing on the bottom ring is geometry below y=0.
+    """
     name = "movex"
     axis = "x"
 
-    def __init__(self, anchor):
+    def __init__(self, anchor, noext=False):
         self.anchor = anchor
+        self.noext = noext
 
     def apply(self, path, cur):
         x, y, layer = cur
@@ -530,20 +538,21 @@ class MoveX(Step):
         if self.axis == "x":
             if y is None:
                 return (c, y, layer)
-            path.drawSegment(x, y, c, y, layer)
+            path.drawSegment(x, y, c, y, layer, extend=not self.noext)
             return (c, y, layer)
         if x is None:
             return (x, c, layer)
-        path.drawSegment(x, y, x, c, layer)
+        path.drawSegment(x, y, x, c, layer, extend=not self.noext)
         return (x, c, layer)
 
     def _json(self):
         return {"anchor": self.anchor.toJson()
-                if isinstance(self.anchor, Anchor) else None}
+                if isinstance(self.anchor, Anchor) else None,
+                "noext": self.noext}
 
     @classmethod
     def _make(cls, o):
-        return cls(Anchor.fromJson(o.get("anchor")))
+        return cls(Anchor.fromJson(o.get("anchor")), o.get("noext", False))
 
     def astuple(self):
         return (self.name, repr(self.anchor))
@@ -619,12 +628,18 @@ class Path(Route):
     drawn.
     """
 
-    def __init__(self, net, layer, start=None, stop=None, options=""):
+    def __init__(self, net, layer, start=None, stop=None, options="",
+                 width=None):
         Route.__init__(self, net, layer, start or [], stop or [],
                        options, "~")
         self.routeType = "POLYLINE"
         self.steps = []
         self.layoutcell = None
+        #- A literal width in database units, for the wires whose width
+        #- is a design decision rather than a rule -- a supply tie is
+        #- as wide as the space it crosses allows, not as narrow as the
+        #- technology permits. None means the rule decides, as always.
+        self.pathWidth = width
         #- `Route.__init__` sets `self.track = 0` for the `trackN`
         #- option, and an instance attribute SHADOWS the class method
         #- of the same name -- so `p.track(channel, index)`, the one
@@ -676,11 +691,11 @@ class Path(Route):
     def down(self, layer=None):
         return self._add(Down(layer))
 
-    def movex(self, anchor):
-        return self._add(MoveX(anchor))
+    def movex(self, anchor, noext=False):
+        return self._add(MoveX(anchor, noext))
 
-    def movey(self, anchor):
-        return self._add(MoveY(anchor))
+    def movey(self, anchor, noext=False):
+        return self._add(MoveY(anchor, noext))
 
     def trunk(self, at=None, direction="v"):
         return self._add(Trunk(at, direction))
@@ -766,7 +781,8 @@ class Path(Route):
         and cut instances instead reimplements that badly... 272 DRC
         errors of minimum width, minimum area and via enclosure".
         """
-        w = Rules.getInstance().get(layer, self.routeWidthRule)
+        w = self.pathWidth or Rules.getInstance().get(
+            layer, self.routeWidthRule)
         #- `half` centres the wire on its own centreline, always.
         #-
         #- `ext` fills the CORNER, and only the ARRIVING leg needs it.

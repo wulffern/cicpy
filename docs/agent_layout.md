@@ -46,10 +46,11 @@ and no lane assignment prevents.
 
 A SidecarCell splits the same netlist into one cell per column and
 hands each to the stack-level maze router, which *is* space-aware and
-writes its conclusions back into the design as `wires`. What you
-declare at the top is only the nets that cross between columns, one
-bar each on its own channel track. A bar in a channel cannot land on
-a pin, because a channel is the place where there are none.
+gives its conclusions back as **anchored stories** ready to paste into
+the design. What you declare at the top is only the nets that cross
+between columns, each a story through named corridors. A story in a
+channel cannot land on a pin, because a channel is the place where
+there are none.
 
 Two things to carry into it, both measured:
 
@@ -174,39 +175,90 @@ hooks win when both exist, and stubs are no longer generated. A
 `routeInternal()` — implementing that method on the class is where a
 real diffpair/mirror router will land.
 
-### Wires: the router's conclusions live in the sidecar
+### Paths: the router's conclusions live in the sidecar
 
-The maze router decides; the decision belongs in the design. A
-subcell class declares its stack-level routes as
+The maze router decides; the decision belongs in the design — and it
+is stored as a STORY, never as a coordinate. A subcell class declares
+its routes as `paths`:
 
 ```python
+from cicpy.core.path import PITCH, SPACE, pin, track, \
+    left_of_pins, right_of_pins, tab_lane
+
 class p_bias(Stack):
     ...
-    wires = [
-        ("VO", "M1", "||", "trunkx=304100"),
-        ("VBP", "blocked", "path is not a shape route.py can draw"),
+    #- a rail COLLECTS its pins: no start/stop, so a device added to
+    #- the column grows the rail with no line changing here
+    paths = [
+        dict(net="VO", layer="M1",
+             steps=[("trunk", right_of_pins())]),
+        #- a flyover: ride the tab lane a layer up, touch down only
+        #- on your own pins
+        dict(net="PWRUP_N_1V8", layer="M4",
+             steps=[("trunk", tab_lane()), ("taps",)]),
+        #- a two-pin story names its ends
+        dict(net="VO1", at="e",
+             start=("xload3", "VO1"), stop=("xload5", "VO1"),
+             steps=[("up",),
+                    ("movex", pin("xload5", "VO1", "x")),
+                    ("end",)]),
     ]
-    wires_key = "6485b44f0f02"
+    #- and the nets that must NOT be drawn: a supply every source
+    #- already reaches through the guard. No geometry, so nothing to
+    #- go stale and no fingerprint to guard it.
+    blocked = [
+        ("VSS", "the guard carries it"),
+    ]
 ```
 
-each 4-tuple ordinary `addConnectivityRoute` arguments -- edit them
-like any other route -- and a `("net", "blocked", reason)` triple a
-net the search proved unroutable, replayed as blocked rather than
-quietly retried. Declared nets REPLAY: no track map, no A* search,
-which are the whole cost of the flat build (measured: 74 s to 0.5 s
-on LELOTEMP_BIAS_IBP, 15 s to 0.5 s on LELOTEMP_OTAR, outputs byte
-identical). route.py still redraws under whatever the technology
-says today.
+Every anchor — `pin(...) ± n*PITCH`, `track(channel, i) ± SPACE`,
+`right_of_pins()`, `tab_lane()` — recomputes from the pins on every
+build, so **a placement change moves the wire instead of invalidating
+it**. This replaced the older `wires`/`wires_key` blocks, whose
+resolved coordinates were guarded by a placement fingerprint: measured
+on LELOTEMP_CMPR, the fingerprint had been stale for days while every
+wire replayed anyway — inert in the good case, silently discarding in
+the bad one. If you meet a `wires` block in an old design, convert it;
+if you meet a bare number, refuse it.
 
-The options are RESOLVED -- a trunkx is a coordinate -- so
-`wires_key` fingerprints the stack's own instances, and any
-placement change makes the block stale: the router says so, ignores
-it, searches afresh, and writes every searched stack's conclusions
-to `<CELL>.routes.py` beside the design as a paste-ready block. The
-loop is: build once, read `<CELL>.routes.py`, paste the blocks into
-the sidecar, build again. Undeclared nets always search, so a wires
-block may cover a stack partially. CICPY_NO_ROUTEPLAN=1 ignores
-every declaration.
+### The loop: search → emit → import → verify → next net
+
+One net at a time, and the search does the discovering while the
+design keeps only anchors:
+
+```
+1  DECLARE the net as a search:              mazes = [dict(net="X",
+   a layer budget and two ends,                layers=("M2","M3","M4"),
+   nothing more                                between=[(a,"X"),(b,"X")])]
+2  BUILD once (make mag). The search runs, draws what it proved, and
+   EMITS the route to <CELL>.routes.py as an anchored `paths` entry —
+   every corner resolved to a pin or a channel track. A corner nothing
+   reproduces is marked UNANCHORED with the number in a comment: that
+   entry is a draft to finish, never a coordinate to inherit.
+3  IMPORT: paste the entry into the sidecar's `paths`, delete the
+   maze, gate with `paths_only = (..., "X")` while verifying.
+4  VERIFY, all four, before the next net:
+       make drc  CELL=<CELL>
+       make gds kdrc CELL=<CELL>        # gds FIRST or kdrc is stale
+       make cdl lvs  CELL=<CELL>        # read only "Final result:"
+       make ant  CELL=<CELL>
+5  NEXT net. paths_only = None when the cell is done.
+```
+
+`paths_only` gates `paths` and `mazes` both — `None` means all, a
+tuple names the enabled nets, and an empty tuple draws NOTHING (it is
+not "everything"). The search stands aside for any net declared as a
+path, so a bisected net stays undrawn rather than quietly searched.
+
+Two rules the emitter enforces so you do not have to:
+
+- **anchors, or refusal.** The emitter's tolerance is a quarter lane
+  (the search walks a finer grid than the lanes), and a corner that
+  no pin or track explains comes out UNANCHORED, loudly.
+- **paste-ready means gated.** Verify the imported story under
+  `paths_only` before opening the gate — the search proved the route
+  against the metal that existed when it ran, and your paste order is
+  not its run order.
 
 ### The flow
 
@@ -217,8 +269,12 @@ make mag      CELL=X     # ONE command: X's subcells are built, each
                          # assembled from them
 make drc      CELL=X_P_BIAS       # every subcell verifies standalone
 make gds cdl lvs CELL=X_P_BIAS    # gds FIRST or extraction is stale
+make kdrc     CELL=X_P_BIAS       # klayout reads the flattened gds:
+                                  # it catches the partial-overlap and
+                                  # sliver classes magic's hierarchy
+                                  # tolerates
 make drc      CELL=X
-make gds cdl lvs CELL=X
+make gds cdl lvs kdrc ant CELL=X
 ```
 
 Read the LVS verdict from the **`Final result:`** line and nowhere
@@ -1149,10 +1205,19 @@ overlaps tracked the errors. One sweep over four cells cost a minute
 and killed a wrong theory that would have moved a hundred innocent
 vias.
 
-## Worked example
+## Worked examples
 
-`LELO_TEMP_SKY130A/LELOTEMP_OTA.py` in lelo_temp_sky130a exercises all of
-this: netlist driven grouping with renames, folded ten device groups into
-mirrored five device halves, dummy fill, tap fallback for LVT devices,
-and every spacing in the table above. `LELOTEMP_CMP.py` in the same
-library is the reference for the routing phase.
+In `lelo_temp_sky130a/design/LELO_TEMP_SKY130A/`:
+
+- **`LELOTEMP_CMPR.py`** is the reference for a cell whose routing is
+  entirely declared: every column rail, flyover and two-pin story is a
+  `paths` entry, the supplies are `blocked`, and there is not a
+  coordinate in the file. Its docstring carries the measurements that
+  justified each choice — read those before inventing your own.
+- **`LELO_TEMP.py`** is the reference for a top: stories through named
+  bands, channels registered from the placement in `afterPlace`, a
+  corridor measured off a block's own view (`pband`), and `paths_only`
+  as the bisect gate.
+- `LELOTEMP_OTA.py` still exercises the placement half: netlist-driven
+  grouping with renames, folding into mirrored halves, dummy fill and
+  tap fallback.

@@ -423,9 +423,17 @@ class SidecarPycell:
                 #- strap, and it is declared rather than default
                 #- because core/ is shared and a strap lands metal
                 #- over whatever the design routed beside its ring.
+                #- `strap_gaps` is {side: [[lo, hi], ...]} in cell
+                #- coordinates: the spans the strap leaves open. A
+                #- subcell's ring row carries the cell's own edge
+                #- ports and the parent's crossings on the strap
+                #- layer, so a subcell strap is declared WITH its
+                #- gaps -- full length is only legal on a cell that
+                #- sees every crossing (the top).
                 layout.addRouteRing("M1", net, side,
                                     widthmult=3, spacemult=2,
-                                    straps=s.get("straps"))
+                                    straps=s.get("straps"),
+                                    strap_gaps=s.get("strap_gaps"))
             if devices:
                 layout.addPowerGuardConnection(
                     net, excludeInstances=s.get("guard_exclude", ""))

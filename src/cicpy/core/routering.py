@@ -73,12 +73,24 @@ def strap_over(cell, r, layers, gaps=None):
 
 class RouteRing(Cell):
 
-    def __init__(self, layer:str = None, name:str = None, rect:Rect = None, location:str = None, 
+    #- class-level defaults: ChannelRoute constructs via Cell.__init__
+    #- and never sets these, but inherits translate/_strapSides.
+    straps = ()
+    strap_gaps = {}
+
+    def __init__(self, layer:str = None, name:str = None, rect:Rect = None, location:str = None,
                  xgrid:int = None, ygrid:int = None, metalwidth:int = None,
-                 straps=None):
+                 straps=None, strap_gaps=None):
         super().__init__()
         self.ignoreBoundaryRouting = False
         self.straps = list(straps or [])
+        #- {side: [(lo, hi), ...]} in the cell's coordinates along the
+        #- bar's long axis: the spans a strap must leave open. A ring
+        #- row is also where a cell publishes its edge ports and where
+        #- a parent's routes cross on the strap layer, so a SUBCELL's
+        #- strap is legal only as segments between those spans -- see
+        #- strap_over. Sides are "bottom"/"top"/"left"/"right".
+        self.strap_gaps = dict(strap_gaps or {})
         
         # Default constructor
         if layer is None:
@@ -140,30 +152,51 @@ class RouteRing(Cell):
         dictates" means here. The strap is part of the ring, so
         wherever the ring is re-laid the strap re-lays with it.
         """
+        self._clearStraps()
         if not self.straps:
             return
         for side in ("bottom", "top", "left", "right"):
             r = getattr(self, side, None)
             if r is None or r not in self.children:
                 continue
-            strap_over(self, r, self.straps)
+            self._strap_rects += strap_over(self, r, self.straps,
+                                            gaps=self.strap_gaps.get(side))
+
+    def _clearStraps(self):
+        for r in getattr(self, "_strap_rects", []):
+            if r in self.children:
+                self.children.remove(r)
+        self._strap_rects = []
 
     def getDefault(self):
         """Get the default rectangle"""
         return self.default_rectangle
 
     def translate(self, dx: int, dy: int):
-        """Translate the route ring by dx, dy"""
+        """Translate the route ring by dx, dy.
+
+        The straps are re-laid, not moved: their gap spans are
+        declared in the CELL's coordinates (they mark where ports and
+        parent crossings sit, which do not move when the ring is
+        re-laid), so a strap baked at construction time and dragged
+        along would carry its gaps away from the things they clear --
+        measured on LELOTEMP_CMPR, whose recipe ring translates +4800
+        after construction and every gap missed by exactly that.
+        """
+        self._clearStraps()
         Cell.translate(self, dx, dy)
+        self._strapSides()
 
     def moveTo(self, ax: int, ay: int):
         """Move the route ring to position ax, ay"""
+        self._clearStraps()
         x1 = self.x1()
         y1 = self.y1()
 
         ax = ax - x1
         ay = ay - y1
         Cell.moveTo(self, ax, ay)
+        self._strapSides()
 
     def get(self, location: str):
         """Get a copy of the rectangle at the specified location"""

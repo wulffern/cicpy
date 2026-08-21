@@ -90,19 +90,26 @@ class XschemSymbol(Cell):
         #- second one each time -- harmless until a cell could find its
         #- own previously generated .sym, and then it compounded every
         #- run. A K block is "K {" through the line that closes it.
-        in_k_block = False
+        #- A K block does not have to close on a line of its own: the
+        #- PDK's fet symbols end theirs at the tail of a property line
+        #- (`drc="fet_drc ...\}"}`), and treating only a bare "}" line
+        #- as the close swallowed the rest of the file -- every pin box
+        #- included. Count brace depth instead, ignoring the escaped
+        #- \{ \} that PDK templates are full of.
+        def bracedepth(line):
+            stripped = line.replace("\\{", "").replace("\\}", "")
+            return stripped.count("{") - stripped.count("}")
+
+        k_depth = 0
         with open(filename) as fi:
             for l in fi:
                 if(l.startswith("v")): # Skip v line, I want to add more info
                     continue
-                if(in_k_block):
-                    if(l.lstrip().startswith("}")):
-                        in_k_block = False
+                if(k_depth > 0):
+                    k_depth += bracedepth(l)
                     continue
                 if(l.startswith("K")):
-                    #- a one line K {...} closes on the same line
-                    if(l.count("{") > l.count("}")):
-                        in_k_block = True
+                    k_depth = bracedepth(l)
                     continue
                 self.symbuffer.append(l)
                 if(l.startswith("B")):

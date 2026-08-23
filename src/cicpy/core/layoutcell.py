@@ -68,7 +68,14 @@ def readJsonChildren(parent, o):
         elif(cl == "Text"):
             c  = Text()
         elif(cl == "Instance"):
-            c  = Instance()
+            #- a placed cut serializes as an Instance -- ciccreator has
+            #- no other class for it -- so cut-ness is recovered from
+            #- the cell it places, the same test Cut::isACut uses
+            if str(child.get("cell", "")).startswith("cut_"):
+                from .instancecut import InstanceCut
+                c = InstanceCut()
+            else:
+                c  = Instance()
         elif(cl == "InstanceCut"):
             from .instancecut import InstanceCut
             c = InstanceCut()
@@ -205,6 +212,12 @@ class LayoutCell(Cell):
 
         self.add(i)
         i.moveTo(x,y)
+        #- the instance carries its schematic name as a Text at its
+        #- centre -- that is how a viewer, and magic's labels, know
+        #- which placement this is (C++ addInstance does the same)
+        t = Text(cktInst.name)
+        t.moveTo(int(x + i.width() / 2), int(y + i.height() / 2))
+        i.add(t)
         self.addToNodeGraph(i)
         i.updateBoundingRect()
         return i
@@ -2584,9 +2597,15 @@ class LayoutCell(Cell):
         if(self.subckt is None): return
         nodes = self.subckt.nodes
 
+        #- "^B$": a BULK terminal is wired by construction -- substrate
+        #- taps, well ties -- not by a wire to a published pin, so the
+        #- C++ has always excluded child ports named B here and no .cic
+        #- ciccreator ever wrote publishes one. A node whose only rects
+        #- were bulk pins then reports 'No rects found', exactly as the
+        #- C++ does.
         for node in nodes:
             if(node in self.ports): continue
-            rects = self.findRectanglesByNode("^" + node + "$",None,None)
+            rects = self.findRectanglesByNode("^" + node + "$","^B$",None)
             if(len(rects) > 0):
                 self.updatePort(node,rects[0])
             else:

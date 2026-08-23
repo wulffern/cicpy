@@ -1,0 +1,20 @@
+gdssLibName = "SAR9B"
+ pdkLib = "SAR9B"
+;- Create cell CAPX1_CV
+(let (layout net fig )
+ layout = dbOpenCellViewByType(gdssLibName "CAPX1_CV" "layout" "maskLayout" "w")
+mstr = dbOpenCellViewByType( pdkLib "CAPR" "layout")
+layInst=dbCreateInst(layout mstr "XA1" 0.0:0.0 "R0")
+mstr = dbOpenCellViewByType( pdkLib "CAP" "layout")
+layInst=dbCreateInst(layout mstr "XB1" 1.72:0.0 "R0")
+fig = dbCreateRect(layout list(46 -1) list(-0.043:0.142 1.763:0.202))
+net = dbCreateNet(layout "A")
+dbCreateTerm( net "A" "inputOutput")
+dbCreatePin(net fig)
+dbCreateLabel(layout list(46 237) -0.043:0.142 "A" "centerLeft" "R0" "stick" 0.1)
+fig = dbCreateRect(layout list(42 -1) list(3.397:0.215 3.483:0.301))
+net = dbCreateNet(layout "B")
+dbCreateTerm( net "B" "inputOutput")
+dbCreatePin(net fig)
+dbCreateLabel(layout list(42 237) 3.397:0.215 "B" "centerLeft" "R0" "stick" 0.1)
+ dbSave(layout) )

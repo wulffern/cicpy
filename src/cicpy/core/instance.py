@@ -320,6 +320,31 @@ class Instance(Cell):
             rects.append(rr)
         return rects
 
+    def _findRectanglesByRegex(self, rects, regex, layer):
+        """Resolve a path like `S` against the CELL, not the instance.
+
+        The instance's own ports are the netlist's nodes -- DDD has one,
+        B -- but a route command may name any port the child cell
+        publishes: `XA1:S` reaches the S the pattern drew, which no
+        netlist mentions. The C++ delegates to the referenced cell and
+        transforms what comes back (Instance::findRectanglesByRegex);
+        searching the instance's ports here is how `XA1:S` came back
+        empty and the route silently did not happen.
+
+        Copies, then transform: the child's named_rects arrive live,
+        and transforming a live rect would move the cell itself.
+        """
+        cell = self.layoutcell or self._cell_obj
+        if cell is None:
+            return
+        found = cell.findAllRectangles(regex, layer)
+        for r in found:
+            rr = r.getCopy()
+            rr.net = getattr(r, "net", "")
+            self._transformRect(rr)
+            rr.parent = self
+            rects.append(rr)
+
     def transform(self, rect):
         """Map a rect from THIS instance's cell frame into the parent's.
 

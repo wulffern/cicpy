@@ -51,7 +51,13 @@ class Compiler():
 
     def read(self, filename):
         """Compile `filename`, and everything it includes, into the design."""
-        self.readCells(filename)
+        from ..core.route import Route
+        prev = Route.compat
+        Route.compat = "ciccreator"
+        try:
+            self.readCells(filename)
+        finally:
+            Route.compat = prev
         #- Every cut the routing asked for is a CELL, and it has to be in
         #- the design before anything that places it -- Design::read puts
         #- them at the front for exactly that reason.

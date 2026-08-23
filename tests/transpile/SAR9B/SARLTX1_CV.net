@@ -1,0 +1,48 @@
+ Netlist File
+ SARLTX1_CV
+ N1
+MN0/D
+MN1/S
+
+ A
+MN0/G
+
+ AVSS
+MN0/S
+MN0/B
+MN1/B
+MN2/B
+MP0/B
+MP1/B
+MP2/B
+
+ N3
+MN1/D
+MN2/S
+
+ LCK_N
+MN1/G
+
+ CHL
+MN2/D
+MP2/D
+
+ EN
+MN2/G
+
+ NP2
+MP0/D
+MP1/S
+
+ RST_N
+MP0/G
+MP1/G
+MP2/G
+
+ AVDD
+MP0/S
+
+ NP1
+MP1/D
+MP2/S
+

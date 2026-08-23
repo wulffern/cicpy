@@ -1,0 +1,242 @@
+magic
+tech tech
+magscale 1 2
+timestamp 1787443200
+<< checkpaint >>
+rect 0 0 688 2270
+<< po >>
+rect 120 992 169 1004
+rect 169 871 241 883
+rect 169 871 181 1004
+rect 120 1267 169 1279
+rect 169 1146 241 1158
+rect 169 1146 181 1279
+rect 507 854 568 866
+rect 447 802 507 814
+rect 507 802 519 866
+rect 86 1129 152 1139
+rect 101 1129 111 1139
+rect 127 1129 137 1139
+rect 86 1129 152 1139
+rect 206 596 272 606
+rect 221 596 231 606
+rect 247 596 257 606
+rect 206 596 272 606
+rect 120 1129 169 1141
+rect 169 596 241 608
+rect 169 596 181 1141
+rect 577 940 589 1363
+rect 533 1680 599 1690
+rect 548 1680 558 1690
+rect 574 1680 584 1690
+rect 533 1680 599 1690
+rect 413 149 479 159
+rect 428 149 438 159
+rect 454 149 464 159
+rect 413 149 479 159
+rect 568 1680 616 1692
+rect 447 149 616 161
+rect 616 149 628 1692
+rect 120 1748 169 1760
+rect 169 1697 241 1709
+rect 169 1697 181 1760
+rect 114 1748 126 1829
+rect 86 1886 152 1896
+rect 101 1886 111 1896
+rect 127 1886 137 1896
+rect 86 1886 152 1896
+rect 206 1628 272 1638
+rect 221 1628 231 1638
+rect 247 1628 257 1638
+rect 206 1628 272 1638
+rect 120 1886 169 1898
+rect 169 1628 241 1640
+rect 169 1628 181 1898
+rect 143 1943 169 1955
+rect 169 1903 241 1915
+rect 169 1903 181 1955
+rect 120 1955 155 1967
+rect 143 2012 169 2024
+rect 169 1972 241 1984
+rect 169 1972 181 2024
+rect 120 2024 155 2036
+rect 120 2161 169 2173
+rect 169 2075 241 2087
+rect 169 2075 181 2173
+rect 447 1284 496 1296
+rect 496 1404 568 1416
+rect 496 1284 508 1416
+rect 413 1009 479 1019
+rect 428 1009 438 1019
+rect 454 1009 464 1019
+rect 413 1009 479 1019
+rect 533 1542 599 1552
+rect 548 1542 558 1552
+rect 574 1542 584 1552
+rect 533 1542 599 1552
+rect 447 1009 496 1021
+rect 496 1542 568 1554
+rect 496 1009 508 1554
+rect 89 442 155 452
+rect 533 785 602 797
+rect 89 98 155 108
+rect 86 648 155 660
+rect 416 150 482 160
+rect 89 993 155 1003
+rect 89 993 155 1003
+rect 104 993 114 1003
+rect 130 993 140 1003
+rect 89 993 155 1003
+rect 104 993 114 1003
+rect 130 993 140 1003
+rect 89 993 155 1003
+rect 104 993 114 1003
+rect 130 993 140 1003
+rect 89 993 155 1003
+rect 295 982 305 1048
+rect 295 982 305 1048
+rect 295 997 305 1007
+rect 295 1023 305 1033
+rect 295 982 305 1048
+rect 295 997 305 1007
+rect 295 1023 305 1033
+rect 295 982 305 1048
+rect 295 997 305 1007
+rect 295 1023 305 1033
+rect 295 982 305 1048
+rect 335 1119 345 1185
+rect 335 1119 345 1185
+rect 335 1134 345 1144
+rect 335 1160 345 1170
+rect 335 1119 345 1185
+rect 335 1134 345 1144
+rect 335 1160 345 1170
+rect 335 1119 345 1185
+rect 335 1134 345 1144
+rect 335 1160 345 1170
+rect 335 1119 345 1185
+rect 355 1257 365 1323
+rect 355 1257 365 1323
+rect 355 1272 365 1282
+rect 355 1298 365 1308
+rect 355 1257 365 1323
+rect 355 1272 365 1282
+rect 355 1298 365 1308
+rect 355 1257 365 1323
+rect 355 1272 365 1282
+rect 355 1298 365 1308
+rect 355 1257 365 1323
+rect 416 150 482 160
+rect 431 150 441 160
+rect 457 150 467 160
+rect 416 150 482 160
+rect 89 98 155 108
+rect 104 98 114 108
+rect 130 98 140 108
+rect 89 98 155 108
+rect 89 98 155 108
+rect 104 98 114 108
+rect 130 98 140 108
+rect 89 98 155 108
+rect 89 442 155 452
+rect 104 442 114 452
+rect 130 442 140 452
+rect 89 442 155 452
+rect 89 442 155 452
+rect 104 442 114 452
+rect 130 442 140 452
+rect 89 442 155 452
+rect 86 2092 155 2104
+rect 413 2178 482 2190
+rect 86 1473 155 1485
+rect 206 1766 275 1778
+rect 550 940 616 950
+rect 413 0 479 2270
+rect 206 0 272 2270
+rect 413 0 479 2270
+rect 206 2247 272 2257
+rect 221 2247 231 2257
+rect 247 2247 257 2257
+rect 206 2247 272 2257
+rect 221 2247 231 2257
+rect 247 2247 257 2257
+rect 206 2247 272 2257
+rect 221 2247 231 2257
+rect 247 2247 257 2257
+rect 206 2247 272 2257
+rect 206 0 272 2270
+use SARMRYX1_CV XA1 
+transform 1 0 0 0 1 0
+box 0 0 688 826
+use SWX2_CV XA2 
+transform 1 0 0 0 1 826
+box 0 826 688 964
+use SWX2_CV XA3 
+transform 1 0 0 0 1 963
+box 0 963 688 1101
+use SWX2_CV XA4 
+transform 1 0 0 0 1 1101
+box 0 1101 688 1239
+use SWX2_CV XA5 
+transform 1 0 0 0 1 1238
+box 0 1238 688 1376
+use SARCEX1_CV XA6 
+transform 1 0 0 0 1 1376
+box 0 1376 688 1651
+use IVX1_CV XA7 
+transform 1 0 0 0 1 1651
+box 0 1651 688 1720
+use IVX1_CV XA8 
+transform 1 0 0 0 1 1720
+box 0 1720 688 1789
+use NDX1_CV XA9 
+transform 1 0 0 0 1 1789
+box 0 1789 688 1927
+use IVX1_CV XA10 
+transform 1 0 0 0 1 1926
+box 0 1926 688 1995
+use NRX1_CV XA11 
+transform 1 0 0 0 1 1995
+box 0 1995 688 2133
+use IVX1_CV XA12 
+transform 1 0 0 0 1 2133
+box 0 2133 688 2202
+use TAPCELL_CV XA13 
+transform 1 0 0 0 1 2202
+box 0 2202 688 2271
+<< labels >>
+flabel po s 89 442 155 452 0 FreeSans 400 0 0 0 CMP_OP
+port 1 nsew signal bidirectional
+flabel po s 533 785 602 797 0 FreeSans 400 0 0 0 RST_N
+port 4 nsew signal bidirectional
+flabel po s 89 98 155 108 0 FreeSans 400 0 0 0 EN
+port 3 nsew signal bidirectional
+flabel po s 86 648 155 660 0 FreeSans 400 0 0 0 CMP_ON
+port 2 nsew signal bidirectional
+flabel po s 416 150 482 160 0 FreeSans 400 0 0 0 ENO
+port 5 nsew signal bidirectional
+flabel po s 89 993 155 1003 0 FreeSans 400 0 0 0 CN1
+port 10 nsew signal bidirectional
+flabel po s 295 982 305 1048 0 FreeSans 400 0 0 0 CP1
+port 8 nsew signal bidirectional
+flabel po s 335 1119 345 1185 0 FreeSans 400 0 0 0 CP0
+port 7 nsew signal bidirectional
+flabel po s 355 1257 365 1323 0 FreeSans 400 0 0 0 CN0
+port 9 nsew signal bidirectional
+flabel po s 86 2092 155 2104 0 FreeSans 400 0 0 0 CEIN
+port 11 nsew signal bidirectional
+flabel po s 413 2178 482 2190 0 FreeSans 400 0 0 0 CEO
+port 12 nsew signal bidirectional
+flabel po s 86 1473 155 1485 0 FreeSans 400 0 0 0 CKS
+port 13 nsew signal bidirectional
+flabel po s 206 1766 275 1778 0 FreeSans 400 0 0 0 DONE
+port 6 nsew signal bidirectional
+flabel po s 550 940 616 950 0 FreeSans 400 0 0 0 VREF
+port 14 nsew signal bidirectional
+flabel po s 413 0 479 2270 0 FreeSans 400 0 0 0 AVDD
+port 15 nsew signal bidirectional
+flabel po s 206 0 272 2270 0 FreeSans 400 0 0 0 AVSS
+port 16 nsew signal bidirectional
+<< properties >>
+string FIXED_BBOX 0 0 688 2270
+<< end >>

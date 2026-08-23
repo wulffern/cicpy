@@ -27,28 +27,24 @@ then a single parity percentage.
 
 ## Where the port stands
 
-`cicpy compile examples/routes.json examples/tech.json` runs end to end
-and reaches **8 of 46 cells matching ciccreator exactly (17.4%)**,
-including every PatternTile leaf.
+**routes.json: 45 of 46 cells match ciccreator exactly (97.8%), 766
+shapes on each side.**
 
-PatternTile is ported: the character grid, the sub patterns from the
-file's `patterns` map, contacts and contact pairs, port characters,
-the merge with the neighbour on the left, and enclosures. The leaf
-cells it draws -- DDD, DDA, DDMVIA and the rest -- match the reference
-shape for shape.
+The one remaining cell is TEST_R, off by exactly one database unit:
+ciccreator's integer Rect::rotate(90) loses a unit (a 6300-wide cell
+comes back 6299 wide, ports at 151 instead of 150). That is a bug in
+the reference, not a gap in the port, and cicpy does not replicate it.
 
-What is left is one coherent thing: HOW A CELL PUBLISHES ITS PORTS.
-Against the reference, each remaining cell shows
+Behaviour the two flows legitimately disagree on is selected by
+`Route.compat` -- the compiler sets "ciccreator" for the duration of a
+compile, spi2mag keeps cicpy's own conventions:
 
-    want 2x Port  M1 ... 'B'      +  1x Text TXT ... 'XA1'
-    got  1x InstancePort M1 ... 'B'
+  - the landing rect keeps the pin when a cut straddles its centre
+    (cicpy follows the cut, measured against VR1's trunk)
+  - no cut re-alignment to the wire, no fitting chain
+  - routeVertical is one wire, bound edge to bound edge
+  - instances abut (no CELL-space gap between groups)
 
-so three symptoms of the same gap -- ciccreator publishes a `Port` on
-the parent through `updatePort`, emits a `Text` label per instance,
-and resolves `XA1:S` style names in route commands
-(`findAllRectangles`) that currently find nothing. Fixing that is the
-next chunk, and it should close most of the remaining 38 cells at once.
-
-The SAR example needs more than this: it adds LayoutDigitalCell's row
-conventions, LayoutSARCDAC, LayoutCapCellSmall and the Gds pattern
-devices, none of which are ported.
+The SAR example is the next target: LayoutDigitalCell's row
+conventions, PatternResistor, the Gds pattern devices, LayoutSARCDAC
+and the capacitor cells are not yet ported.

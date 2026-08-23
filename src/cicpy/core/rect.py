@@ -37,11 +37,17 @@ def sortOnTop(rects,left=False,right=False,top=False,bottom=False):
     index = 0
     count = 0
 
-    x =  INT_MAX
+    #- each criterion needs the OPPOSITE extreme as its starting
+    #- value: a `>` test must start from -inf, a `<` test from +inf.
+    #- top started from +inf, so `r.y2 > y` was never true and
+    #- sortTopOnTop was a silent no-op -- every onTopT route trunked
+    #- from whatever rect happened to be first. bottom had the same
+    #- fault mirrored.
+    x = INT_MAX
     y = INT_MAX
     if(right):
         x = INT_MIN
-    elif(bottom):
+    if(top):
         y = INT_MIN
 
     for r in rects:
@@ -376,10 +382,16 @@ class Rect:
     def toJson(self):
         o = dict()
         o["class"] = "Rect"
-        o["x1"] = self.x1
-        o["y1"] = self.y1
-        o["x2"] = self.x2
-        o["y2"] = self.y2
+        #- the .cic format is INTEGER database units -- ciccreator's
+        #- QJson writes ints, and every consumer reads them back as
+        #- coordinates on the manufacturing grid. cicpy's arithmetic
+        #- runs through /2.0 and rotation trig, so a coordinate can
+        #- arrive here as 6300.0 or 10000.000000000002; rounding at
+        #- the boundary keeps the file what the format says it is.
+        o["x1"] = int(round(self.x1))
+        o["y1"] = int(round(self.y1))
+        o["x2"] = int(round(self.x2))
+        o["y2"] = int(round(self.y2))
         o["layer"] = self.layer
         o["net"] = self.net
         return o

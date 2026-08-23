@@ -1,0 +1,54 @@
+ Netlist File
+ SARCEX1_CV
+ N4
+MN0/D
+MN1/S
+
+ RST
+MN0/G
+MN1/G
+MN2/G
+MN3/G
+
+ AVSS
+MN0/S
+MN0/B
+MN1/D
+MN1/B
+MN2/S
+MN2/B
+MN3/B
+MP0/B
+MP1/B
+MP2/B
+MP3/B
+
+ N1
+MN2/D
+MN3/S
+
+ Y
+MN3/D
+MP0/S
+MP3/D
+
+ N2
+MP0/D
+MP1/S
+
+ A
+MP0/G
+MP1/G
+
+ AVDD
+MP1/D
+MP2/S
+
+ N3
+MP2/D
+MP3/S
+
+ B
+MP2/G
+MP3/G
+

@@ -263,7 +263,7 @@ class Cut(Cell):
         return fill_inst
 
     @staticmethod
-    def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True, stopLayer:str=None, forceShape:bool=False, centerAlignCut:bool=False):
+    def getCutsForRects(routeLayer:str, rects:list, cuts:int, vcuts:int, leftAlignCut:bool=True, stopLayer:str=None, forceShape:bool=False, centerAlignCut:bool=False, honorCount:bool=False, landingFollowsCut:bool=True):
         """Get cuts for a list of rectangles, matching C++ implementation
 
         ``stopLayer`` ends the stack there instead of on the pin's own
@@ -337,7 +337,17 @@ class Cut(Cell):
                     #- steering away from. Overhanging the pin is the
                     #- lesser evil and the chain never drops below two
                     #- cuts anyway.
-                    if not _fits(inst) and not forceShape:
+                    #- honorCount: the route SAID a number ("3cuts"),
+                    #- and ciccreator takes it verbatim, overhang and
+                    #- all -- its getCutsForRects has no fitting chain.
+                    #- The chain below is cicpy's own safeguard for
+                    #- routes that never asked, and it stays for them.
+                    #- and in ciccreator-compat mode not at all: the
+                    #- C++ has no fitting chain, and even PROBING the
+                    #- alternatives creates their cut cells, which then
+                    #- appear in the output as cells nothing places.
+                    if (landingFollowsCut and not _fits(inst)
+                            and not forceShape and not honorCount):
                         chosen = None
                         for (hc, vc) in ((vcuts, cuts), (2, 1), (1, 2)):
                             alt = Cut.getInstance(routeLayer, landing,
@@ -377,7 +387,17 @@ class Cut(Cell):
                     #- 0.1 um from VR1's trunk. Following the cut keeps
                     #- the metal no wider than before and puts it where
                     #- the alignment asked for.
-                    if inst.x1 < r.x1 or inst.x2 > r.x2:
+                    if not landingFollowsCut:
+                        #- ciccreator's rule: the landing keeps the
+                        #- whole pin while the cut straddles its
+                        #- centre, and shrinks to the cut only when
+                        #- the cut missed it (Cut::getCutsForRects:
+                        #- `if(inst->x1() > xc || inst->x2() < xc)
+                        #-      r->setWidth(inst->width());`)
+                        xc = r.centerX()
+                        if inst.x1 > xc or inst.x2 < xc:
+                            r.x2 = r.x1 + inst.width()
+                    elif inst.x1 < r.x1 or inst.x2 > r.x2:
                         r.x1 = min(r.x1, inst.x1)
                         r.x2 = max(r.x2, inst.x2)
                     else:

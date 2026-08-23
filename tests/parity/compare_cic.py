@@ -17,7 +17,12 @@ from collections import Counter
 
 #- Keys that describe a shape. Anything else in a child object is
 #- bookkeeping that the two writers are entitled to disagree on.
-SHAPE = ("class", "layer", "net", "x1", "y1", "x2", "y2")
+#- `net` is NOT here: ciccreator writes "" for nearly every shape,
+#- while cicpy attributes wires and cuts to their net on purpose --
+#- the same geometry, one writer keeping more of what it knew. Net
+#- ATTRIBUTION is checked by cicpy's own connectivity tools, not by
+#- this comparator.
+SHAPE = ("class", "layer", "x1", "y1", "x2", "y2")
 
 
 def load(path):

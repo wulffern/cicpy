@@ -27,6 +27,14 @@ class LayoutCell(_CicpyLayoutCell):
             self.name = name
         #- object files set this by property; the C++ name has no `set`
         self.patterns = {}
+        #- ciccreator's place() ABUTS: a group starts at the previous
+        #- instance's x2, no gap (place(): `x = next_x`). The spacing
+        #- default on cicpy's LayoutCell is the spi2mag flow's, where
+        #- magic cells need the technology's CELL space between them.
+        #- This class is the ciccreator calling convention, so it takes
+        #- ciccreator's packing.
+        self.place_xspace = [0]
+        self.place_yspace = [0]
 
     def addConnectivityRoute(self, *args):
         """[layer, regex, routeType, options, cuts, includeInstances]
@@ -64,8 +72,30 @@ class LayoutDigitalCell(LayoutCell):
 
 @cicclass("Layout::LayoutRotateCell")
 class LayoutRotateCell(LayoutCell):
-    """A LayoutCell whose contents are rotated by `rotateAngle`."""
+    """A LayoutCell whose contents are rotated by `rotateAngle`.
+
+    The C++ (core/layoutrotatecell.cpp) replaces place() outright:
+    every instance of the subckt lands at the ORIGIN with the cell's
+    angle -- the class exists to wrap one cell in an orientation, not
+    to arrange anything. It adds no name label, and the golden files
+    show none.
+    """
 
     def __init__(self, name=""):
         super().__init__(name)
-        self.rotateAngle = 0
+        self.rotateAngle = ""
+
+    def place(self):
+        if self.ckt is None:
+            return
+        for cktInst in self.ckt.instances:
+            inst = self.addInstance(cktInst, 0, 0)
+            if inst is None:
+                continue
+            #- addInstance labels the placement; the rotate cell's C++
+            #- hand-rolls the same steps without the label
+            for ch in list(inst.children):
+                if ch.isType("Text"):
+                    inst.children.remove(ch)
+            inst.setAngle(self.rotateAngle or "")
+        self.updateBoundingRect()

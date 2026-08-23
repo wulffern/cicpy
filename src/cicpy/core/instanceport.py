@@ -35,7 +35,11 @@ class InstancePort(Port):
         uniquely.
         """
         o = super().toJson()
-        o["class"] = "InstancePort"
+        #- "Port", not "InstancePort": that is the class ciccreator
+        #- writes and the only one its reader knows, and cicpy's own
+        #- readers already treat the two names as the same thing. What
+        #- makes it an InstancePort in a file is childName, which stays.
+        o["class"] = "Port"
         if self.childName:
             o["childName"] = self.childName
         return o

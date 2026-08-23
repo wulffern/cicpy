@@ -49,6 +49,25 @@ def trunkAnchorCoords(rects, layer):
 
 class Route(Cell):
 
+    #- Which flow's conventions this route follows. "cicpy" is the
+    #- spi2mag flavour: the landing rect follows the cut (measured
+    #- against VR1's trunk in LELOTEMP_BIAS_IBP). "ciccreator" is the
+    #- object-file compiler's: the landing keeps the pin whenever the
+    #- cut straddles its centre, which is what every golden .cic pins.
+    #- The compiler sets this for the duration of a compile.
+    compat = "cicpy"
+
+    def toJson(self):
+        o = super().toJson()
+        #- the name ciccreator writes, and the one every .cic already
+        #- on disk uses; cicpy's reader accepts both
+        o["class"] = "cIcCore::Route"
+        #- every C++ Rect is born on PR and a Route never changes that,
+        #- so the files all say PR; the net lives in the NAME
+        if not o.get("layer"):
+            o["layer"] = "PR"
+        return o
+
     def __init__(self, net, layer, start, stop, options, routeType):
         super().__init__(net)
         self.log = logging.getLogger("Route")
@@ -187,6 +206,14 @@ class Route(Cell):
         self.endVCuts = get_int(r"(\d+)endvcuts(\s+|,|$)", 0)
         self.cuts = get_int(r"(\d+)cuts", 2)
         self.vcuts = get_int(r"(\d+)vcuts", 1)
+        #- an explicit count is a REQUEST: "5cuts" means five, and
+        #- ciccreator honours it verbatim (Route::addCuts passes the
+        #- numbers straight to Cut::getCutsForRects). The aspect
+        #- heuristic below is for routes that never said a number.
+        self.cutsExplicit = bool(
+            re.search(r"(\d+)(start|end)?v?cuts", self.options)
+            or self.startCuts or self.startVCuts
+            or self.endCuts or self.endVCuts)
         if re.search(r"cutaligncenter", self.options):
             self.centerAlignCut = True
         self.routeWidthRule = get_str(r"routeWidth=([^,\\s+,$]+)", "width")
@@ -398,6 +425,12 @@ class Route(Cell):
         #- the caller should be the one accepting it.
         if hcuts == 1 and vcuts <= 1:
             return (1, 1)
+        #- a route that ASKED for a count gets that count -- this is
+        #- ciccreator's behaviour, and the golden route demos pin it
+        #- (3cuts -> cut_*_3x1, 2vcuts -> cut_*_2x2). The clamp below
+        #- only shapes the DEFAULT 2/1 by the landing pad's aspect.
+        if self.cutsExplicit:
+            return (hcuts, vcuts)
         if vcuts > hcuts:
             return (1, 2)
         return (2, 1)
@@ -468,7 +501,9 @@ class Route(Cell):
                                         cut_v, self.leftAlignCut,
                                         stopLayer,
                                         forceShape=cutShape is not None,
-                                        centerAlignCut=self.centerAlignCut)
+                                        centerAlignCut=self.centerAlignCut,
+                                        honorCount=self.cutsExplicit,
+                                        landingFollowsCut=(Route.compat != "ciccreator"))
             inst = insts[0] if insts else None
             if inst is not None:
                 cuts.append(inst)
@@ -688,8 +723,13 @@ class Route(Cell):
 
     def routeOne(self):
         self.log.info(f"routeOne: net={self.net}, layer={self.routeLayer}, route={self.route_}, options={self.options}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
-        self._alignCutsToWire(self.startRects, self.startCutRects)
-        self._alignCutsToWire(self.stopRects, self.endCutRects)
+        #- ciccreator has no cut re-alignment: the cut stays where the
+        #- alignment put it and the wire meets it there. The clamp in
+        #- _alignCutsToWire also assumes a cut narrower than its pin,
+        #- and walked a WIDER cut off the pin's left edge.
+        if Route.compat != "ciccreator":
+            self._alignCutsToWire(self.startRects, self.startCutRects)
+            self._alignCutsToWire(self.stopRects, self.endCutRects)
 
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
@@ -846,6 +886,29 @@ class Route(Cell):
         self.log.info(f"routeVertical: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
         
         if not (len(self.startRects) > 0 and len(self.stopRects) > 0):
+            return
+
+        if Route.compat == "ciccreator":
+            #- the C++ routeVertical, verbatim: ONE wire from the lower
+            #- bound's bottom edge to the upper bound's top edge, on the
+            #- start bound's centre; cuts recentred onto that centre.
+            #- cicpy's own version below runs pairwise connections with
+            #- crowding control -- better for spi2mag, but a different
+            #- layout than the goldens pin.
+            rules = Rules.getInstance()
+            width = rules.get(self.routeLayer, self.routeWidthRule)
+            sb = Cell.calcBoundingRectFromList(self.startRects)
+            tb = Cell.calcBoundingRectFromList(self.stopRects)
+            yc = sb.y1
+            height = tb.y2 - yc
+            if sb.y1 > tb.y1:
+                yc = tb.y1
+                height = sb.y2 - yc
+            xc = sb.centerX() - width / 2
+            for r in self.children:
+                if r.isCut():
+                    r.moveCenter(sb.centerX(), r.centerY())
+            self.add(Rect(self.routeLayer, int(xc), int(yc), int(width), int(height)))
             return
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)

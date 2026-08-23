@@ -1,0 +1,18 @@
+ Netlist File
+ IVX1_CV
+ Y
+MN0/D
+MP0/D
+
+ A
+MN0/G
+MP0/G
+
+ AVSS
+MN0/S
+MN0/B
+MP0/B
+
+ AVDD
+MP0/S
+

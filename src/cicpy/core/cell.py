@@ -819,15 +819,20 @@ class Cell(Rect):
                 rects.append(nr)
 
     def _port_rect_on_layer(self, port, layer):
+        """The port's rect on `layer`, or its route-layer rect.
+
+        The FALLBACK IS NOT FILTERED, and that is the C++'s behaviour
+        exactly (findRectanglesByRegex: `r = p->get(layer); if(!r) r =
+        p->get();` -- and no check after). A route on M2 may start from
+        a port whose metal is on M1; the router drops the via stack.
+        Filtering the fallback turned every such route into 'Route did
+        not work ... start=0'.
+        """
         if port is None or not hasattr(port, "get"):
             return None
         rr = port.get(layer)
         if rr is None:
             rr = port.get()
-        if rr is None:
-            return None
-        if layer and getattr(rr, "layer", "") and getattr(rr, "layer", "") != layer:
-            return None
         return rr
 
     #     QJsonObject toJson();

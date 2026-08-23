@@ -358,7 +358,13 @@ class Instance(Cell):
         cell = self.layoutcell or self._cell_obj
         if cell is None:
             return
-        found = cell.findAllRectangles(regex, layer)
+        #- the ByRegex HALF only, exactly as the C++ delegates: the
+        #- other half (findRectangles) matches the cell's child
+        #- instance ports by bare name, and through a path like XA1:EN
+        #- that returned the pin AND every same-named pin one level
+        #- deeper -- each start rect twice, each with its own via
+        found = []
+        cell._findRectanglesByRegex(found, regex, layer)
         for r in found:
             rr = r.getCopy()
             rr.net = getattr(r, "net", "")

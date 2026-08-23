@@ -417,7 +417,7 @@ class Cell(Rect):
             #- is added afterwards), and every golden box agrees. The
             #- spi2mag flow keeps cicpy's behaviour, where the box is
             #- the union and rings opt out per cell.
-            if(child.isRoute()):
+            if(child.isRoute() and not self.isType("RouteRing")):
                 from .route import Route
                 if(Route.compat == "ciccreator"):
                     continue
@@ -589,6 +589,9 @@ class Cell(Rect):
             "Route": "cIcCore::Route",
             "RouteRing": "cIcCore::RouteRing",
             "Guard": "cIcCore::Guard",
+            #- a Cut CELL: Qt sees it via the Cell metaobject, so
+            #- ciccreator's files call it cIcCore::Cell
+            "Cut": "cIcCore::Cell",
         }
         o["class"] = _CPP_NAMES.get(o["class"], o["class"])
         #- every C++ Rect is born on layer PR and a Cell never changes
@@ -827,9 +830,13 @@ class Cell(Rect):
                     rr = self._port_rect_on_layer(port, layer)
                     if rr is not None:
                         rects.append(rr)
-                # named_rects entry by exact name.
+                # named_rects entry by exact name. NO layer filter: a
+                # named rect is usually a via's TOP metal, published so
+                # a route on another layer can land on it -- filtering
+                # by the route's layer is exactly what would hide it
+                # (the C++ appends unconditionally).
                 nr = self.named_rects.get(s)
-                if nr is not None and (not layer or getattr(nr, "layer", "") == layer):
+                if nr is not None:
                     rects.append(nr)
 
     def _findRectangles(self, rects, name, layer):
@@ -855,7 +862,7 @@ class Cell(Rect):
                 if rr is not None:
                     rects.append(rr)
         nr = self.named_rects.get(name)
-        if nr is not None and (not layer or getattr(nr, "layer", "") == layer):
+        if nr is not None:
             # Already appended in _findRectanglesByRegex when no `:`/`,`; skip
             # to avoid duplication.
             if nr not in rects:

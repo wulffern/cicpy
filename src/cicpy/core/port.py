@@ -50,6 +50,10 @@ class Port(Rect):
         self.routeLayer = routeLayer or (rect.layer if rect else None)
         self.rect = rect
         self.alternates = [rect] if rect is not None and getattr(rect, "layer", "") else []
+        #- follow the rect from birth, exactly as set() does: a port
+        #- built on a ring bar must move when the bar is trimmed
+        if rect is not None:
+            rect.connect(self.updateRect)
         self.spicePort = True
         self.net = ""
         self.pinLayer = self._resolve_pin_layer(self.routeLayer)

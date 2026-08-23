@@ -26,6 +26,24 @@ log = logging.getLogger("cicpy.compiler")
 
 DEFAULT_CLASS = "cIcCore::LayoutCell"
 
+#- Design::Design()'s cellTranslator, verbatim: the names object files
+#- write are marketing names for a smaller set of classes. Notably
+#- Layout::LayoutDigitalCell IS cIcCore::LayoutCell -- it never grew
+#- behaviour of its own.
+CELL_TRANSLATOR = {
+    "Gds::GdsPatternTransistor": "cIcCore::PatternTransistor",
+    "Gds::GdsPatternHighResistor": "cIcCore::PatternHighResistor",
+    "Gds::GdsPatternResistor": "cIcCore::PatternResistor",
+    "Gds::GdsPatternCapacitor": "cIcCore::PatternCapacitor",
+    "Gds::GdsPatternCapacitorGnd": "cIcCore::PatternCapacitor",
+    "Layout::LayoutDigitalCell": "cIcCore::LayoutCell",
+    "LayoutCell": "cIcCore::LayoutCell",
+    "Layout::LayoutRotateCell": "cIcCore::LayoutRotateCell",
+    "Layout::LayoutSARCDAC": "cIcCells::SAR",
+    "Layout::LayoutCDACSmall": "cIcCells::CDAC",
+    "Layout::LayoutCapCellSmall": "cIcCells::CapCell",
+}
+
 
 class Compiler():
 
@@ -158,14 +176,20 @@ class Compiler():
         out.append(par)
 
     def resolveClass(self, jobj, parents):
+        """The nearest ancestor that names a class decides.
+
+        The C++ source guards this on the CHILD having a class of its
+        own, but the binary demonstrably does not behave that way:
+        NCHDL declares none, inherits DMOSE, and both the console and
+        the golden .cic build it as a PatternTransistor. Observed
+        behaviour outranks the text, so the walk is unconditional --
+        outermost parent first, the last (nearest) one with a class
+        wins, over the child's own too.
+        """
         cl = jobj.get("class", "")
-        #- a class named anywhere up the chain wins over the child's own,
-        #- matching createCell: the loop runs forward and keeps the LAST
-        #- parent that named one
-        if "class" in jobj and parents:
-            for par in parents:
-                if "class" in par:
-                    cl = par["class"]
+        for par in parents:
+            if "class" in par:
+                cl = par["class"]
         return cl or DEFAULT_CLASS
 
     def createCell(self, jobj):
@@ -185,6 +209,7 @@ class Compiler():
             parents.append(self._json[leech])
 
         cl = self.resolveClass(jobj, parents)
+        cl = CELL_TRANSLATOR.get(cl, cl)
         cls = registry.get(cl)
         if cls is None:
             log.error("did not find class '%s' for cell '%s'", cl, name)
@@ -218,7 +243,32 @@ class Compiler():
         self.hook("Paint", cell, jobj, parents, kw)
 
         self.design.add(cell)
+        self.registerSubckt(cell)
         return cell
+
+    def registerSubckt(self, cell):
+        """Put the cell's subckt where instances can FIND it.
+
+        The C++ ends createCell with `ckt->addSubckt()` -- without it a
+        pattern device's constructed subckt exists only on the cell,
+        Subckt.getSubckt(name) answers None, and setSubcktInstance
+        builds no instance ports: every standard cell placed its
+        transistors and lost their pins.
+        """
+        import cicspi
+        ckt = getattr(cell, "subckt", None)
+        if ckt is None:
+            return
+        try:
+            ckt.name = cell.name
+        except Exception:
+            pass
+        if self.spice is not None and cell.name not in self.spice:
+            self.spice[cell.name] = ckt
+        if cicspi.Subckt.circuits is None:
+            cicspi.Subckt.circuits = self.spice if self.spice is not None else {}
+        if cell.name not in cicspi.Subckt.circuits:
+            cicspi.Subckt.circuits[cell.name] = ckt
 
     def hook(self, stage, cell, jobj, parents, kw):
         """before<Stage> -> <stage>() -> after<Stage>."""

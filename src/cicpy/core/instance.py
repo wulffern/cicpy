@@ -320,6 +320,24 @@ class Instance(Cell):
             rects.append(rr)
         return rects
 
+    def getRect(self, layer):
+        """The referenced cell's first rect on `layer`, in OUR frame.
+
+        Cell.getRect searches the instance's own children, which for a
+        cut instance are none -- the metal lives in the cut CELL. The
+        C++ delegates and transforms (Instance::getRect); an untransformed
+        answer put a port at the cell's load origin instead of the via.
+        """
+        cell = self.layoutcell or self._cell_obj
+        if cell is None:
+            return super().getRect(layer)
+        r = cell.getRect(layer)
+        if r is None:
+            return None
+        r = r.getCopy()
+        self._transformRect(r)
+        return r
+
     def _findRectanglesByRegex(self, rects, regex, layer):
         """Resolve a path like `S` against the CELL, not the instance.
 

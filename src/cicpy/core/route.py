@@ -62,10 +62,6 @@ class Route(Cell):
         #- the name ciccreator writes, and the one every .cic already
         #- on disk uses; cicpy's reader accepts both
         o["class"] = "cIcCore::Route"
-        #- every C++ Rect is born on PR and a Route never changes that,
-        #- so the files all say PR; the net lives in the NAME
-        if not o.get("layer"):
-            o["layer"] = "PR"
         return o
 
     def __init__(self, net, layer, start, stop, options, routeType):

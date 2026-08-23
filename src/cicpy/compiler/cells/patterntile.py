@@ -112,14 +112,16 @@ class PatternTile(Cell):
         self.xmax_ = 0
         self.ymax_ = 0
         self.arraylength = 0
-        self.minPolyLength = 0
+        self._minPolyLength = 0
         self.horizontalGrid = 0
         self.verticalGrid = 0
         self.horizontalGridMultiplier = 1.0
         self.verticalGridMultiplier = 1.0
         self.mirrorPatternString = 0
         self.polyWidthAdjust = 1
-        self.metalUnderMetalRes = False
+        #- true by default, as the C++ has it: a metal resistor rides
+        #- on its own metal unless the technology says otherwise
+        self.metalUnderMetalRes = True
         self.xoffset = 0
         self.yoffset = 0
         self.widthoffset = 0
@@ -149,6 +151,20 @@ class PatternTile(Cell):
     def rules(self):
         from ...core.rules import Rules
         return Rules.getInstance()
+
+    @property
+    def minPolyLength(self):
+        return self._minPolyLength
+
+    @minPolyLength.setter
+    def minPolyLength(self, val):
+        """A LENGTH property: the object file writes it in rule units
+        and the C++ setter scales by the technology's gamma
+        (setMinPolyLength: val*rules->gamma()). 36 in the file is 1800
+        in the database, and an unscaled value drew 3.6nm gates."""
+        rules = self.rules()
+        gamma = getattr(rules, "gamma", 1) if rules is not None else 1
+        self._minPolyLength = val * gamma
 
     def rule(self, layer, key, default=0):
         """Rules.get RAISES on a missing rule, so ask forgivingly."""
@@ -231,6 +247,8 @@ class PatternTile(Cell):
         if self.minPolyLength == 0:
             self.minPolyLength = self.rule("PO", "mingatelength")
 
+        data = self.initFillCoordinates()
+
         layer = ar[0]
         rows = list(ar[1:])
 
@@ -264,11 +282,14 @@ class PatternTile(Cell):
                     continue
                 if c != "-":
                     self.rectangle_strings.setdefault(layer, {}).setdefault(x, {})[y] = c
+                    self.onFillCoordinate(c, layer, x, y, data)
             strs.append(row)
 
         self.layers[layer] = strs
         if layer not in self.layerNames:
             self.layerNames.append(layer)
+
+        self.endFillCoordinate(data)
 
     def applyCopyRows(self, rows):
         for c in self.copyRow_:
@@ -300,55 +321,138 @@ class PatternTile(Cell):
     #- -----------------------------------------------------------------
 
     def addEnclosure(self, ar):
-        if isinstance(ar, list) and len(ar) >= 2:
-            self.enclosures_.append({"layer": ar[0], "startx": 0,
-                                     "encloseWithLayers": list(ar[1:])})
+        """[layer, startx, [enclosing layers...]]"""
+        if not isinstance(ar, list) or len(ar) < 3:
+            return
+        self.enclosures_.append({
+            "layer": str(ar[0]), "startx": int(ar[1]),
+            "encloseWithLayers": [str(v) for v in (ar[2] or [])]})
 
     def addEnclosuresByRectangle(self, ar):
-        self.addEnclosureByRectangle(ar)
+        for v in (ar or []):
+            self.addEnclosureByRectangle(v)
 
     def addEnclosureByRectangle(self, ar):
-        if not isinstance(ar, list) or len(ar) < 5:
+        """[layer, [x1,y1,w,h] | "self", [enclosing layers...]]
+
+        Coordinates are in PATTERN cells, not database units. "self"
+        means the tile's own extent; a width of "width" or height of
+        "height" likewise. A copyColumn that widened the pattern
+        widens any rectangle spanning the copy point with it.
+        """
+        if not isinstance(ar, list) or len(ar) < 3:
             return
-        self.enclosureRectangles_.append({
-            "layer": ar[0], "x1": float(ar[1]), "y1": float(ar[2]),
-            "width": float(ar[3]), "height": float(ar[4]),
-            "encloseWithLayers": [str(v) for v in ar[5:]]})
+        layer = str(ar[0])
+        rect = ar[1]
+        e = {"layer": layer, "encloseWithLayers": [str(v) for v in (ar[2] or [])]}
+        if rect == "self" or (isinstance(rect, list) and rect and rect[0] == "self"):
+            e.update(x1=0, y1=0, width=self.xmax_ + 1,
+                     height=self.verticalMultiplyVectorSum(self.ymax_ + 1))
+        else:
+            e["x1"] = float(rect[0])
+            e["y1"] = float(rect[1])
+            w = rect[2]
+            if w == "width":
+                e["width"] = self.xmax_ + 1
+            else:
+                e["width"] = float(w)
+                for c in self.copyColumn_:
+                    if e["x1"] < c["offset"] and (e["x1"] + e["width"]) > c["offset"]:
+                        e["width"] += c["length"] * c["count"]
+                    elif self.mirrorPatternString:
+                        xmax = self.xmax_ + 1 - c["length"] * c["count"]
+                        x2mir = xmax - e["x1"]
+                        x1mir = xmax - e["x1"] - e["width"]
+                        if x1mir < c["offset"] and x2mir > c["offset"]:
+                            e["width"] += c["length"] * c["count"]
+            h = rect[3]
+            e["height"] = self.verticalMultiplyVectorSum(self.ymax_ + 1)                 if h == "height" else float(h)
+        self.enclosureRectangles_.append(e)
+
+    def enclosureRule(self, lay, patternLayer):
+        """rule(lay, <pattern layer>enclosure), else rule(lay, enclosure)."""
+        rules = self.rules()
+        if rules is not None and rules.hasRule(lay, patternLayer + "enclosure"):
+            return self.rule(lay, patternLayer + "enclosure")
+        return self.rule(lay, "enclosure")
 
     def paintEnclosures(self):
-        """Draw a layer over the extent of the layers it must enclose."""
-        for e in self.enclosureRectangles_:
-            r = Rect(e["layer"], self.translateX(int(e["x1"])),
-                     self.translateY(int(e["y1"])),
-                     int(e["width"] * self.xspace_), int(e["height"] * self.yspace_))
-            self.add(r)
-            self.onPaintEnclosure(r)
-
+        """Wrap the pattern's shapes in the layers that must contain them."""
         for e in self.enclosures_:
-            rects = []
+            rects = self.findPatternRects(e["layer"])
             for lay in e["encloseWithLayers"]:
-                rects += self.findPatternRects(lay)
-            if not rects:
-                continue
-            x1 = min(r.x1 for r in rects)
-            y1 = min(r.y1 for r in rects)
-            x2 = max(r.x2 for r in rects)
-            y2 = max(r.y2 for r in rects)
-            r = Rect(e["layer"], x1, y1, x2 - x1, y2 - y1)
-            self.add(r)
-            self.onPaintEnclosure(r)
+                if len(rects) <= e["startx"]:
+                    continue
+                enc = self.enclosureRule(lay, e["layer"])
+                base = rects[e["startx"]]
+                r = Rect(lay, base.x1, base.y1, base.width(), base.height())
+                #- grow on every side; cicpy's one-argument adjust
+                #- TRANSLATES, so say all four explicitly
+                r.adjust(-enc, -enc, enc, enc)
+                self.add(r)
+                self.onPaintEnclosure(r)
+
+        for e in self.enclosureRectangles_:
+            for lay in e["encloseWithLayers"]:
+                #- the C++ passes these doubles into int parameters:
+                #- pattern coordinates truncate
+                r = Rect(lay, self.translateX(int(e["x1"])), self.translateY(int(e["y1"])),
+                         e["width"] * self.xspace_, e["height"] * self.yspace_)
+                self.add(r)
+                enc = self.enclosureRule(lay, e["layer"])
+                opp = enc
+                rules = self.rules()
+                if rules is not None and rules.hasRule(lay, e["layer"] + "encOpposite"):
+                    opp = self.rule(lay, e["layer"] + "encOpposite")
+                r.adjust(-opp, -enc, opp, enc)
+                self.onPaintEnclosure(r)
 
     def findPatternRects(self, layer):
-        out = []
-        for _y, row in self.rectangles.get(layer, {}).items():
-            for _x, r in row.items():
-                if r is not None:
-                    out.append(r)
-        return out
+        """The pattern's painted cells on `layer`, COALESCED.
+
+        Runs merge left to right, stacks merge bottom to top, in y-
+        then-x order -- so `rects[1]` in an addEnclosure means the same
+        island it means to ciccreator, and the whole grid comes back as
+        a handful of maximal rectangles rather than one per character.
+        """
+        rects = self.rectangles.get(layer)
+        if rects is None:
+            log.info("could not find layer '%s'", layer)
+            return []
+        columnrects = []
+        for y in range(self.ymax_ + 1):
+            row = rects.get(y)
+            if row is None:
+                continue
+            rowrects = []
+            for x in range(self.xmax_ + 1):
+                r = row.get(x)
+                if r is None:
+                    continue
+                for rx in rowrects:
+                    if rx.x2 == r.x1 and rx.y1 == r.y1 and rx.y2 == r.y2:
+                        rx.setRight(r.x2)
+                        break
+                else:
+                    rowrects.append(Rect(r.layer, r.x1, r.y1,
+                                         r.width(), r.height()))
+            for r in rowrects:
+                for ry in columnrects:
+                    if ry.y2 == r.y1 and ry.x1 == r.x1:
+                        ry.setTop(r.y2)
+                        break
+                else:
+                    columnrects.append(Rect(r.layer, r.x1, r.y1,
+                                            r.width(), r.height()))
+        return columnrects
 
     #- -----------------------------------------------------------------
     #- Subclass hooks -- no-ops on a plain tile
     #- -----------------------------------------------------------------
+
+    def initFillCoordinates(self):
+        """Per-fill scratch state, threaded through onFillCoordinate."""
+        return {}
 
     def onFillCoordinate(self, c, layer, x, y, data):
         pass
@@ -394,8 +498,8 @@ class PatternTile(Cell):
             self.xspace_ = self.horizontalGrid
         if self.verticalGrid:
             self.yspace_ = self.verticalGrid
-        if self.minPolyLength == 0:
-            self.minPolyLength = self.rule("PO", "mingatelength")
+        if self._minPolyLength == 0:
+            self._minPolyLength = self.rule("PO", "mingatelength")
 
         self.readPatterns()
 

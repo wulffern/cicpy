@@ -487,7 +487,18 @@ class LayoutCell(Cell):
 
     def toJson(self):
         o = super().toJson()
-        o["children"] = [child.toJson() for child in self.iterJsonChildren()]
+        #- same dedup as Cell.toJson: a plain rect painted N times over
+        #- itself is written once, matching the C++ writer
+        oc = []
+        printed = set()
+        for child in self.iterJsonChildren():
+            if child.__class__.__name__ == "Rect":
+                rid = (child.layer, child.x1, child.y1, child.x2, child.y2)
+                if rid in printed:
+                    continue
+                printed.add(rid)
+            oc.append(child.toJson())
+        o["children"] = oc
         o["useHalfHeight"] = self.useHalfHeight
         o["alternateGroup"] = self.alternateGroup
         o["noPowerRoute"] = self.noPowerRoute
@@ -1504,6 +1515,14 @@ class LayoutCell(Cell):
         rects = self.findAllRectangles(path, layer)
         for r in rects:
             width = r.width()
+            if cuts and int(cuts) > 0:
+                #- with a cut count, the strap is as wide as THAT CUT,
+                #- not as wide as the pin it rises from (the C++ takes
+                #- inst->width() of the M1-to-layer cut)
+                from .cut import Cut
+                inst = Cut.getInstance("M1", layer, int(cuts), 1)
+                if inst is not None:
+                    width = inst.width()
             rn = Rect(layer, r.x1, self.y1, width, self.height())
             self.add(rn)
 
@@ -2551,8 +2570,13 @@ class LayoutCell(Cell):
             #- A power sheet spans the cell top to bottom, so it belongs
             #- on the highest layer the technology runs VERTICALLY. That
             #- is M4 in sky130 here, which is what this used to say
-            #- outright.
-            sheet = self._topLayerRunning("v")
+            #- outright -- and what ciccreator still says: its
+            #- addPowerRoute hardcodes M4, and compiled cells match it.
+            from .route import Route
+            if Route.compat == "ciccreator":
+                sheet = "M4"
+            else:
+                sheet = self._topLayerRunning("v")
             if sheet is None:
                 self.log.warning(
                     f"addPowerRoute({net}): the technology declares no "
@@ -2591,6 +2615,23 @@ class LayoutCell(Cell):
                 rects.append(r)
         return rects
 
+
+    def trimRouteRing(self, path, location=None, whichEndToTrim=None):
+        """Trim a ring's named side back to the extent of its routes.
+
+        (path, location, end) or one JSON array of the three -- the
+        object-file form and the C++ overloads both land here.
+        """
+        if isinstance(path, list):
+            if len(path) < 3:
+                self.log.error("trimRouteRing needs (path, location, end)")
+                return
+            path, location, whichEndToTrim = path[0], path[1], path[2]
+        for r in self.children:
+            if r is None or not r.isType("RouteRing"):
+                continue
+            if re.search(path, r.name):
+                r.trimRouteRing(location, whichEndToTrim)
 
     def addAllPorts(self):
         self.log.info(f"addAllPorts()")

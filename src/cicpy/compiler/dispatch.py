@@ -37,6 +37,10 @@ RESERVED = re.compile(
 #- method for the dispatcher to find.
 IGNORED = ("symbol", "rows", "composite", "comment", "description", "spice")
 
+#- Design::Design()'s nameTranslator: a JSON key that calls a method
+#- by an older name. `type` on a transistor means mosType.
+NAME_TRANSLATOR = {"type": "mosType"}
+
 
 def arity(fn):
     """(required positional count, takes *args) for a bound method.
@@ -94,6 +98,7 @@ def runIfObjectCan(cell, jobj, theme="", fromParent=False, ignoreSetYoffsetHalf=
         if fromParent and key == "abstract":
             continue
 
+        key = NAME_TRANSLATOR.get(key, key)
         member = getattr(cell, key, None)
 
         if callable(member):

@@ -251,23 +251,26 @@ class RouteRing(Cell):
     def trimRouteRing(self, location: str, whichEndToTrim: str):
         """Trim the route ring at the specified location and end"""
         cuts = self.getChildren("cIcCore::Route")
-        bounds = Cell.calcBoundingRect(cuts)
+        #- the STATIC C++ overload -- box of a list, not of this cell
+        bounds = Cell.calcBoundingRectFromList(cuts)
 
         r = self.getPointer(location)
         if r is None:
             return
             
+        #- coordinates are attributes in cicpy, methods in the C++ this
+        #- was transcribed from -- the calls had never run
         if "l" in whichEndToTrim:
-            r.setLeft(bounds.x1())
+            r.setLeft(bounds.x1)
 
         if "t" in whichEndToTrim:
-            r.setTop(bounds.y2())
+            r.setTop(bounds.y2)
 
         if "r" in whichEndToTrim:
-            r.setRight(bounds.x2())
+            r.setRight(bounds.x2)
 
         if "b" in whichEndToTrim:
-            r.setBottom(bounds.y1())
+            r.setBottom(bounds.y1)
 
 
 

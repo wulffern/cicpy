@@ -244,6 +244,18 @@ class Cell(Rect):
             p = self.ports[name]
         return p
 
+    def getChildren(self, typename):
+        """Children of one class, by ciccreator's name for it.
+
+        The C++ matches metaObject()->className(), so callers pass
+        namespaced names like "cIcCore::Route"; isType knows classes by
+        their Python names, so strip the namespace before asking.
+        RouteRing.trimRouteRing has called this since it was ported and
+        nothing had ever executed that line until the CDAC did.
+        """
+        name = typename.split("::")[-1]
+        return [c for c in self.children if c is not None and c.isType(name)]
+
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
         for child in self.children:
@@ -559,10 +571,20 @@ class Cell(Rect):
         o = super().toJson()
         o["class"] = self.__class__.__name__
 
-        if(o["class"] == "Cell"):
-            o["class"] = "cIcCore::Cell"
-        elif(o["class"] == "Layout"):
-            o["class"] = "cIcCore::LayoutCell"
+        #- the names ciccreator's writer uses; its reader and cicpy's
+        #- both accept them, and .cic files on disk say these
+        _CPP_NAMES = {
+            "Cell": "cIcCore::Cell",
+            "Layout": "cIcCore::LayoutCell",
+            "Route": "cIcCore::Route",
+            "RouteRing": "cIcCore::RouteRing",
+            "Guard": "cIcCore::Guard",
+        }
+        o["class"] = _CPP_NAMES.get(o["class"], o["class"])
+        #- every C++ Rect is born on layer PR and a Cell never changes
+        #- it, so cells in a .cic all say PR; say the same
+        if not o.get("layer"):
+            o["layer"] = "PR"
 
         o["name"] = self.name
         o["has_pr"] = self.has_pr
@@ -574,7 +596,18 @@ class Cell(Rect):
             o["ckt"] = ockt
 
         oc = list()
+        #- plain rectangles are deduplicated by value, exactly as the
+        #- C++ writer does (Cell::toJson keeps a toString() set): a
+        #- generator that paints the same bar once per finger writes it
+        #- once. Only for class Rect precisely -- a Port or a Text with
+        #- the same geometry is still its own thing.
+        printed = set()
         for child in self.children:
+            if child.__class__.__name__ == "Rect":
+                rid = (child.layer, child.x1, child.y1, child.x2, child.y2)
+                if rid in printed:
+                    continue
+                printed.add(rid)
             oc.append(child.toJson())
         o["children"] = oc
         return o

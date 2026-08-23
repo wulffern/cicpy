@@ -49,6 +49,7 @@ class Port(Rect):
 
         self.routeLayer = routeLayer or (rect.layer if rect else None)
         self.rect = rect
+        self.alternates = [rect] if rect is not None and getattr(rect, "layer", "") else []
         self.spicePort = True
         self.net = ""
         self.pinLayer = self._resolve_pin_layer(self.routeLayer)
@@ -80,7 +81,14 @@ class Port(Rect):
         """
         if rect is None:
             return
+        #- a port REMEMBERS every rect it is given, one per layer: a
+        #- transistor's gate is set once on PO and again on M1, and a
+        #- route on either layer asks get(layer) for the right one.
+        #- The C++ keeps the same list (alternates_rectangles_).
         if getattr(rect, "layer", ""):
+            self.alternates = [r for r in getattr(self, "alternates", [])
+                               if r.layer != rect.layer]
+            self.alternates.append(rect)
             self.routeLayer = rect.layer
             self.pinLayer = self._resolve_pin_layer(rect.layer)
         #- Subscribe ONCE. The C++ returns early when handed the rect it
@@ -92,6 +100,20 @@ class Port(Rect):
             self.rect = rect
             rect.connect(self.updateRect)
         self.setRect(rect)
+
+    def mirrorY(self, ax):
+        """A port does not mirror ITSELF -- it follows its rect.
+
+        The rect is a child of the same cell and mirrors in the same
+        sweep; letting the port mirror too applied the fold twice and
+        put every mirrored cell's pins back on the unmirrored side.
+        The C++ Port::mirrorY does exactly this: updateRect(), nothing
+        else.
+        """
+        self.updateRect()
+
+    def mirrorX(self, ay):
+        self.updateRect()
 
     def updateRect(self):
         """The rect moved; take its geometry, but keep our own layer."""
@@ -123,6 +145,14 @@ class Port(Rect):
         return o
 
     def get(self,layer=None):
+        #- a copy of this port's rect: on `layer` if the port was
+        #- ever set there, else on its route layer (C++ Port::get)
+        if layer:
+            for a in getattr(self, "alternates", []):
+                if a.layer == layer:
+                    rp = a.getCopy()
+                    rp.net = self.name
+                    return rp
         r = None
         if(self.routeLayer):
             r = self.getCopy(layer)

@@ -11,5 +11,9 @@ What is not thin is PatternTile, which has no cicpy equivalent.
 """
 from .layoutcells import LayoutCell, LayoutDigitalCell, LayoutRotateCell
 from .patterntile import PatternTile
+from .patterndevices import PatternTransistor, PatternResistor, PatternCapacitor
+from .sarcells import CapCell, CDAC, SAR
 
-__all__ = ["LayoutCell", "LayoutDigitalCell", "LayoutRotateCell", "PatternTile"]
+__all__ = ["LayoutCell", "LayoutDigitalCell", "LayoutRotateCell", "PatternTile",
+           "PatternTransistor", "PatternResistor", "PatternCapacitor",
+           "CapCell", "CDAC", "SAR"]

@@ -489,13 +489,13 @@ class Cell(Rect):
     
 
     #- Abstract methods
-    def paint():
+    def paint(self):
         pass
 
-    def route():
+    def route(self):
         pass
 
-    def place():
+    def place(self):
         pass
 
 

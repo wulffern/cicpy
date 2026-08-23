@@ -295,9 +295,38 @@ class Cell(Rect):
                 self.routes.append(child)
             child.parent = self
             self.children.append(child)
-            child.connect(self.updateBoundingRect)
+            child.connect(self._childGeometryChanged)
 
+        #- one add is one union step. Recomputing the whole union per
+        #- add made building a cell O(children^2) -- a third of a SAR
+        #- compile spent re-summing boxes that could only grow. A full
+        #- recompute still happens whenever an EXISTING child moves
+        #- (the listener below) or an explicit updateBoundingRect asks.
+        #- only when the box IS the union: a subclass that computes its
+        #- box some other way (PatternTile's grid formula, CapCell's
+        #- trimmed union) must keep being asked, not expanded past
+        if(getattr(self, "_bbox_incremental", False)
+           and type(self).calcBoundingRect is Cell.calcBoundingRect):
+            self._expandBoundingRect(child)
+        else:
+            self.updateBoundingRect()
+
+    def _childGeometryChanged(self):
+        #- an existing child moved or resized: the union may have
+        #- SHRUNK, which expansion cannot express
         self.updateBoundingRect()
+
+    def _expandBoundingRect(self, child):
+        if(self._boundingSkips(child)):
+            return
+        if(child.x1 < self.x1):
+            self.x1 = child.x1
+        if(child.y1 < self.y1):
+            self.y1 = child.y1
+        if(child.x2 > self.x2):
+            self.x2 = child.x2
+        if(child.y2 > self.y2):
+            self.y2 = child.y2
 
     
     # Move this cell, and all children by dx and dy
@@ -384,8 +413,35 @@ class Cell(Rect):
         self.y1 = r.y1
         self.x2 = r.x2
         self.y2 = r.y2
+        #- the box now reflects every child, so add() may EXPAND it
+        #- instead of recomputing the union from scratch
+        self._bbox_incremental = True
 
     # Calculate the extent of this cell. Should be overriden by children
+    def _boundingSkips(self, child):
+        """Does this child stay OUT of the cell's own box?
+
+        - ignoreBoundaryRouting keeps routing out, so a ring drawn
+          around the cell does not become part of the cell it rings
+          (cIcCore writes this as (!isInstance() || isCut())).
+        - compiled cells: a plain Route or a Port never widens the box
+          (measured against the binary and every golden), but a ring
+          does -- and a ring's own box spans its connections. The
+          spi2mag flow keeps cicpy's union behaviour.
+        - a child still at (0,0)-(0,0) is a placeholder, not geometry
+          at the origin (see calcBoundingRectFromList).
+        """
+        if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
+            return True
+        if((child.isRoute() or child.isPort()) and not child.isType("RouteRing") and not self.isType("RouteRing")):
+            from .route import Route
+            if(Route.compat == "ciccreator"):
+                return True
+        if(child.x1 == 0 and child.y1 == 0
+           and child.x2 == 0 and child.y2 == 0):
+            return True
+        return False
+
     def calcBoundingRect(self):
         x1 = INT_MAX
         y1 = INT_MAX
@@ -397,38 +453,7 @@ class Cell(Rect):
 
 
         for child in self.children:
-            #- ignoreBoundaryRouting keeps routing out of the bounding
-            #- box, so a ring drawn around the cell does not become part
-            #- of the cell it rings.
-            #-
-            #- cIcCore::Cell::updateBoundingRect writes this as
-            #-   (!cr->isInstance() || cr->isCut())
-            #- because there every child is an instance or a route. Here
-            #- a LayoutCell's children are CellGroups, so keeping only
-            #- instances keeps nothing and the box comes out INT_MAX.
-            #- Say what is meant instead: routing does not count.
-            #- The port had not(isInstance()) or not(isCut()), true for
-            #- every plain instance, which emptied the box either way
-            if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
-                continue
-            #- compiled cells: a plain Route or a Port never widens the
-            #- box (measured against the binary and every golden), but a
-            #- ring does -- and a ring's own box spans its connections
-            if((child.isRoute() or child.isPort()) and not child.isType("RouteRing") and not self.isType("RouteRing")):
-                from .route import Route
-                if(Route.compat == "ciccreator"):
-                    continue
-            #- compiled cells NEVER count a route toward their own box:
-            #- measured against the binary (a route past the last
-            #- instance leaves TOP's box at the instance edge, whatever
-            #- is added afterwards), and every golden box agrees. The
-            #- spi2mag flow keeps cicpy's behaviour, where the box is
-            #- the union and rings opt out per cell.
-
-            #- see calcBoundingRectFromList: a child still at
-            #- (0,0)-(0,0) is a placeholder, not geometry at the origin
-            if(child.x1 == 0 and child.y1 == 0
-               and child.x2 == 0 and child.y2 == 0):
+            if(self._boundingSkips(child)):
                 continue
             cx1 = child.x1
             cx2 = child.x2

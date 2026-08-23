@@ -1293,7 +1293,16 @@ class LayoutCell(Cell):
         prevcell = None
         previnst = None
 
-        for inst in self.ckt.orderInstancesByGroup():
+        #- ciccreator walks the netlist AS WRITTEN -- a group starts
+        #- when the instance name's group changes, and the schematic's
+        #- order IS the floorplan. cicpy's own flow sorts by group for
+        #- stability across netlisters; the goldens pin the raw order.
+        from .route import Route
+        if Route.compat == "ciccreator":
+            _insts = list(self.ckt.instances)
+        else:
+            _insts = self.ckt.orderInstancesByGroup()
+        for inst in _insts:
 
             name = inst.name
             #- fill devices belong to the LAYOUT generator

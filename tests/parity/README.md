@@ -27,24 +27,21 @@ then a single parity percentage.
 
 ## Where the port stands
 
-**routes.json: 45 of 46 cells match ciccreator exactly (97.8%), 766
-shapes on each side.**
+**routes.json: 45/46 cells (97.8%).** The one holdout is TEST_R, off by
+one database unit -- ciccreator's integer rotate(90) drops one, a bug
+in the reference that cicpy does not replicate.
 
-The one remaining cell is TEST_R, off by exactly one database unit:
-ciccreator's integer Rect::rotate(90) loses a unit (a 6300-wide cell
-comes back 6299 wide, ports at 151 instead of 150). That is a bug in
-the reference, not a gap in the port, and cicpy does not replicate it.
+**SAR_ESSCIRC16_28N: 50/52 cells (96.2%), 4832 of 4877 shapes (99.1%).**
+Every leaf, every standard cell, both CDAC columns and the unrouted top
+match exactly. The one differing cell is the routed top SAR9B_EV,
+where two of its own nets disagree in detail: the EN spine resolves
+its nested XA0:XA1:XA5:EN pins 150 units to the right of the
+reference, and the AVSS edge straps end one cut height short of the
+reference's ring bar. (SAR9B_EV_NOROUTE, same placement without the
+top routes, matches exactly.)
 
-Behaviour the two flows legitimately disagree on is selected by
-`Route.compat` -- the compiler sets "ciccreator" for the duration of a
-compile, spi2mag keeps cicpy's own conventions:
-
-  - the landing rect keeps the pin when a cut straddles its centre
-    (cicpy follows the cut, measured against VR1's trunk)
-  - no cut re-alignment to the wire, no fitting chain
-  - routeVertical is one wire, bound edge to bound edge
-  - instances abut (no CELL-space gap between groups)
-
-The SAR example is the next target: LayoutDigitalCell's row
-conventions, PatternResistor, the Gds pattern devices, LayoutSARCDAC
-and the capacitor cells are not yet ported.
+Flow-level behaviour the two tools legitimately disagree on is
+selected by `Route.compat` -- the compiler sets "ciccreator" for the
+duration of a compile; spi2mag keeps cicpy's own conventions
+(landing rects, cut fitting, group spacing and ordering, power sheet
+layer, box semantics).

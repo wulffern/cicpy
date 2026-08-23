@@ -490,7 +490,17 @@ class Instance(Cell):
             # No cell set, return self as bounding rect
             return self
 
-        r = cell_to_use.calcBoundingRect()
+        from .route import Route
+        if Route.compat == "ciccreator":
+            #- the STORED box, not a live recompute: the cell's box was
+            #- settled when the cell was built (a CDAC's includes the
+            #- CTOP port its route() published; a TAPCELL's excludes
+            #- the routes that stick out), and the instance mirrors
+            #- that decision instead of re-deciding it
+            r = Rect("", cell_to_use.x1, cell_to_use.y1,
+                     cell_to_use.width(), cell_to_use.height())
+        else:
+            r = cell_to_use.calcBoundingRect()
         if self.angle == "R90":
             r.rotate(90)
         elif self.angle == "MY":

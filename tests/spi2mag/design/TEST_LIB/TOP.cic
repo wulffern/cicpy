@@ -6,7 +6,7 @@
             "y1": 0,
             "x2": 19600,
             "y2": 6700,
-            "layer": "",
+            "layer": "PR",
             "net": "",
             "name": "TOP",
             "has_pr": false,

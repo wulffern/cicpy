@@ -411,16 +411,20 @@ class Cell(Rect):
             #- every plain instance, which emptied the box either way
             if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
                 continue
+            #- compiled cells: a plain Route or a Port never widens the
+            #- box (measured against the binary and every golden), but a
+            #- ring does -- and a ring's own box spans its connections
+            if((child.isRoute() or child.isPort()) and not child.isType("RouteRing") and not self.isType("RouteRing")):
+                from .route import Route
+                if(Route.compat == "ciccreator"):
+                    continue
             #- compiled cells NEVER count a route toward their own box:
             #- measured against the binary (a route past the last
             #- instance leaves TOP's box at the instance edge, whatever
             #- is added afterwards), and every golden box agrees. The
             #- spi2mag flow keeps cicpy's behaviour, where the box is
             #- the union and rings opt out per cell.
-            if(child.isRoute() and not self.isType("RouteRing")):
-                from .route import Route
-                if(Route.compat == "ciccreator"):
-                    continue
+
             #- see calcBoundingRectFromList: a child still at
             #- (0,0)-(0,0) is a placeholder, not geometry at the origin
             if(child.x1 == 0 and child.y1 == 0

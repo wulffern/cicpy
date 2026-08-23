@@ -51,7 +51,20 @@ class CapCell(LayoutCell):
         self._maxcap = int(v)
 
     def calcBoundingRect(self):
-        r = super().calcBoundingRect()
+        """The FULL union, ports included, then the M2 half-width trim.
+
+        The compat skip keeps ports out of ordinary cells' boxes, but
+        the golden CapCell box starts at the tap-ladder pads on x=0 --
+        this cell's box has always covered everything it draws.
+        """
+        xs = [c for c in self.children if c is not None]
+        if not xs:
+            return super().calcBoundingRect()
+        r = Rect()
+        r.x1 = min(c.x1 for c in xs)
+        r.y1 = min(c.y1 for c in xs)
+        r.x2 = max(c.x2 for c in xs)
+        r.y2 = max(c.y2 for c in xs)
         mw = Rules.getInstance().get("M2", "width")
         r.adjust(0, mw // 2, 0, -mw // 2)
         return r
@@ -203,6 +216,15 @@ class CapCell(LayoutCell):
 class CDAC(LayoutCell):
     """A column of CapCells, one per bit, ringed by the CP<> nets."""
 
+    def _fullUnionBox(self):
+        xs = [c for c in self.children if c is not None]
+        if not xs:
+            return
+        self.x1 = min(c.x1 for c in xs)
+        self.y1 = min(c.y1 for c in xs)
+        self.x2 = max(c.x2 for c in xs)
+        self.y2 = max(c.y2 for c in xs)
+
     def __init__(self, name=""):
         super().__init__(name)
         self.firstinst = None
@@ -265,7 +287,10 @@ class CDAC(LayoutCell):
 
         super().route()
         self.trimRouteRing("CP<", "left", "b")
-        self.updateBoundingRect()
+        #- the C++ ends route() with an explicit recompute taken AFTER
+        #- CTOP was published, so this box -- unlike a plain cell's --
+        #- includes that port: the golden top edge IS the port's y2
+        self._fullUnionBox()
 
 
 @cicclass("cIcCells::SAR")
@@ -274,7 +299,9 @@ class SAR(LayoutCell):
 
     def __init__(self, name=""):
         super().__init__(name)
-        self.usem5_ = False
+        #- true by default (sar.h): the SAR's vertical hop rides M5
+        #- unless the object file turns it off
+        self.usem5_ = True
         self.sarn = None
         self.sarp = None
 

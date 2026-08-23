@@ -159,8 +159,45 @@ class Compiler():
             if self.spice is None:
                 self.spice = cicspi.SpiceParser()
             self.spice.parseFile(spifile)
+            for ckt in self.spice.values():
+                self.expandMultipliers(ckt)
         except ImportError:
             log.warning("cicspi not installed, no connectivity from %s", spifile)
+
+    _M_RE = re.compile(r"\bM\s*=\s*(\d+)", re.I)
+
+    def expandMultipliers(self, ckt):
+        """XCAPB ... M=7 is SEVEN instances: XCAPB0 .. XCAPB6.
+
+        ciccreator's parser expands the multiplier as it reads
+        (subckt.cpp: 'Make paralell devices'); cicspi drops parameters
+        on the floor, so the expansion happens here, from the line the
+        instance still carries. The clones stay contiguous, which is
+        what stacks them into one column at place()."""
+        import cicspi
+        instances = getattr(ckt, "instances", None)
+        if not instances:
+            return
+        out = []
+        for inst in instances:
+            line = getattr(inst, "spiceStr", "") or ""
+            m = self._M_RE.search(line)
+            if not m or not str(getattr(inst, "name", "")).upper().startswith("X"):
+                out.append(inst)
+                continue
+            count = int(m.group(1))
+            base = inst.name
+            inst.name = base + "0"
+            out.append(inst)
+            for i in range(1, count):
+                clone = cicspi.SubcktInstance()
+                #- parse() resolves the model name through the parser
+                clone.parser = getattr(inst, "parser", None)
+                clone.parent = getattr(inst, "parent", None)
+                clone.parse(line, getattr(inst, "lineNumber", 0))
+                clone.name = "%s%d" % (base, i)
+                out.append(clone)
+        ckt.instances = out
 
     #- -----------------------------------------------------------------
     #- Building one cell
@@ -304,14 +341,49 @@ class Compiler():
             ckt = self.parseInlineSpice(self.applySpiceRegex(lines, jobj), name)
 
         if ckt is None:
+            #- inherit the NEAREST parent's netlist, REPARSED under this
+            #- cell's name -- not shared: SARDIGEX4 is SARDIGEX2's
+            #- netlist with a spiceRegex swapping every SWX2 for SWX4,
+            #- and rewriting a shared object would rewrite the parent
             for par in reversed(parents):
-                ckt = self.spice.get(par.get("name", ""))
+                pname = par.get("name", "")
+                pckt = self.spice.get(pname)
+                if pckt is None:
+                    continue
+                lines = self.subcktLines(pckt, pname)
+                lines = [ln.replace(pname, name) for ln in lines]
+                ckt = self.parseInlineSpice(lines, name)
                 if ckt is not None:
                     break
+
+        #- spiceRegex rewrites the netlist a found subckt describes
+        if ckt is not None and jobj.get("spiceRegex") and "spice" not in jobj:
+            lines = self.applySpiceRegex(self.subcktLines(ckt, name), jobj)
+            reparsed = self.parseInlineSpice(lines, name)
+            if reparsed is not None:
+                ckt = reparsed
 
         if ckt is not None:
             cell.ckt = ckt
             cell.subckt = ckt
+
+    def subcktLines(self, ckt, name):
+        """The subckt as lines, in the RAW instance order.
+
+        tospice() emits instances in index order, and the raw order is
+        the floorplan -- so rebuild from each instance's own line. An
+        M-expanded clone carries its source line; keep ONE line per
+        source so the reparse expands it again rather than 7 times 7.
+        """
+        lines = [".subckt %s %s" % (name, " ".join(ckt.nodes))]
+        seen = set()
+        for inst in ckt.instances:
+            ln = getattr(inst, "spiceStr", "") or ""
+            if ln and ln not in seen:
+                seen.add(ln)
+                lines.append(ln)
+        lines.append(".ends")
+        return lines
 
     def applySpiceRegex(self, lines, jobj):
         """`spiceRegex` rewrites the netlist before it is parsed."""
@@ -339,4 +411,7 @@ class Compiler():
             return None
         finally:
             os.unlink(path)
-        return self.spice.get(name)
+        ckt = self.spice.get(name)
+        if ckt is not None:
+            self.expandMultipliers(ckt)
+        return ckt

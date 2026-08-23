@@ -1251,6 +1251,13 @@ class LayoutCell(Cell):
 
         prevgroup = ""
 
+        #- A cell with no netlist places nothing. The C++ guards this at
+        #- the top of place() (`if(!_subckt) return;`); without it a cell
+        #- whose name is absent from the .spi -- a pure geometry cell,
+        #- say -- dies on the first read of self.ckt instead.
+        if(self.ckt is None):
+            return
+
         ymax = 0
         yorg = 0
         xorg = 0

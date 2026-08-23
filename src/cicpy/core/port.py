@@ -64,13 +64,43 @@ class Port(Rect):
             self.set(rect)
 
     def set(self, rect):
+        """Adopt `rect` as this port's shape, AND FOLLOW IT.
+
+        The rect a port is given is not final. A pattern paints one
+        cell of its grid at a time and merges each new rectangle into
+        the one on its left, so the rect handed over at the port's own
+        character keeps growing as the row continues: `wSw` publishes S
+        on a rect that is two cells wide when set() runs and three by
+        the end of the row.
+
+        The C++ connects the rect's updated() signal to the port for
+        exactly this reason. cicpy's Rect already emits to `listeners`
+        on every edge move, so subscribe -- copying once leaves the
+        port a cell short of the metal it names.
+        """
         if rect is None:
             return
-        self.rect = rect
         if getattr(rect, "layer", ""):
             self.routeLayer = rect.layer
             self.pinLayer = self._resolve_pin_layer(rect.layer)
+        #- Subscribe ONCE. The C++ returns early when handed the rect it
+        #- already holds; do not copy that here. Plenty of cicpy code
+        #- moves a rect by assigning x1/x2 straight, which emits nothing,
+        #- and those callers rely on a later set() to refresh the port --
+        #- so always re-read the geometry, and only guard the listener.
+        if rect is not self.rect:
+            self.rect = rect
+            rect.connect(self.updateRect)
         self.setRect(rect)
+
+    def updateRect(self):
+        """The rect moved; take its geometry, but keep our own layer."""
+        if self.rect is None:
+            return
+        self.x1 = self.rect.x1
+        self.y1 = self.rect.y1
+        self.x2 = self.rect.x2
+        self.y2 = self.rect.y2
 
 
     

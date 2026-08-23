@@ -39,6 +39,12 @@ class Instance(Cell):
 
     def __init__(self):
         super().__init__()
+        #- An instance sits on PR, the place-and-route boundary layer.
+        #- Set it here rather than in setCell: addInstance assigns
+        #- `cell` directly and never goes through the setter, so an
+        #- instance built in memory would otherwise be on no layer while
+        #- the same instance read back from a .cic is on PR.
+        self.layer = "PR"
         self.instanceName = ""
         self.cell = ""
         self.layoutcell = None
@@ -51,13 +57,21 @@ class Instance(Cell):
         self._cell_obj = None  # Direct reference to Cell object
     
     def setCell(self, cell):
-        """Set the cell - accepts either a Cell object or a string name"""
+        """Set the cell - accepts either a Cell object or a string name
+
+        An instance sits on PR, the place-and-route boundary layer.
+        That is what the C++ setCell does and what every .cic this
+        package reads back says, so say it here too rather than leave
+        an instance built in memory on no layer at all while the same
+        instance loaded from a file is on PR.
+        """
         if isinstance(cell, str):
             # String name - look up in design
             self.cell = cell
             self._cell_obj = self.getCell(cell)
             if self._cell_obj:
                 self.name = self._cell_obj.name
+                self.layer = "PR"
                 self.updateBoundingRect()
         else:
             # Cell object - store directly
@@ -65,6 +79,7 @@ class Instance(Cell):
             if cell:
                 self.cell = cell.name
                 self.name = cell.name
+                self.layer = "PR"
                 self.updateBoundingRect()
 
     def setSubcktInstance(self,inst:spi.SubcktInstance):

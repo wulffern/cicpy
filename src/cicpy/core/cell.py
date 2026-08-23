@@ -358,9 +358,20 @@ class Cell(Rect):
         pass
 
     def updateBoundingRect(self):
+        """Take the extent of the children, and ONLY the extent.
+
+        calcBoundingRect builds a throwaway Rect to carry four numbers
+        home, and that rect is on no layer. setRect copies the layer
+        too, so routing this through it silently cleared the layer of
+        whatever it was called on -- an Instance is on PR, and every
+        instance came out of here on no layer at all. The C++ hands
+        back a SimpleRect, which has no layer to copy.
+        """
         r = self.calcBoundingRect()
-        self.setRect(r)
-        pass
+        self.x1 = r.x1
+        self.y1 = r.y1
+        self.x2 = r.x2
+        self.y2 = r.y2
 
     # Calculate the extent of this cell. Should be overriden by children
     def calcBoundingRect(self):

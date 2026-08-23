@@ -32,11 +32,14 @@ RESERVED = re.compile(
 
 #- Keys that belonged to backends this tool no longer has. Silently
 #- ignored so an object file written for the SKILL flow still compiles.
-IGNORED = ("symbol", "rows", "composite", "comment", "description")
+#- `spice` is here for a different reason: it IS read, by the compiler's
+#- own attachSubckt, as the cell's inline netlist -- it was never a
+#- method for the dispatcher to find.
+IGNORED = ("symbol", "rows", "composite", "comment", "description", "spice")
 
 
-def wantsArgument(fn):
-    """Does this bound method take the JSON value, or nothing at all?
+def arity(fn):
+    """(required positional count, takes *args) for a bound method.
 
     mirrorCenterX/mirrorCenterY take no argument. Qt used to drop the
     extra one quietly and newer Qt refuses the call outright, which
@@ -46,20 +49,36 @@ def wantsArgument(fn):
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
-        return True
+        return 1, True
+    required, star = 0, False
     for p in sig.parameters.values():
         if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
-            return True
+            star = True
+            continue
         if p.default is p.empty:
-            return True
-    return False
+            required += 1
+    return required, star
 
 
 def call(cell, fn, value):
-    if wantsArgument(fn):
-        fn(value)
-    else:
+    """Invoke one method with the JSON value as its argument.
+
+    Every ciccreator method takes a single QJsonArray/QJsonObject and
+    unpacks it itself, so the C++ marshalling is one argument or none.
+    cicpy's own methods were written for Python and take the pieces
+    UNPACKED -- addDirectedRoute(layer, net, route, options) against
+    the object file's ["M2","A","-|","..."]. Both are the same call
+    with the parentheses in a different place, so spread a list into a
+    method that asks for more than one argument and hand it over whole
+    to a method that asks for one.
+    """
+    required, star = arity(fn)
+    if required == 0 and not star:
         fn()
+    elif required > 1 and isinstance(value, list):
+        fn(*value)
+    else:
+        fn(value)
 
 
 def runIfObjectCan(cell, jobj, theme="", fromParent=False, ignoreSetYoffsetHalf=False):

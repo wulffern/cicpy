@@ -27,18 +27,28 @@ then a single parity percentage.
 
 ## Where the port stands
 
-The compiler front end -- `cicpy compile`, in `src/cicpy/compiler/` --
-is complete: it reads object files the way ciccreator does, resolves
-`inherit`/`leech` chains, dispatches JSON keys onto cell methods by
-reflection, and runs the full
-afterNew/place/route/addAllPorts/paint lifecycle.
+`cicpy compile examples/routes.json examples/tech.json` runs end to end
+and reaches **8 of 46 cells matching ciccreator exactly (17.4%)**,
+including every PatternTile leaf.
 
-What is NOT ported is `PatternTile.paint()`
-(cic-core/src/core/patterntile.cpp:348, ~280 lines plus
-`findPatternRects` and `paintEnclosures`). PatternTile is a leaf cell
-that nearly every other cell places, so until it lands, `cicpy compile`
-builds the hierarchy and then has no geometry to put in it. It raises
-`NotPortedYet` rather than emitting an empty cell, because an empty
-cell scores as a shape count of zero here and would read as progress.
+PatternTile is ported: the character grid, the sub patterns from the
+file's `patterns` map, contacts and contact pairs, port characters,
+the merge with the neighbour on the left, and enclosures. The leaf
+cells it draws -- DDD, DDA, DDMVIA and the rest -- match the reference
+shape for shape.
 
-Run with `--keep-going` to compile past it and see how far the rest gets.
+What is left is one coherent thing: HOW A CELL PUBLISHES ITS PORTS.
+Against the reference, each remaining cell shows
+
+    want 2x Port  M1 ... 'B'      +  1x Text TXT ... 'XA1'
+    got  1x InstancePort M1 ... 'B'
+
+so three symptoms of the same gap -- ciccreator publishes a `Port` on
+the parent through `updatePort`, emits a `Text` label per instance,
+and resolves `XA1:S` style names in route commands
+(`findAllRectangles`) that currently find nothing. Fixing that is the
+next chunk, and it should close most of the remaining 38 cells at once.
+
+The SAR example needs more than this: it adds LayoutDigitalCell's row
+conventions, LayoutSARCDAC, LayoutCapCellSmall and the Gds pattern
+devices, none of which are ported.

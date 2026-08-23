@@ -16,6 +16,8 @@ overrides what it inherits rather than fighting it.
 """
 import logging
 import os
+import re
+import tempfile
 
 from . import dispatch, registry
 from .reader import readJson
@@ -50,6 +52,10 @@ class Compiler():
     def read(self, filename):
         """Compile `filename`, and everything it includes, into the design."""
         self.readCells(filename)
+        #- Every cut the routing asked for is a CELL, and it has to be in
+        #- the design before anything that places it -- Design::read puts
+        #- them at the front for exactly that reason.
+        self.design.addCuts()
         return self.design
 
     def readCells(self, filename):
@@ -221,19 +227,60 @@ class Compiler():
     def attachSubckt(self, cell, jobj, parents, name):
         """Give the cell its connectivity.
 
-        cicspi's SpiceParser IS a dict of subckts, so a lookup is a
-        lookup. A cell whose own name is not in the netlist inherits
-        the subckt of the nearest parent that has one -- that is how a
-        cell built by `inherit` gets the devices it places.
+        Three places a subckt can come from, in ciccreator's order:
+
+          1. the companion .spi, by the cell's own name
+          2. a `spice` array in the object file -- a netlist written
+             INLINE, which is how the route demos describe a cell that
+             exists only to be routed and has no .spi of its own
+          3. the nearest parent that has one, renamed to this cell, so
+             a cell built by `inherit` gets the devices it places
+
+        Without (2) such a cell has no nodes, addAllPorts finds nothing
+        to publish, and the cell comes out with no ports at all.
         """
         if self.spice is None:
             return
         ckt = self.spice.get(name)
+
+        if ckt is None and isinstance(jobj.get("spice"), list):
+            lines = [str(v) for v in jobj["spice"]]
+            ckt = self.parseInlineSpice(self.applySpiceRegex(lines, jobj), name)
+
         if ckt is None:
             for par in reversed(parents):
                 ckt = self.spice.get(par.get("name", ""))
                 if ckt is not None:
                     break
+
         if ckt is not None:
             cell.ckt = ckt
             cell.subckt = ckt
+
+    def applySpiceRegex(self, lines, jobj):
+        """`spiceRegex` rewrites the netlist before it is parsed."""
+        for rule in jobj.get("spiceRegex", []) or []:
+            if not isinstance(rule, list) or len(rule) < 2:
+                continue
+            frm, to = str(rule[0]), str(rule[1])
+            lines = [re.sub(frm, to, ln) for ln in lines]
+        return lines
+
+    def parseInlineSpice(self, lines, name):
+        """Parse netlist lines with the real parser, via a temp file.
+
+        cicspi only parses files. Reimplementing .subckt parsing here
+        to avoid a temp file would mean a second, subtly different
+        netlist parser in the same package -- worse than the file.
+        """
+        with tempfile.NamedTemporaryFile("w", suffix=".spi", delete=False) as fo:
+            fo.write("\n".join(lines) + "\n")
+            path = fo.name
+        try:
+            self.spice.parseFile(path)
+        except Exception as e:
+            log.error("%s: could not parse inline spice: %s", name, e)
+            return None
+        finally:
+            os.unlink(path)
+        return self.spice.get(name)

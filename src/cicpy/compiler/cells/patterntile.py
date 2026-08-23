@@ -244,8 +244,12 @@ class PatternTile(Cell):
             self.xspace_ = self.horizontalGrid
         if self.verticalGrid:
             self.yspace_ = self.verticalGrid
-        if self.minPolyLength == 0:
-            self.minPolyLength = self.rule("PO", "mingatelength")
+        #- _minPolyLength directly: rule() values are ALREADY in
+        #- database units, and the property setter would gamma-scale
+        #- them a second time (300 became 15000 and every PO row grew
+        #- five rows tall)
+        if self._minPolyLength == 0:
+            self._minPolyLength = self.rule("PO", "mingatelength")
 
         data = self.initFillCoordinates()
 

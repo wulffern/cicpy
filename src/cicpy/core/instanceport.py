@@ -2,9 +2,19 @@
 
 from .cell import Cell
 from .port import Port
+from .rect import Rect
 from .rules import Rules
 
 class InstancePort(Port):
+
+    #- an instance port is geometry in the PARENT's frame and folds
+    #- with the instance; only a cell's own Port follows its rect.
+    #- The C++ overrides these straight back to Rect's fold.
+    def mirrorY(self, ax):
+        Rect.mirrorY(self, ax)
+
+    def mirrorX(self, ay):
+        Rect.mirrorX(self, ay)
 
     def __init__(self,name,port:Port,parent:Cell):
         super().__init__(name)

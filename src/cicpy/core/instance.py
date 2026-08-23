@@ -295,7 +295,10 @@ class Instance(Cell):
                 continue
             if(not pi.isInstancePort()):
                 continue
-            if(re.search(node, pi.name) and ((filterChild is None) or not re.search(filterChild, getattr(pi, 'childName', '')))):
+            #- an EMPTY filter means no filter, as the C++ spells out
+            #- (`filterChild == "" || ...`); re.search("") matches every
+            #- string, so passing "" through excluded every port
+            if(re.search(node, pi.name) and ((not filterChild) or not re.search(filterChild, getattr(pi, 'childName', '')))):
                 r = pi.get()
                 if(r is not None):
                     r.parent = self

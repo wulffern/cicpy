@@ -182,7 +182,7 @@ class LayoutDigitalCell(LayoutCell):
     """
 
 
-@cicclass("Layout::LayoutRotateCell")
+@cicclass("Layout::LayoutRotateCell", "cIcCore::LayoutRotateCell")
 class LayoutRotateCell(LayoutCell):
     """A LayoutCell whose contents are rotated by `rotateAngle`.
 

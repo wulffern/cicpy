@@ -36,10 +36,10 @@ def readJson(filename):
         #- message names a place in the FILE, not an offset in a string
         #- nobody can see. Do the same or the error is useless.
         count = 0
-        for i, l in enumerate(lines):
-            count += len(l)
+        for i, line in enumerate(lines):
+            count += len(line)
             if count >= e.pos:
                 raise json.JSONDecodeError(
-                    "%s (near line %d of %s: %s)" % (e.msg, i + 1, filename, l.strip()[:60]),
+                    "%s (near line %d of %s: %s)" % (e.msg, i + 1, filename, line.strip()[:60]),
                     text, e.pos) from None
         raise

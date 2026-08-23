@@ -9,8 +9,7 @@ cicpy class under the name ciccreator knows it by.
 
 What is not thin is PatternTile, which has no cicpy equivalent.
 """
-from ..registry import register
-from .layoutcells import (LayoutCell, LayoutDigitalCell, LayoutRotateCell)
+from .layoutcells import LayoutCell, LayoutDigitalCell, LayoutRotateCell
 from .patterntile import PatternTile
 
 __all__ = ["LayoutCell", "LayoutDigitalCell", "LayoutRotateCell", "PatternTile"]

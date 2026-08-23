@@ -400,15 +400,19 @@ class Rect:
     def printToJson(self):
         print(json.dumps(self.toJson(),indent=4))
 
+    #- class -> frozenset of every name in its MRO, filled on first ask.
+    #- isType is the hottest function in a compile (350k calls over one
+    #- SAR); walking __mro__ and comparing names each time cost more
+    #- than the geometry it was guarding.
+    _typenames_cache = {}
+
     def isType(self,typename):
-        # Check current class
-        if(self.__class__.__name__ == typename):
-            return True
-        # Check all parent classes in the MRO (Method Resolution Order)
-        for base in self.__class__.__mro__[1:]:  # Skip self.__class__ at index 0
-            if base.__name__ == typename:
-                return True
-        return False
+        cls = self.__class__
+        names = Rect._typenames_cache.get(cls)
+        if names is None:
+            names = frozenset(base.__name__ for base in cls.__mro__)
+            Rect._typenames_cache[cls] = names
+        return typename in names
 
     def isInstance(self):
         return self.isType("Instance")

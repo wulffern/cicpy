@@ -41,6 +41,7 @@ import cicspi as spi
 import math
 import re
 import logging
+import sys
 import inspect
 from collections import defaultdict
 
@@ -1121,13 +1122,21 @@ class LayoutCell(Cell):
     def _captureRouteDebug(self, api_name, params):
         callsite = ""
         command = f"{api_name}(" + ", ".join(f"{k}={params[k]!r}" for k in params) + ")"
+        #- sys._getframe, not inspect.stack(): inspect builds a
+        #- FrameInfo per frame and resolves each frame's module by
+        #- scanning sys.modules -- measured at half a second of a
+        #- one-second SAR compile, all spent labelling routes that
+        #- never error. Walking raw frames records the same callsite.
         try:
-            for frame in inspect.stack()[2:]:
-                filename = frame.filename or ""
-                if filename.endswith("layoutcell.py") or filename.endswith("cellgroup.py") or filename.endswith("route.py"):
-                    continue
-                callsite = f"{filename}:{frame.lineno}"
-                break
+            f = sys._getframe(2)
+            while f is not None:
+                filename = f.f_code.co_filename or ""
+                if not (filename.endswith("layoutcell.py")
+                        or filename.endswith("cellgroup.py")
+                        or filename.endswith("route.py")):
+                    callsite = f"{filename}:{f.f_lineno}"
+                    break
+                f = f.f_back
         except Exception:
             callsite = ""
         return {

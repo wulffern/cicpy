@@ -29,7 +29,6 @@ import cicpy as cic
 import cicspi as spi
 import os
 import re
-import numpy as np
 
 cells = dict()
 lcells = dict()

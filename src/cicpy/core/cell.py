@@ -333,7 +333,16 @@ class Cell(Rect):
         #- only when the box IS the union: a subclass that computes its
         #- box some other way (PatternTile's grid formula, CapCell's
         #- trimmed union) must keep being asked, not expanded past
-        if(getattr(self, "_bbox_incremental", False)
+        #- compat runs the reference's exact semantics: a fresh union
+        #- over the children's CURRENT boxes at every add. Expansion
+        #- cannot express it -- a queued route counts as (0,0,0,0)
+        #- until it draws, and whether that zero ends up in the final
+        #- box depends on whether anything is added afterwards (a ring
+        #- freezes it in, a painted cell washes it out).
+        from .route import Route
+        if(Route.compat == "ciccreator"):
+            self.updateBoundingRect()
+        elif(getattr(self, "_bbox_incremental", False)
            and type(self).calcBoundingRect is Cell.calcBoundingRect):
             self._expandBoundingRect(child)
         else:
@@ -484,14 +493,13 @@ class Cell(Rect):
             #- `if(ignoreBoundaryRouting && (!isInstance()||isCut()))`)
             if(self.ignoreBoundaryRouting):
                 return (not child.isInstance()) or child.isCut()
-            #- a child still at (0,0)-(0,0) is a queued Route, not
-            #- geometry at the origin. The C++ counts it transiently
-            #- and the next add's full recompute washes it out once
-            #- the route has drawn; expansion cannot shrink, so the
-            #- placeholder must never seed the box.
-            if(child.x1 == 0 and child.y1 == 0
-               and child.x2 == 0 and child.y2 == 0):
-                return True
+            #- and NO placeholder rule: a child at (0,0,0,0) -- a
+            #- queued route, a Text pinned at origin -- is geometry to
+            #- the reference's union. Whether the zero survives into
+            #- the final box depends only on whether the box is
+            #- recomputed after the child draws (a ring's never is;
+            #- CAPT8B's DONE ring and SUN_PLL_BIAS's AVSS route both
+            #- keep the origin edge).
             return False
         if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
             return True
@@ -649,6 +657,14 @@ class Cell(Rect):
 
         if("physicalOnly" in o):
             self.physicalOnly = o["physicalOnly"]
+
+        #- the file records how this cell's box was computed (the C++
+        #- LayoutCell defaults it TRUE: box = non-cut instances only).
+        #- Losing it on a library round trip made every re-read cell's
+        #- box a full union -- a TAPCELLB grew 10800 and every cell
+        #- placed after it shifted right (measured in sun_pll).
+        if("boundaryIgnoreRouting" in o):
+            self.ignoreBoundaryRouting = bool(o["boundaryIgnoreRouting"])
 
         if("libcell" in o):
             self.libcell = o["libcell"]
@@ -949,13 +965,19 @@ class Cell(Rect):
                 continue
             if not (hasattr(child, "isInstance") and child.isInstance()):
                 continue
+            #- the C++ searches inst->ports(), a NAME-KEYED MAP: when a
+            #- net lands on two pins of one instance (XA0 ... EN EN),
+            #- the LAST InstancePort with the name is the one the map
+            #- holds, and the one whose rect an addPortOnRect sees
+            by_name = {}
             for pi in getattr(child, "children", []):
                 if pi is None:
                     continue
                 if not (hasattr(pi, "isInstancePort") and pi.isInstancePort()):
                     continue
-                if getattr(pi, "name", "") != name:
-                    continue
+                by_name[getattr(pi, "name", "")] = pi
+            pi = by_name.get(name)
+            if pi is not None:
                 rr = self._port_rect_on_layer(pi, layer)
                 if rr is not None:
                     rects.append(rr)

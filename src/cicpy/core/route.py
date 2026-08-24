@@ -1016,7 +1016,10 @@ class Route(Cell):
             for idx, r2 in enumerate(self.stopRects):
                 r, center = wire(r1, r2)
                 self.add(r)
-                if idx < len(self.endCutRects):
+                #- the reference relocates end cuts only in the
+                #- equal-count branch; the one-to-many fan leaves them
+                #- where addEndCuts put them (left-aligned on the pin)
+                if Route.compat != "ciccreator" and idx < len(self.endCutRects):
                     self.endCutRects[idx].moveCenter(r2.centerX(), center)
 
 

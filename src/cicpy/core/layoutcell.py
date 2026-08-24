@@ -86,7 +86,16 @@ def readJsonChildren(parent, o):
             #- only the metal it produced
             from .path import Path
             c = Path("", "")
-        elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+        elif(cl in ("Cell", "cIcCore::Cell")):
+            #- Cell::cellFromJson: a plain Cell stays a plain Cell and
+            #- writes back cIcCore::Cell
+            c = Cell()
+        elif(cl in ("Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::LayoutCell")):
+            #- LayoutCell::cellFromJson reads ALL of these back as a
+            #- LayoutCell, so a round-tripped library file says
+            #- cIcCore::LayoutCell where it once said Route -- the
+            #- reference does exactly this, and matching it means
+            #- matching the mutation too
             c = LayoutCell()
         else:
             parent.log.warning(f"Unkown class {cl}")
@@ -95,7 +104,7 @@ def readJsonChildren(parent, o):
             c.design = parent.design
             c.fromJson(child)
             # Add instances to node graph after loading from JSON
-            if(cl == "Instance"):
+            if(cl == "Instance" and hasattr(parent, "addToNodeGraph")):
                 parent.addToNodeGraph(c)
             parent.add(c)
 
@@ -419,16 +428,29 @@ class LayoutCell(Cell):
             if not self._instance_matches_route_scope(inst, includeInstances=includeInstances, excludeInstances=excludeInstances):
                 continue
 
+            from .route import Route
+            compat = Route.compat == "ciccreator"
             rr = None
             if hasattr(port, "get"):
-                rr = port.get(layer) if layer else port.get()
+                if compat:
+                    #- Graph::getRectangles: a port with no rect on the
+                    #- asked layer answers with its route-layer rect,
+                    #- and EVERY port answers -- two pins on the same
+                    #- strap are two rects, which is what routeVertical
+                    #- spans
+                    rr = port.get(layer)
+                    if rr is None:
+                        rr = port.get()
+                else:
+                    rr = port.get(layer) if layer else port.get()
 
             if rr is None:
                 continue
-            key = self._access_rect_key(rr)
-            if key in seen:
-                continue
-            seen.add(key)
+            if not compat:
+                key = self._access_rect_key(rr)
+                if key in seen:
+                    continue
+                seen.add(key)
             rects.append(rr)
         return rects
 
@@ -482,6 +504,14 @@ class LayoutCell(Cell):
                 anymetal=anymetal,
             )
         )
+        #- the reference keeps duplicates: two pins on the same metal
+        #- (a shared D/S strap) are two rects, and routeVertical NEEDS
+        #- both -- one becomes the start, one the stop, and the strap
+        #- between them is real geometry. Dedup only in cicpy's own
+        #- flow, where the router treats the list as a set.
+        from .route import Route
+        if Route.compat == "ciccreator":
+            return rects
         out = []
         seen = set()
         for rect in rects:
@@ -1324,6 +1354,7 @@ class LayoutCell(Cell):
         endGroup = False
         prevcell = None
         previnst = None
+        mirror_y = False
 
         #- ciccreator walks the netlist AS WRITTEN -- a group starts
         #- when the instance name's group changes, and the schematic's
@@ -1345,6 +1376,10 @@ class LayoutCell(Cell):
                 self.log.info(f"place: skipping schematic fill {name}")
                 continue
             group = inst.groupName
+            #- alternateGroup mirrors every OTHER group about Y (C++
+            #- place: mirror_y flips on each group change)
+            if(group != prevgroup and prevgroup != ""):
+                mirror_y = not mirror_y
             if(group != prevgroup or prevgroup == ""):
                 startGroup = True
                 if(previnst is not None):
@@ -1411,7 +1446,15 @@ class LayoutCell(Cell):
                 elif a == "MX":
                     linst.setAngle("MX")
 
-            if(linst.x2 > next_x):
+            if self.alternateGroup and mirror_y:
+                linst.setAngle("MY")
+
+            #- the reference tracks the LAST instance's right edge, not
+            #- the widest: a group ending in a narrow cell starts the
+            #- next column at that narrow edge (C++: next_x=inst->x2())
+            if Route.compat == "ciccreator":
+                next_x = linst.x2
+            elif(linst.x2 > next_x):
                 next_x = linst.x2
             next_y = linst.y2
 
@@ -2792,9 +2835,16 @@ class LayoutCell(Cell):
         #- ciccreator ever wrote publishes one. A node whose only rects
         #- were bulk pins then reports 'No rects found', exactly as the
         #- C++ does.
+        #-
+        #- COMPILE FLOW ONLY. spi2mag's decap subcells carry VSS on
+        #- nothing but the cap cells' B pins; filtering those out
+        #- dropped the VSS rail and port and floated the whole array's
+        #- bulk (LVS INCORRECT through three levels of lelo_temp).
+        from .route import Route
+        filterChild = "^B$" if Route.compat == "ciccreator" else ""
         for node in nodes:
             if(node in self.ports): continue
-            rects = self.findRectanglesByNode("^" + node + "$","^B$",None)
+            rects = self.findRectanglesByNode("^" + node + "$",filterChild,None)
             if(len(rects) > 0):
                 self.updatePort(node,rects[0])
             else:
@@ -2822,8 +2872,6 @@ class LayoutCell(Cell):
 
         if("graph" in o):
             self.graph = o["graph"]
-
-        readJsonChildren(self, o)
 
     def addMazeRoute(self, regex, layer="", layers=None, width=None,
                      rects=None, excludeInstances="", includeInstances="",

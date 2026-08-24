@@ -388,10 +388,19 @@ class Rect:
         #- runs through /2.0 and rotation trig, so a coordinate can
         #- arrive here as 6300.0 or 10000.000000000002; rounding at
         #- the boundary keeps the file what the format says it is.
-        o["x1"] = int(round(self.x1))
-        o["y1"] = int(round(self.y1))
-        o["x2"] = int(round(self.x2))
-        o["y2"] = int(round(self.y2))
+        #- "Not all programs like negative width/height, so fix it" --
+        #- Rect::toJson swaps an inverted rect at the boundary, and the
+        #- box math upstream has already run on the raw coordinates
+        x1, x2 = self.x1, self.x2
+        if x2 < x1:
+            x1, x2 = x2, x1
+        y1, y2 = self.y1, self.y2
+        if y2 < y1:
+            y1, y2 = y2, y1
+        o["x1"] = int(round(x1))
+        o["y1"] = int(round(y1))
+        o["x2"] = int(round(x2))
+        o["y2"] = int(round(y2))
         o["layer"] = self.layer
         o["net"] = self.net
         return o

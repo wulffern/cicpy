@@ -150,29 +150,29 @@ class Route(Cell):
             r = self.stopRects.pop(0)
             self.startRects.append(r)
 
-        if re.search(r"trimstartleft(,|\\s+|$)", self.options):
+        if re.search(r"trimstartleft(,|\s+|$)", self.options):
             self.startTrim = "TRIM_START_LEFT"
-        elif re.search(r"trimstartright(\\s+|,|$)", self.options):
+        elif re.search(r"trimstartright(\s+|,|$)", self.options):
             self.startTrim = "TRIM_START_RIGHT"
 
-        if re.search(r"trimendleft(,|\\s+|$)", self.options):
+        if re.search(r"trimendleft(,|\s+|$)", self.options):
             self.endTrim = "TRIM_END_LEFT"
-        elif re.search(r"trimendright(\\s+|,|$)", self.options):
+        elif re.search(r"trimendright(\s+|,|$)", self.options):
             self.endTrim = "TRIM_END_RIGHT"
 
-        if re.search(r"offsethigh(,|\\s+|$)", self.options):
+        if re.search(r"offsethigh(,|\s+|$)", self.options):
             self.startOffset = "HIGH"
-        elif re.search(r"offsetlow(\\s+|,|$)", self.options):
+        elif re.search(r"offsetlow(\s+|,|$)", self.options):
             self.startOffset = "LOW"
 
-        if re.search(r"startoffsetcuthigh(,|\\s+|$)", self.options):
+        if re.search(r"startoffsetcuthigh(,|\s+|$)", self.options):
             self.startOffsetCut = "HIGH"
-        elif re.search(r"startoffsetcutlow(,|\\s+|$)", self.options):
+        elif re.search(r"startoffsetcutlow(,|\s+|$)", self.options):
             self.startOffsetCut = "LOW"
 
-        if re.search(r"endoffsetcuthigh(,|\\s+|$)", self.options):
+        if re.search(r"endoffsetcuthigh(,|\s+|$)", self.options):
             self.endOffsetCut = "HIGH"
-        elif re.search(r"endoffsetcutlow(,|\\s+|$)", self.options):
+        elif re.search(r"endoffsetcutlow(,|\s+|$)", self.options):
             self.endOffsetCut = "LOW"
 
         if re.search(r"offsethighend", self.options):
@@ -212,9 +212,9 @@ class Route(Cell):
             or self.endCuts or self.endVCuts)
         if re.search(r"cutaligncenter", self.options):
             self.centerAlignCut = True
-        self.routeWidthRule = get_str(r"routeWidth=([^,\\s+,$]+)", "width")
-        self.startLayer = get_str(r"startLayer=([^,\\s+,$]+)", "")
-        self.stopLayer = get_str(r"stopLayer=([^,\\s+,$]+)", "")
+        self.routeWidthRule = get_str(r"routeWidth=([^,\s+,$]+)", "width")
+        self.startLayer = get_str(r"startLayer=([^,\s+,$]+)", "")
+        self.stopLayer = get_str(r"stopLayer=([^,\s+,$]+)", "")
 
         if self.startLayer:
             for r in self.startRects:
@@ -822,7 +822,7 @@ class Route(Cell):
         
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
-        vertical = re.search(r"vertical(,|\\s+|$)", self.options) is not None
+        vertical = re.search(r"vertical(,|\s+|$)", self.options) is not None
         if vertical:
             if len(self.startRects) == 1:
                 sr = self.startRects[0]
@@ -988,23 +988,33 @@ class Route(Cell):
     def routeStraight(self):
         self.log.info(f"routeStraight: net={self.net}, layer={self.routeLayer}, startRects={len(self.startRects)}, stopRects={len(self.stopRects)}")
         
+        def wire(r1, r2):
+            height = min(r1.height(), r2.height())
+            center = r1.centerY()
+            r = Rect(self.routeLayer, r1.x1, center - height/2.0,
+                     r2.x2 - r1.x1, height)
+            if Route.compat == "ciccreator" and r2.x2 < r1.x1:
+                #- the reference KEEPS the inverted rect (x2 < x1): its
+                #- box math runs min-over-x1 / max-over-x2 on the raw
+                #- coordinates, so a right-to-left wire does not pull
+                #- the route's box leftward; the writer swaps at the
+                #- end (Rect::toJson), and so does ours
+                r.x1, r.x2 = r1.x1, r2.x2
+            return r, center
+
         if len(self.startRects) == len(self.stopRects):
             count = len(self.startRects)
             for x in range(count):
                 r1 = self.startRects[x]
                 r2 = self.stopRects[x]
-                height = min(r1.height(), r2.height())
-                center = r1.centerY()
-                r = Rect(self.routeLayer, r1.x1, center - height/2.0, r2.x2 - r1.x1, height)
+                r, center = wire(r1, r2)
                 self.add(r)
                 if x < len(self.endCutRects):
                     self.endCutRects[x].moveCenter(r2.centerX(), center)
         elif len(self.startRects) == 1:
             r1 = self.startRects[0]
             for idx, r2 in enumerate(self.stopRects):
-                height = min(r1.height(), r2.height())
-                center = r1.centerY()
-                r = Rect(self.routeLayer, r1.x1, center - height/2.0, r2.x2 - r1.x1, height)
+                r, center = wire(r1, r2)
                 self.add(r)
                 if idx < len(self.endCutRects):
                     self.endCutRects[idx].moveCenter(r2.centerX(), center)

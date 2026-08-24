@@ -141,6 +141,10 @@ class Instance(Cell):
         pass
     
     def fromJson(self,o):
+        #- an Instance reads its own children below (ports keep their
+        #- childName); stop the shared reader in Cell.fromJson from
+        #- reading them a second time
+        self._children_from_json = True
         super().fromJson(o)
         self.instanceName = o["instanceName"]
         self.angle = o["angle"]
@@ -167,6 +171,12 @@ class Instance(Cell):
                 c = Port()
             elif cl == "Rect":
                 c = Rect()
+            elif cl == "Text":
+                #- the schematic name label at the instance centre --
+                #- dropping it made a library .cic lose its instance
+                #- labels on every round trip
+                from .text import Text
+                c = Text()
             if c is None:
                 continue
             c.design = self.design

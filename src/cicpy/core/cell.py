@@ -627,6 +627,16 @@ class Cell(Rect):
             self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])
 
+        #- Cell::fromJson reads children too -- a plain Cell child (a
+        #- Guard's contact row, a fill cut) has geometry of its own,
+        #- and skipping it here silently emptied every such child on a
+        #- library round trip. LayoutCell.fromJson used to do this
+        #- alone; the shared reader guards against double-reading.
+        if not getattr(self, "_children_from_json", False):
+            self._children_from_json = True
+            from .layoutcell import readJsonChildren
+            readJsonChildren(self, o)
+
 
     def toJson(self):
         o = super().toJson()
@@ -637,6 +647,7 @@ class Cell(Rect):
         _CPP_NAMES = {
             "Cell": "cIcCore::Cell",
             "Layout": "cIcCore::LayoutCell",
+            "LayoutCell": "cIcCore::LayoutCell",
             "Route": "cIcCore::Route",
             "RouteRing": "cIcCore::RouteRing",
             "Guard": "cIcCore::Guard",

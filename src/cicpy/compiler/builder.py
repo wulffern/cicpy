@@ -162,6 +162,16 @@ class Compiler():
                 continue
             if not getattr(cell, "libpath", ""):
                 cell.libpath = libpath
+            #- the reference resurrects each library cell as its REAL
+            #- class (Qt metatype), so a Pattern* cell's closing
+            #- updateBoundingRect reruns the pattern FORMULA -- which
+            #- is what wrote the file's box. Reading children as plain
+            #- geometry unions in the well enclosures instead; put the
+            #- file's box back.
+            jo = self.design.jcells.get(name) or {}
+            bb = getattr(cell, "cic_bbox", None)
+            if bb and "Pattern" in str(jo.get("class", "")):
+                cell.x1, cell.y1, cell.x2, cell.y2 = bb
             ckt = getattr(cell, "ckt", None)
             if ckt is not None:
                 import cicspi

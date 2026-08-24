@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-import pandas as pd
 import re
-import numpy as np
+from cicpy.logger import console
 
 class Placer():
 
@@ -13,7 +12,7 @@ class Placer():
         self.readFile(self.layoutfile)
 
     def snap(self,n):
-        return np.round(n*1000)/1000
+        return round(n*1000)/1000
 
     def getGroup(self,instName):
         group = re.sub(r"\(\d+\)","",instName)
@@ -27,6 +26,11 @@ class Placer():
             return 0
 
     def readFile(self,fname):
+        #- pandas is imported HERE, not at module scope: it costs about
+        #- 240 ms to import and `cicpy place` is the only command that
+        #- reads a layout csv -- every other command paid that tax on
+        #- startup for a function it never called
+        import pandas as pd
         df = pd.read_csv(fname,delimiter=";")
         df["group"] = df["instanceName"].apply(self.getGroup)
         df["index"] = df["instanceName"].apply(self.getIndex)
@@ -150,7 +154,7 @@ class Placer():
             y += self.snap(c.toMicron(c.height()))
 
 
-        print(self.df)
+        console.print(self.df)
 
     def placeVertical(self,column=0,x=None,y=None):
 

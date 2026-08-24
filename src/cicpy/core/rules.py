@@ -147,15 +147,27 @@ class Rules:
             log.error(f"RuleError: Rulefile does not have category '{category}'")
             raise Exception(f"RuleError: Rulefile does not have category {category}")
 
+    #- Rules::get in the reference never throws: a missing layer or a
+    #- missing rule is a qDebug line and the value 0, and object files
+    #- in the wild lean on that (a tech without PWT still builds its
+    #- nch devices, just without the well enclosure). Warn once per
+    #- lookup so a missing rule is visible without drowning the log.
+    _warned_rules = set()
+
     def get(self,layer,key):
-        obj = self.getValue("rules",layer)
-        #print(obj)
-        if(key in obj):
-            #print(obj)
-            #print(obj[key])
-            return obj[key]*self.gamma
+        rules = Rules.rules.get("rules") if Rules.rules else None
+        obj = rules.get(layer) if rules else None
+        if(obj is None):
+            msg = f"Could not find rule {key} for layer {layer}, no such layer"
+        elif(key not in obj):
+            msg = f"Could not find rule {layer} {key}"
         else:
-            raise Exception(f"RuleError: Could not find rule {key} on layer {layer}")
+            return obj[key]*self.gamma
+        if(msg not in Rules._warned_rules):
+            Rules._warned_rules.add(msg)
+            import logging
+            logging.getLogger("Rules").warning(msg)
+        return 0
 
     def hasRule(self, layer, key):
         try:

@@ -26,6 +26,7 @@
 ######################################################################
 from .designprinter import DesignPrinter
 import sys
+import logging
 from os import path
 import re
 import os
@@ -381,9 +382,8 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName + o.properties["layer"])
         except Exception as e:
-            print(o.deviceName+"\n")
-            print(o.deviceName+"\n")
-            print(e)
+            logging.getLogger("SkillSchPrinter").error(o.deviceName)
+            logging.getLogger("SkillSchPrinter").error(e)
             raise(e)
             #raise(Exception("Could not find '" + o.deviceName + o.properties["layer"]+ "' in rule file\n"))
 
@@ -480,11 +480,11 @@ unless( ddGetObj(schLibName schName "symbol")
         try:
             odev = self.rules.device(o.deviceName)
         except Exception as e:
-            print(o.deviceName+"\n")
-            print(e)
+            logging.getLogger("SkillSchPrinter").error(o.deviceName)
+            logging.getLogger("SkillSchPrinter").error(e)
             raise(e)
 
-        print(odev)
+        logging.getLogger("SkillSchPrinter").debug(odev)
 
         typename = odev["name"]
 

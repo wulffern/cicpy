@@ -64,13 +64,25 @@ class Design():
     def newLayoutCell(self, name):
         return self.layoutcell_factories.get(name, LayoutCell)()
 
+    def getLayoutCell(self, subcktName):
+        """The cell to instantiate for this subckt name.
+
+        A cell BUILT THIS RUN is the answer whenever there is one --
+        placement asks for a child by name and must get the child this
+        design just made, not a fresh empty one. MagicDesign overrides
+        this to fall back to a .mag on disk; with no library behind it
+        there is nothing to fall back to, so say so by returning None
+        and let the caller report the missing subcell.
+        """
+        return self.cells.get(subcktName)
+
 
     def addCuts(self):
         # Import all cuts and add them to the design (matching C++ behavior)
         from .cut import Cut
         for cut in Cut.getCuts():
             if cut.name not in self.cells:
-                print(f"Adding cut {cut.name}")
+                logging.getLogger("Design").debug(f"Adding cut {cut.name}")
                 self.cells[cut.name] = cut
                 self.cellnames.insert(0, cut.name)  # Add at the beginning like C++
 

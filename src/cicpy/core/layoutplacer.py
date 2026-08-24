@@ -1,5 +1,5 @@
 
-import numpy as np
+import math
 
 def placeArray(xorg,yorg,columns,instances,xspace,yspace):
 
@@ -9,7 +9,7 @@ def placeArray(xorg,yorg,columns,instances,xspace,yspace):
     next_y = 0
     count = 0
     N = len(instances)
-    M = np.floor(N/columns)
+    M = math.floor(N/columns)
     array = list()
     array.append(list())
     row = 0

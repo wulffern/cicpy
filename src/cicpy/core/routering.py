@@ -1,3 +1,4 @@
+import logging
 from .cell import Cell
 from .rect import Rect
 from .rules import Rules
@@ -245,29 +246,32 @@ class RouteRing(Cell):
         elif location == "left":
             return self.left
         else:
-            print(f"Could not find location = {location} on {self.name()}. Use top,bottom,left,right")
+            logging.getLogger("RouteRing").error(f"Could not find location = {location} on {self.name()}. Use top,bottom,left,right")
             return None
 
     def trimRouteRing(self, location: str, whichEndToTrim: str):
         """Trim the route ring at the specified location and end"""
         cuts = self.getChildren("cIcCore::Route")
-        bounds = Cell.calcBoundingRect(cuts)
+        #- the STATIC C++ overload -- box of a list, not of this cell
+        bounds = Cell.calcBoundingRectFromList(cuts)
 
         r = self.getPointer(location)
         if r is None:
             return
             
+        #- coordinates are attributes in cicpy, methods in the C++ this
+        #- was transcribed from -- the calls had never run
         if "l" in whichEndToTrim:
-            r.setLeft(bounds.x1())
+            r.setLeft(bounds.x1)
 
         if "t" in whichEndToTrim:
-            r.setTop(bounds.y2())
+            r.setTop(bounds.y2)
 
         if "r" in whichEndToTrim:
-            r.setRight(bounds.x2())
+            r.setRight(bounds.x2)
 
         if "b" in whichEndToTrim:
-            r.setBottom(bounds.y1())
+            r.setBottom(bounds.y1)
 
 
 

@@ -70,7 +70,7 @@ class DesignPrinter():
                 if(hasattr(child,"children")):
                     self.printChildren(child.children)
                 else:
-                    print("DesignPrinter: don't know what to do with " + str(child) + " " + child.name)
+                    self.log.warning("don't know what to do with " + str(child) + " " + child.name)
 
 
 

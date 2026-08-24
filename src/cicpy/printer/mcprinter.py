@@ -26,7 +26,7 @@
 ######################################################################
 from .designprinter import DesignPrinter
 import sys
-import numpy as np
+import logging
 from os import path
 import os
 
@@ -184,7 +184,7 @@ class MinecraftCellPrinter():
 
 
         if(not cname in self.design.cells):
-            print(f"Could not find cell {cname}")
+            logging.getLogger("MinecraftPrinter").warning(f"Could not find cell {cname}")
             return
 
 
@@ -233,4 +233,4 @@ class MinecraftCellPrinter():
             elif(child.isRect()):
                 self.printRect(child)
             else:
-                print(str(child) + " " + child.name)
+                logging.getLogger("MinecraftPrinter").warning(str(child) + " " + child.name)

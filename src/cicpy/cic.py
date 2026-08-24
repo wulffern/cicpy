@@ -34,21 +34,7 @@ import cicspi
 import yaml
 import logging
 
-
-class ColorFormatter(logging.Formatter):
-    COLORS = {
-        'DEBUG': '\033[36m',     # Cyan
-        'INFO': '\033[32m',      # Green
-        'WARNING': '\033[33m',   # Yellow
-        'ERROR': '\033[31m',     # Red
-        'CRITICAL': '\033[1;31m' # Bold Red
-    }
-    RESET = '\033[0m'
-
-    def format(self, record):
-        color = self.COLORS.get(record.levelname, self.RESET)
-        message = super().format(record)
-        return f"{color}{message}{self.RESET}"
+from cicpy.logger import console, setupLogging
 
 log = logging.getLogger("spi2mag")
 
@@ -63,15 +49,7 @@ def load_design(cicfile, includes=()):
 def cli(ctx):
     """ Python toolbox for Custom Integrated Circuit Creator (ciccreator). """
     ctx.ensure_object(dict)
-    handler = logging.StreamHandler()
-    formatter = ColorFormatter('%(levelname)s: %(message)s')
-    handler.setFormatter(formatter)
-
-    logger = logging.getLogger()
-    logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-
-    pass
+    setupLogging(logging.DEBUG)
 
 @cli.command("transpile")
 @click.pass_context
@@ -166,9 +144,9 @@ def jcell(ctx,cicfile,techfile,cell,child,includes):
                     nl.append(c)
             obj["children"] = nl
 
-        print(json.dumps(obj,indent=4))
+        console.print(json.dumps(obj,indent=4))
     else:
-        print("\n".join(design.cellnames))
+        console.print("\n".join(design.cellnames))
 
 
 @cli.command("place")
@@ -191,13 +169,13 @@ def place(ctx,cicfile,techfile,layoutfile,circuit,pattern,includes):
     if(circuit == "diffpair"):
         placer.placeDiffPair()
     elif(circuit == "currentmirror"):
-        print("TODO: Implement current mirror specific placer")
+        log.warning("TODO: Implement current mirror specific placer")
     elif(circuit == "vertical"):
         placer.placeVertical()
     elif(circuit == "horizontal"):
         placer.placeHorizontal()
     else:
-        print(f"Could not find placer '{circuit}', using vertical")
+        log.warning(f"Could not find placer '{circuit}', using vertical")
         placer.place()
     placer.toCsv(layoutfile.replace(".csv","_place.csv"))
     placer.toSkill(layoutfile.replace(".csv",".il"))
@@ -232,7 +210,7 @@ def minecraft(ctx,cicfile,techfile,cell,child,x,y,includes):
             fo.write(buff)
 
     else:
-        print("\n".join(design.cellnames))
+        console.print("\n".join(design.cellnames))
 
 @cli.command("svg")
 @click.pass_context
@@ -269,10 +247,8 @@ def cost(ctx, cicfile, techfile, cell, top):
     from cicpy.core.wirecost import report
     rules = cic.Rules(techfile)
     um = 10000
-    try:
+    if rules.hasRule("ROUTE", "um"):
         um = int(rules.get("ROUTE", "um"))
-    except Exception:
-        pass
     click.echo(report(cicfile, cell, um=um, top=top))
 
 
@@ -827,11 +803,11 @@ def tracks(ctx,cicfile,techfile,cell,includes,layer,band,free,verbose):
             idx = tm.free_between(lname, float(lo), float(hi),
                                   b[0] if b else None, b[1] if b else None)
             coords = [int(tm.tracks[lname][i].coord) for i in idx]
-            print(f"{lname}: {len(idx)} tracks free over {lo}..{hi}")
-            print("   " + ", ".join(f"t{i}@{c}" for i,c in zip(idx,coords)))
+            console.print(f"{lname}: {len(idx)} tracks free over {lo}..{hi}")
+            console.print("   " + ", ".join(f"t{i}@{c}" for i,c in zip(idx,coords)))
         return
 
-    print(tm.report(layer=layer or None, band=b, verbose=verbose))
+    console.print(tm.report(layer=layer or None, band=b, verbose=verbose))
 
 
 @cli.command("blockers")
@@ -868,16 +844,16 @@ def blockers(ctx,cicfile,techfile,cell,includes,net,box):
         raise SystemExit(2)
     hits = tm.column_blockers(net, x1, x2, y1, y2)
     if not hits:
-        print(f"{net}: nothing blocks the column {box}")
+        console.print(f"{net}: nothing blocks the column {box}")
         return
     seen = set()
-    print(f"{net}: {len(hits)} blocking pin spans in {box}")
+    console.print(f"{net}: {len(hits)} blocking pin spans in {box}")
     for other, coord, s0, s1 in hits:
         key = (other, coord, s0, s1)
         if key in seen:
             continue
         seen.add(key)
-        print(f"   {other:16s} at {coord}  span {s0}..{s1}")
+        console.print(f"   {other:16s} at {coord}  span {s0}..{s1}")
 
 
 @cli.command("findroute")
@@ -921,19 +897,19 @@ def findroute(ctx,cicfile,techfile,cell,includes,net,start,stop):
     try:
         path = r.search(a, b, r.manhattan_heuristic(r.snap(b)))
     except Blocked as e:
-        print(f"{net}: BLOCKED")
-        print(f"   {e}")
-        print(f"   nodes explored: {e.reached}")
+        console.print(f"{net}: BLOCKED")
+        console.print(f"   {e}")
+        console.print(f"   nodes explored: {e.reached}")
         for other, coord, s0, s1 in e.blockers[:10]:
-            print(f"   blocker {other} at {coord} span {s0}..{s1}")
+            console.print(f"   blocker {other} at {coord} span {s0}..{s1}")
         raise SystemExit(1)
     runs, vias = r.segments(path)
-    print(f"{net}: path found, {len(path)} nodes -> {len(runs)} runs, {len(vias)} vias")
+    console.print(f"{net}: path found, {len(path)} nodes -> {len(runs)} runs, {len(vias)} vias")
     for layer,x1,y1,x2,y2 in runs:
-        print(f"   run {layer:3s} {x1},{y1} -> {x2},{y2}")
+        console.print(f"   run {layer:3s} {x1},{y1} -> {x2},{y2}")
     for la,lb,x,y in vias:
         ok = "ok" if r.via_is_free(x,y) else "BLOCKED"
-        print(f"   via {la}->{lb} at {x},{y}  [{ok}]")
+        console.print(f"   via {la}->{lb} at {x},{y}  [{ok}]")
 
 
 @cli.command("gui")
@@ -972,3 +948,46 @@ def filter(ctx,cicfile,cell,includes):
 
 if __name__ == '__main__':
     cli(obj={})
+
+
+@cli.command("compile")
+@click.pass_context
+@click.argument("objectfile")
+@click.argument("techfile")
+@click.argument("library", required=False, default="")
+@click.option("--I", "includes", multiple=True, help="Path to search for include files")
+@click.option("--prefix", default="", help="Prefix for every cell name")
+@click.option("--keep-going", is_flag=True, help="Continue past cells this port cannot build yet")
+def compile_(ctx, objectfile, techfile, library, includes, prefix, keep_going):
+    """Compile a ciccreator object definition (.json) into a .cic file.
+
+    This is the job `bin/cic` does in ciccreator: read an object file,
+    its companion .spi netlist and a technology file, run the place /
+    route / paint lifecycle over every cell, and write the result.
+    """
+    from .compiler import Compiler
+
+    if not library:
+        library = re.sub(r"\.json$", "", os.path.basename(objectfile))
+
+    cic.Rules(techfile)
+    design = cic.Design()
+    design.libname = library
+
+    comp = Compiler(design, includePaths=includes, prefix=prefix, keepGoing=keep_going)
+    comp.read(objectfile)
+    if comp.failed:
+        log.warning(f"{len(comp.failed)} cell(s) not built: "
+                    + ", ".join(n for n, _ in comp.failed))
+
+    obj = comp.toJson()
+    obj["info"] = {
+        "file": objectfile,
+        "rules": techfile,
+        "library": library,
+        "arguments": " ".join(sys.argv),
+    }
+    out = library + ".cic"
+    with open(out, "w") as fo:
+        json.dump(obj, fo, indent=1, sort_keys=True)
+    log.info(f"Writing {out}")

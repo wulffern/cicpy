@@ -25,11 +25,11 @@
 ##
 ######################################################################
 
+import logging
 import cicpy as cic
 import cicspi as spi
 import os
 import re
-import numpy as np
 
 cells = dict()
 lcells = dict()
@@ -220,7 +220,7 @@ def getLayoutCellFromXSch(libdir,xs,xspace,yspace,gbreak,techlib):
 
         #- TODO: Figure out how to handle ports
         if("devices/" in scell.symbol):
-            print(scell.symbol)
+            logging.getLogger("CellFactory").debug(scell.symbol)
             if("pin.sym" in scell.symbol):
                 ports.append(scell)
             continue

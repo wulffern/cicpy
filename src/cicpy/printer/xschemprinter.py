@@ -29,9 +29,9 @@ from ..core.rect import Rect
 from ..core.cell import Cell
 from ..core.port import Port
 import sys
+import logging
 from os import path
 import re
-import numpy as np
 import glob
 import os
 import subprocess
@@ -373,7 +373,7 @@ E {}
         self.startCell(c)
 
         if("noSchematic" in c.meta):
-            print(f" Skipping schematic for {c.name}")
+            logging.getLogger("XschemPrinter").info(f"Skipping schematic for {c.name}")
             return
 
         #- Hack to suport multi finger devices
@@ -521,7 +521,7 @@ E {}
                 #- hand-drawn schematics of this design do.
                 bus = self._busPortFor(instsym, portName)
                 if bus is None:
-                    print(f"Could not find {portName} in {symbolName}")
+                    logging.getLogger("XschemPrinter").warning(f"Could not find {portName} in {symbolName}")
                     continue
                 if bus in emitted_buses:
                     continue
@@ -563,7 +563,8 @@ E {}
 
 
         self.iy1 += instsym.height() + self.ystep
-        self.iy1 = np.round(self.iy1/10)*10
+        #- round() half-to-even matches np.round on scalars
+        self.iy1 = round(self.iy1/10)*10
 
 
         if(self.xstep  < instsym.width()):

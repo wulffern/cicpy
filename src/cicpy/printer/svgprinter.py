@@ -27,7 +27,6 @@
 from .designprinter import DesignPrinter
 import sys
 import svgwrite
-import numpy as np
 from os import path
 import logging
 import os
@@ -275,7 +274,7 @@ class SvgPrinter(DesignPrinter):
 
     def startCell(self,cell):
         file_name_cell = self.libname + os.path.sep + cell.name + ".svg"
-        print("INFO: %s" % file_name_cell)
+        log.info("%s" % file_name_cell)
         self.files.append(file_name_cell)
         self.svgcell = SvgCell(file_name_cell,cell,self.scale,self.x,self.y,)
 

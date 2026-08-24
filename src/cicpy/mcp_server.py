@@ -1038,6 +1038,9 @@ def route_options(name: str = "") -> str:
 
 
 def main():
+    #- stdout is the MCP protocol channel; logs go to stderr
+    from cicpy.logger import setupLogging
+    setupLogging(logging.INFO, stderr=True)
     mcp.run()
 
 

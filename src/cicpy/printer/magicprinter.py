@@ -27,7 +27,6 @@
 from .designprinter import DesignPrinter
 from ..core.gridcheck import GridChecker
 import sys
-import numpy as np
 import datetime
 import time
 import re
@@ -50,7 +49,7 @@ class MagicPrinter(DesignPrinter):
 
     def toMicron(self,angstrom):
         #- Snap to 5 nm grid
-        return int(np.round(angstrom/50))
+        return int(round(angstrom/50))
     
     def __init__(self,filename,rules):
         super().__init__(filename,rules)
@@ -303,7 +302,7 @@ class MagicPrinter(DesignPrinter):
             tr1, tr2 = orientations[rotation]
         else:
             tr1, tr2 = orientations[""]
-            print(f"Warning: orientation {rotation} of {inst.cell} is not known, placing it unrotated")
+            logging.getLogger("MagicPrinter").warning(f"orientation {rotation} of {inst.cell} is not known, placing it unrotated")
 
         path = ""
         if(inst.libpath != ""):

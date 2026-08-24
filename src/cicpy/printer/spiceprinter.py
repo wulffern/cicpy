@@ -251,7 +251,7 @@ class SpicePrinter(DesignPrinter):
             instname = "X" + instname
 
         if(o.subcktName not in self.allcells):
-            print(f"Warning: Could not find cell {o.subcktName}")
+            logging.getLogger("SpicePrinter").warning(f"Could not find cell {o.subcktName}")
         else:
             self.f.write(f"{instname} " + " ".join(self.translateNodes(o.nodes)) + f" {o.subcktName}\n")
         pass

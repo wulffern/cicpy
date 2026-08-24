@@ -41,6 +41,7 @@ import cicspi as spi
 import math
 import re
 import logging
+import sys
 import inspect
 from collections import defaultdict
 
@@ -68,7 +69,14 @@ def readJsonChildren(parent, o):
         elif(cl == "Text"):
             c  = Text()
         elif(cl == "Instance"):
-            c  = Instance()
+            #- a placed cut serializes as an Instance -- ciccreator has
+            #- no other class for it -- so cut-ness is recovered from
+            #- the cell it places, the same test Cut::isACut uses
+            if str(child.get("cell", "")).startswith("cut_"):
+                from .instancecut import InstanceCut
+                c = InstanceCut()
+            else:
+                c  = Instance()
         elif(cl == "InstanceCut"):
             from .instancecut import InstanceCut
             c = InstanceCut()
@@ -78,7 +86,16 @@ def readJsonChildren(parent, o):
             #- only the metal it produced
             from .path import Path
             c = Path("", "")
-        elif(cl in ("Cell", "Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::Cell", "cIcCore::LayoutCell")):
+        elif(cl in ("Cell", "cIcCore::Cell")):
+            #- Cell::cellFromJson: a plain Cell stays a plain Cell and
+            #- writes back cIcCore::Cell
+            c = Cell()
+        elif(cl in ("Route", "RouteRing", "ChannelRoute", "Guard", "OrthogonalLayerRoute", "cIcCore::Route", "cIcCore::RouteRing", "cIcCore::Guard", "cIcCore::LayoutCell")):
+            #- LayoutCell::cellFromJson reads ALL of these back as a
+            #- LayoutCell, so a round-tripped library file says
+            #- cIcCore::LayoutCell where it once said Route -- the
+            #- reference does exactly this, and matching it means
+            #- matching the mutation too
             c = LayoutCell()
         else:
             parent.log.warning(f"Unkown class {cl}")
@@ -87,7 +104,7 @@ def readJsonChildren(parent, o):
             c.design = parent.design
             c.fromJson(child)
             # Add instances to node graph after loading from JSON
-            if(cl == "Instance"):
+            if(cl == "Instance" and hasattr(parent, "addToNodeGraph")):
                 parent.addToNodeGraph(c)
             parent.add(c)
 
@@ -101,7 +118,6 @@ class LayoutCell(Cell):
         self.altenateGroup = False
         self.alternateGroup = False
         self.noPowerRoute = False
-        self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
         self.graph = None
         self._placeHorizontal = False
@@ -181,7 +197,16 @@ class LayoutCell(Cell):
         if layoutCell is None and hasattr(self.parent, "generatePrimitiveLayout"):
             layoutCell = self.parent.generatePrimitiveLayout(cktInst.subcktName, cktInst)
         if layoutCell is None:
-            raise ValueError(f"Could not find layout cell for {cktInst.subcktName}")
+            #- Instance::setCell: an unknown cell WARNS and places an
+            #- empty zero-size cell -- a netlist may name cells the
+            #- object files never define, and the reference builds the
+            #- rest of the layout around the hole rather than dying.
+            self.log.warning(f"Could not find cell {cktInst.subcktName} in {self.name}")
+            from .cell import Cell as _Cell
+            layoutCell = _Cell()
+            missingCell = True
+        else:
+            missingCell = False
         i.cell = layoutCell.name
         #- The name the SCHEMATIC uses, which is not always the layout
         #- cell: a diode connected device is placed as the D variant,
@@ -202,9 +227,19 @@ class LayoutCell(Cell):
         i.xcell = -int(sx)
         i.ycell = -int(sy)
         i.setSubcktInstance(cktInst)
+        if missingCell:
+            #- Instance::setCell left the name EMPTY for an unknown
+            #- cell, and setSubcktInstance never touches it; ours does
+            i.name = ""
 
         self.add(i)
         i.moveTo(x,y)
+        #- the instance carries its schematic name as a Text at its
+        #- centre -- that is how a viewer, and magic's labels, know
+        #- which placement this is (C++ addInstance does the same)
+        t = Text(cktInst.name)
+        t.moveTo(int(x + i.width() / 2), int(y + i.height() / 2))
+        i.add(t)
         self.addToNodeGraph(i)
         i.updateBoundingRect()
         return i
@@ -399,16 +434,29 @@ class LayoutCell(Cell):
             if not self._instance_matches_route_scope(inst, includeInstances=includeInstances, excludeInstances=excludeInstances):
                 continue
 
+            from .route import Route
+            compat = Route.compat == "ciccreator"
             rr = None
             if hasattr(port, "get"):
-                rr = port.get(layer) if layer else port.get()
+                if compat:
+                    #- Graph::getRectangles: a port with no rect on the
+                    #- asked layer answers with its route-layer rect,
+                    #- and EVERY port answers -- two pins on the same
+                    #- strap are two rects, which is what routeVertical
+                    #- spans
+                    rr = port.get(layer)
+                    if rr is None:
+                        rr = port.get()
+                else:
+                    rr = port.get(layer) if layer else port.get()
 
             if rr is None:
                 continue
-            key = self._access_rect_key(rr)
-            if key in seen:
-                continue
-            seen.add(key)
+            if not compat:
+                key = self._access_rect_key(rr)
+                if key in seen:
+                    continue
+                seen.add(key)
             rects.append(rr)
         return rects
 
@@ -462,6 +510,14 @@ class LayoutCell(Cell):
                 anymetal=anymetal,
             )
         )
+        #- the reference keeps duplicates: two pins on the same metal
+        #- (a shared D/S strap) are two rects, and routeVertical NEEDS
+        #- both -- one becomes the start, one the stop, and the strap
+        #- between them is real geometry. Dedup only in cicpy's own
+        #- flow, where the router treats the list as a set.
+        from .route import Route
+        if Route.compat == "ciccreator":
+            return rects
         out = []
         seen = set()
         for rect in rects:
@@ -474,7 +530,18 @@ class LayoutCell(Cell):
 
     def toJson(self):
         o = super().toJson()
-        o["children"] = [child.toJson() for child in self.iterJsonChildren()]
+        #- same dedup as Cell.toJson: a plain rect painted N times over
+        #- itself is written once, matching the C++ writer
+        oc = []
+        printed = set()
+        for child in self.iterJsonChildren():
+            if child.__class__.__name__ == "Rect":
+                rid = (child.layer, child.x1, child.y1, child.x2, child.y2)
+                if rid in printed:
+                    continue
+                printed.add(rid)
+            oc.append(child.toJson())
+        o["children"] = oc
         o["useHalfHeight"] = self.useHalfHeight
         o["alternateGroup"] = self.alternateGroup
         o["noPowerRoute"] = self.noPowerRoute
@@ -1097,13 +1164,21 @@ class LayoutCell(Cell):
     def _captureRouteDebug(self, api_name, params):
         callsite = ""
         command = f"{api_name}(" + ", ".join(f"{k}={params[k]!r}" for k in params) + ")"
+        #- sys._getframe, not inspect.stack(): inspect builds a
+        #- FrameInfo per frame and resolves each frame's module by
+        #- scanning sys.modules -- measured at half a second of a
+        #- one-second SAR compile, all spent labelling routes that
+        #- never error. Walking raw frames records the same callsite.
         try:
-            for frame in inspect.stack()[2:]:
-                filename = frame.filename or ""
-                if filename.endswith("layoutcell.py") or filename.endswith("cellgroup.py") or filename.endswith("route.py"):
-                    continue
-                callsite = f"{filename}:{frame.lineno}"
-                break
+            f = sys._getframe(2)
+            while f is not None:
+                filename = f.f_code.co_filename or ""
+                if not (filename.endswith("layoutcell.py")
+                        or filename.endswith("cellgroup.py")
+                        or filename.endswith("route.py")):
+                    callsite = f"{filename}:{f.f_lineno}"
+                    break
+                f = f.f_back
         except Exception:
             callsite = ""
         return {
@@ -1197,6 +1272,23 @@ class LayoutCell(Cell):
             self.translate(-self.x1, -self.y1)
 
     def parseSubckt(self, obj):
+        #- Qt's fromJson reads a missing key as an empty value, and
+        #- hand-written parseSubckt blocks lean on that (none of them
+        #- carry "class"). cicspi indexes the dict strictly, so fill
+        #- the blanks before handing it over.
+        def _norm(o, extra=()):
+            o = dict(o)
+            o.setdefault("class", "")
+            o.setdefault("name", "")
+            o.setdefault("nodes", [])
+            o.setdefault("properties", {})
+            for k in extra:
+                o.setdefault(k, "")
+            return o
+        obj = _norm(obj)
+        obj["devices"] = [_norm(d, ("deviceName",)) for d in obj.get("devices") or []]
+        obj["instances"] = [_norm(i, ("deviceName", "subcktName", "groupName"))
+                            for i in obj.get("instances") or []]
         ckt = spi.Subckt()
         ckt.fromJson(obj)
         self.ckt = ckt
@@ -1251,6 +1343,13 @@ class LayoutCell(Cell):
 
         prevgroup = ""
 
+        #- A cell with no netlist places nothing. The C++ guards this at
+        #- the top of place() (`if(!_subckt) return;`); without it a cell
+        #- whose name is absent from the .spi -- a pure geometry cell,
+        #- say -- dies on the first read of self.ckt instead.
+        if(self.ckt is None):
+            return
+
         ymax = 0
         yorg = 0
         xorg = 0
@@ -1261,8 +1360,18 @@ class LayoutCell(Cell):
         endGroup = False
         prevcell = None
         previnst = None
+        mirror_y = False
 
-        for inst in self.ckt.orderInstancesByGroup():
+        #- ciccreator walks the netlist AS WRITTEN -- a group starts
+        #- when the instance name's group changes, and the schematic's
+        #- order IS the floorplan. cicpy's own flow sorts by group for
+        #- stability across netlisters; the goldens pin the raw order.
+        from .route import Route
+        if Route.compat == "ciccreator":
+            _insts = list(self.ckt.instances)
+        else:
+            _insts = self.ckt.orderInstancesByGroup()
+        for inst in _insts:
 
             name = inst.name
             #- fill devices belong to the LAYOUT generator
@@ -1273,6 +1382,10 @@ class LayoutCell(Cell):
                 self.log.info(f"place: skipping schematic fill {name}")
                 continue
             group = inst.groupName
+            #- alternateGroup mirrors every OTHER group about Y (C++
+            #- place: mirror_y flips on each group change)
+            if(group != prevgroup and prevgroup != ""):
+                mirror_y = not mirror_y
             if(group != prevgroup or prevgroup == ""):
                 startGroup = True
                 if(previnst is not None):
@@ -1330,7 +1443,24 @@ class LayoutCell(Cell):
                         pass
 
             linst = self.addInstance(inst,inst_x,inst_y)
-            if(linst.x2 > next_x):
+
+            #- a netlist can pin an instance's orientation (C++ place)
+            if inst.hasProperty("angle"):
+                a = inst.getPropertyString("angle")
+                if a == "180":
+                    linst.setAngle("MY")
+                elif a == "MX":
+                    linst.setAngle("MX")
+
+            if self.alternateGroup and mirror_y:
+                linst.setAngle("MY")
+
+            #- the reference tracks the LAST instance's right edge, not
+            #- the widest: a group ending in a narrow cell starts the
+            #- next column at that narrow edge (C++: next_x=inst->x2())
+            if Route.compat == "ciccreator":
+                next_x = linst.x2
+            elif(linst.x2 > next_x):
                 next_x = linst.x2
             next_y = linst.y2
 
@@ -1338,7 +1468,13 @@ class LayoutCell(Cell):
                 ymax = next_y
 
             x = linst.x1
-            y = next_y
+            #- setYoffsetHalf: rows stack at HALF the instance height,
+            #- which is how a standard-cell library shares its supply
+            #- rails between rows (C++: y += (inst->y2()-instance_y)/2)
+            if self.useHalfHeight:
+                y = y + (linst.y2 - inst_y) // 2
+            else:
+                y = next_y
 
             prevcell = linst
             previnst = inst
@@ -1355,7 +1491,10 @@ class LayoutCell(Cell):
                  x = dummy.x1
                  y = dummy.y2
                  next_y = y
-        pass
+        #- C++ place() closes with updateBoundingRect -- for a cell
+        #- with devices but no instances this is the recompute that
+        #- picks up a boundaryIgnoreRouting the object file just set
+        self.updateBoundingRect()
 
     def addPortRectangle(self, layer, x1, y1, width, height, angle, portname):
         self.log.info(f"addPortRectangle(layer={layer}, x1={x1}, y1={y1}, width={width}, height={height}, angle={angle}, portname={portname})")
@@ -1484,6 +1623,14 @@ class LayoutCell(Cell):
         rects = self.findAllRectangles(path, layer)
         for r in rects:
             width = r.width()
+            if cuts and int(cuts) > 0:
+                #- with a cut count, the strap is as wide as THAT CUT,
+                #- not as wide as the pin it rises from (the C++ takes
+                #- inst->width() of the M1-to-layer cut)
+                from .cut import Cut
+                inst = Cut.getInstance("M1", layer, int(cuts), 1)
+                if inst is not None:
+                    width = inst.width()
             rn = Rect(layer, r.x1, self.y1, width, self.height())
             self.add(rn)
 
@@ -1514,6 +1661,98 @@ class LayoutCell(Cell):
             if name != "":
                 self.named_rects[name] = p
             self.add(p)
+
+    def addVia(self, startlayer:str, stoplayer:str, path:str, hcuts:int,
+               vcuts:int=1, offset:float=0, name:str="", yoffset:float=0):
+        """Drop a via on each rect `path` finds on `startlayer`.
+
+        `offset`/`yoffset` are in ROUTE grid pitches. `name` publishes
+        the via's top metal as a named rect for later commands to
+        route to (C++ LayoutCell::addVia).
+        """
+        from .cut import Cut
+        rules = Rules.getInstance()
+        hg = rules.get("ROUTE", "horizontalgrid")
+        vg = rules.get("ROUTE", "verticalgrid")
+        for r in self.findAllRectangles(path, startlayer):
+            if r is None:
+                continue
+            inst = Cut.getInstance(startlayer, stoplayer, int(hcuts), int(vcuts))
+            if inst is None:
+                continue
+            inst.moveTo(int(r.x1 + offset * hg), int(r.y1 + vg * yoffset))
+            if name:
+                p = inst.getRect(stoplayer)
+                if p is not None:
+                    self.named_rects[name] = p
+                else:
+                    self.log.error(f"Unknown rect {name}")
+            self.add(inst)
+
+    def addGuard(self, port:str, gridMultiplier:float, layers:list):
+        """Ring the cell with a guard and publish `port` on its M1
+        (C++ addGuard). The ring stands off the bounding box by
+        `gridMultiplier` vertical route grids on every side.
+        """
+        from .guard import Guard
+        from .port import Port
+        from .rules import Rules
+        rules = Rules.getInstance()
+        r = self.getCopy()
+        enc = rules.get("ROUTE", "verticalgrid") * gridMultiplier
+        r.adjust(-enc, -enc, enc, enc)
+        g = Guard(r, layers)
+        self.add(g)
+        p = self.getPort(port)
+        if p is None:
+            p = Port(port)
+            self.add(p)
+        m1 = g.getRect("M1")
+        if p is not None and m1 is not None:
+            p.set(m1.getCopy())
+
+    def addPortOnRect(self, port:str, layer:str, path:str=""):
+        """Publish `port` on the first rect `path` finds on `layer`.
+
+        `path` defaults to the port's own name (C++ addPortOnRect).
+        """
+        path = path or port
+        rects = self.findAllRectangles(path, layer)
+        if not rects:
+            self.log.error(f"Could not find port {port} on path {path} in layer {layer}")
+            return
+        r = rects[0]
+        if r.layer != layer:
+            self.log.error(f"Layer {r.layer} differs from {port} on rect {path} in layer {layer}")
+            return
+        self.updatePort(port, r)
+
+    def addPortVia(self, startlayer:str, stoplayer:str, port:str, path:str,
+                   vcuts:int, hcuts:int, xoffset:float, yoffset:float, name:str=""):
+        """Drop a via beside each rect `path` finds and publish `port`
+        on the via's TOP metal -- how a buried pin is brought up to
+        where a router can land on it (C++ addPortVia).
+        """
+        from .cut import Cut
+        from .port import Port
+        for r in self.findAllRectangles(path, startlayer):
+            if r is None:
+                continue
+            inst = Cut.getInstance(startlayer, stoplayer, int(hcuts), int(vcuts))
+            if inst is None:
+                continue
+            inst.moveTo(int(r.x2 + xoffset * inst.width()),
+                        int(r.centerY() + yoffset * inst.height()))
+            rstop = inst.getRect(stoplayer)
+            if name:
+                self.named_rects[name] = rstop
+            if port in self.ports:
+                self.ports[port].set(rstop)
+            else:
+                p = Port(port)
+                p.set(rstop)
+                self.add(p)
+            self.add(inst)
 
     def addPowerConnection(self, name:str, includeInstances:str, location:str, excludeInstances:str=""):
         # Check if node exists in nodeGraph
@@ -2066,8 +2305,14 @@ class LayoutCell(Cell):
         #- what a rail has to be able to carry. Cut.getInstance("M3","M4")
         #- gave the right number for a sky130 M1 ring by coincidence and
         #- nothing anywhere else.
-        above = self._layerAbove(layer)
-        c = Cut.getInstance(layer, above, 2, 2) if above else None
+        from .route import Route
+        if Route.compat == "ciccreator":
+            #- the reference sizes EVERY power ring off the M3-M4 2x2
+            #- via, whatever layer the ring is on (addPowerRing)
+            c = Cut.getInstance("M3", "M4", 2, 2)
+        else:
+            above = self._layerAbove(layer)
+            c = Cut.getInstance(layer, above, 2, 2) if above else None
         if c is None:
             mw = Rules.getInstance().get(layer, "width") * widthmult
         else:
@@ -2094,16 +2339,27 @@ class LayoutCell(Cell):
         else:
             xgrid = Rules.getInstance().get(layer, "space")*spacemult + mw
             ygrid = Rules.getInstance().get(layer, "space")*spacemult + mw
-        rr = RouteRing(layer, name, self.getCopy(), location, ygrid, xgrid, mw, straps=straps, strap_gaps=strap_gaps)
-        if rr:
-            rail = f"rail_{name}"
-            self.updatePort(name, rr.getDefault())
-            self.named_rects[rail] = rr
-            self.named_rects[f"rail_b_{name}"] = rr.getPointer("bottom")
-            self.named_rects[f"rail_t_{name}"] = rr.getPointer("top")
-            self.named_rects[f"rail_l_{name}"] = rr.getPointer("left")
-            self.named_rects[f"rail_r_{name}"] = rr.getPointer("right")
-            self.add(rr)
+        #- a bus name is a RING PER BIT (LayoutCell::expandBus,
+        #- high to low). Each add grows the cell box, so the next
+        #- bit's ring is drawn one grid further out -- the staggered
+        #- Y<11:0> ladder on RG12TRIX1 is exactly this.
+        m_bus = re.search(r"<(\d+):(\d+)>", name)
+        if m_bus:
+            hi, lo = int(m_bus.group(1)), int(m_bus.group(2))
+            names = [re.sub(r"<.*>", f"<{i}>", name) for i in range(hi, lo - 1, -1)]
+        else:
+            names = [name]
+        for n in names:
+            rr = RouteRing(layer, n, self.getCopy(), location, ygrid, xgrid, mw, straps=straps, strap_gaps=strap_gaps)
+            if rr:
+                rail = f"rail_{n}"
+                self.updatePort(n, rr.getDefault())
+                self.named_rects[rail] = rr
+                self.named_rects[f"rail_b_{n}"] = rr.getPointer("bottom")
+                self.named_rects[f"rail_t_{n}"] = rr.getPointer("top")
+                self.named_rects[f"rail_l_{n}"] = rr.getPointer("left")
+                self.named_rects[f"rail_r_{n}"] = rr.getPointer("right")
+                self.add(rr)
 
     def addChannelRoute(self, layer:str, name:str, channel:str, track:int=0,
                         widthmult:int=1, key:str=None):
@@ -2531,14 +2787,25 @@ class LayoutCell(Cell):
             #- A power sheet spans the cell top to bottom, so it belongs
             #- on the highest layer the technology runs VERTICALLY. That
             #- is M4 in sky130 here, which is what this used to say
-            #- outright.
-            sheet = self._topLayerRunning("v")
+            #- outright -- and what ciccreator still says: its
+            #- addPowerRoute hardcodes M4, and compiled cells match it.
+            from .route import Route
+            if Route.compat == "ciccreator":
+                sheet = "M4"
+            else:
+                sheet = self._topLayerRunning("v")
             if sheet is None:
                 self.log.warning(
                     f"addPowerRoute({net}): the technology declares no "
                     f"vertical routing layer; not routing")
                 return
-            cuts = Cut.getCutsForRects(sheet, rects, 2, 1)
+            #- the reference's call is the plain 4-arg form: no fitting
+            #- chain (even PROBING an alternative creates its cut cell,
+            #- which the writer then emits as a cell nothing places)
+            from .route import Route
+            _follow = Route.compat != "ciccreator"
+            cuts = Cut.getCutsForRects(sheet, rects, 2, 1,
+                                       landingFollowsCut=_follow)
             rp = None
 
             if len(cuts) > 0:
@@ -2572,14 +2839,44 @@ class LayoutCell(Cell):
         return rects
 
 
+    def trimRouteRing(self, path, location=None, whichEndToTrim=None):
+        """Trim a ring's named side back to the extent of its routes.
+
+        (path, location, end) or one JSON array of the three -- the
+        object-file form and the C++ overloads both land here.
+        """
+        if isinstance(path, list):
+            if len(path) < 3:
+                self.log.error("trimRouteRing needs (path, location, end)")
+                return
+            path, location, whichEndToTrim = path[0], path[1], path[2]
+        for r in self.children:
+            if r is None or not r.isType("RouteRing"):
+                continue
+            if re.search(path, r.name):
+                r.trimRouteRing(location, whichEndToTrim)
+
     def addAllPorts(self):
         self.log.info(f"addAllPorts()")
         if(self.subckt is None): return
         nodes = self.subckt.nodes
 
+        #- "^B$": a BULK terminal is wired by construction -- substrate
+        #- taps, well ties -- not by a wire to a published pin, so the
+        #- C++ has always excluded child ports named B here and no .cic
+        #- ciccreator ever wrote publishes one. A node whose only rects
+        #- were bulk pins then reports 'No rects found', exactly as the
+        #- C++ does.
+        #-
+        #- COMPILE FLOW ONLY. spi2mag's decap subcells carry VSS on
+        #- nothing but the cap cells' B pins; filtering those out
+        #- dropped the VSS rail and port and floated the whole array's
+        #- bulk (LVS INCORRECT through three levels of lelo_temp).
+        from .route import Route
+        filterChild = "^B$" if Route.compat == "ciccreator" else ""
         for node in nodes:
             if(node in self.ports): continue
-            rects = self.findRectanglesByNode("^" + node + "$",None,None)
+            rects = self.findRectanglesByNode("^" + node + "$",filterChild,None)
             if(len(rects) > 0):
                 self.updatePort(node,rects[0])
             else:
@@ -2597,8 +2894,8 @@ class LayoutCell(Cell):
         if("noPowerRoute" in o):
             self.noPowerRoute = o["noPowerRoute"]
 
-        if("boundarIgnoreRouting" in o):
-            self.boundaryIgnoreRouting = o["boundaryIgnoreRouting"]
+        if("boundaryIgnoreRouting" in o):
+            self.setBoundaryIgnoreRouting(o["boundaryIgnoreRouting"])
 
         self.guiHierarchy = o.get("cellgroups", o.get("guiHierarchy", [])) or []
 
@@ -2607,8 +2904,6 @@ class LayoutCell(Cell):
 
         if("graph" in o):
             self.graph = o["graph"]
-
-        readJsonChildren(self, o)
 
     def addMazeRoute(self, regex, layer="", layers=None, width=None,
                      rects=None, excludeInstances="", includeInstances="",
@@ -3393,10 +3688,9 @@ class LayoutCell(Cell):
         states no area rule."""
         rules = Rules.getInstance()
         w = int(rules.get(layer, "width"))
-        try:
-            area = int(rules.get(layer, "area"))
-        except Exception:
+        if not rules.hasRule(layer, "area"):
             return w
+        area = int(rules.get(layer, "area"))
         side = int(math.ceil(math.sqrt(area)))
         return max(w, (side + 1) // 2)
 

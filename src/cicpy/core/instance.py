@@ -39,6 +39,12 @@ class Instance(Cell):
 
     def __init__(self):
         super().__init__()
+        #- An instance sits on PR, the place-and-route boundary layer.
+        #- Set it here rather than in setCell: addInstance assigns
+        #- `cell` directly and never goes through the setter, so an
+        #- instance built in memory would otherwise be on no layer while
+        #- the same instance read back from a .cic is on PR.
+        self.layer = "PR"
         self.instanceName = ""
         self.cell = ""
         self.layoutcell = None
@@ -51,13 +57,21 @@ class Instance(Cell):
         self._cell_obj = None  # Direct reference to Cell object
     
     def setCell(self, cell):
-        """Set the cell - accepts either a Cell object or a string name"""
+        """Set the cell - accepts either a Cell object or a string name
+
+        An instance sits on PR, the place-and-route boundary layer.
+        That is what the C++ setCell does and what every .cic this
+        package reads back says, so say it here too rather than leave
+        an instance built in memory on no layer at all while the same
+        instance loaded from a file is on PR.
+        """
         if isinstance(cell, str):
             # String name - look up in design
             self.cell = cell
             self._cell_obj = self.getCell(cell)
             if self._cell_obj:
                 self.name = self._cell_obj.name
+                self.layer = "PR"
                 self.updateBoundingRect()
         else:
             # Cell object - store directly
@@ -65,11 +79,15 @@ class Instance(Cell):
             if cell:
                 self.cell = cell.name
                 self.name = cell.name
+                self.layer = "PR"
                 self.updateBoundingRect()
 
     def setSubcktInstance(self,inst:spi.SubcktInstance):
 
         log = logging.getLogger("Instance("+inst.subcktName + ")")
+        #- keep the schematic instance: decorators read its groupName
+        #- (C++ Instance::subcktInstance())
+        self.subcktInstance = inst
         self.instanceName = inst.name
         self.ports.clear()
         self.name = inst.subcktName
@@ -126,6 +144,10 @@ class Instance(Cell):
         pass
     
     def fromJson(self,o):
+        #- an Instance reads its own children below (ports keep their
+        #- childName); stop the shared reader in Cell.fromJson from
+        #- reading them a second time
+        self._children_from_json = True
         super().fromJson(o)
         self.instanceName = o["instanceName"]
         self.angle = o["angle"]
@@ -152,6 +174,12 @@ class Instance(Cell):
                 c = Port()
             elif cl == "Rect":
                 c = Rect()
+            elif cl == "Text":
+                #- the schematic name label at the instance centre --
+                #- dropping it made a library .cic lose its instance
+                #- labels on every round trip
+                from .text import Text
+                c = Text()
             if c is None:
                 continue
             c.design = self.design
@@ -280,7 +308,10 @@ class Instance(Cell):
                 continue
             if(not pi.isInstancePort()):
                 continue
-            if(re.search(node, pi.name) and ((filterChild is None) or not re.search(filterChild, getattr(pi, 'childName', '')))):
+            #- an EMPTY filter means no filter, as the C++ spells out
+            #- (`filterChild == "" || ...`); re.search("") matches every
+            #- string, so passing "" through excluded every port
+            if(re.search(node, pi.name) and ((not filterChild) or not re.search(filterChild, getattr(pi, 'childName', '')))):
                 r = pi.get()
                 if(r is not None):
                     r.parent = self
@@ -304,6 +335,55 @@ class Instance(Cell):
             rr.parent = self
             rects.append(rr)
         return rects
+
+    def getRect(self, layer):
+        """The referenced cell's first rect on `layer`, in OUR frame.
+
+        Cell.getRect searches the instance's own children, which for a
+        cut instance are none -- the metal lives in the cut CELL. The
+        C++ delegates and transforms (Instance::getRect); an untransformed
+        answer put a port at the cell's load origin instead of the via.
+        """
+        cell = self.layoutcell or self._cell_obj
+        if cell is None:
+            return super().getRect(layer)
+        r = cell.getRect(layer)
+        if r is None:
+            return None
+        r = r.getCopy()
+        self._transformRect(r)
+        return r
+
+    def _findRectanglesByRegex(self, rects, regex, layer):
+        """Resolve a path like `S` against the CELL, not the instance.
+
+        The instance's own ports are the netlist's nodes -- DDD has one,
+        B -- but a route command may name any port the child cell
+        publishes: `XA1:S` reaches the S the pattern drew, which no
+        netlist mentions. The C++ delegates to the referenced cell and
+        transforms what comes back (Instance::findRectanglesByRegex);
+        searching the instance's ports here is how `XA1:S` came back
+        empty and the route silently did not happen.
+
+        Copies, then transform: the child's named_rects arrive live,
+        and transforming a live rect would move the cell itself.
+        """
+        cell = self.layoutcell or self._cell_obj
+        if cell is None:
+            return
+        #- the ByRegex HALF only, exactly as the C++ delegates: the
+        #- other half (findRectangles) matches the cell's child
+        #- instance ports by bare name, and through a path like XA1:EN
+        #- that returned the pin AND every same-named pin one level
+        #- deeper -- each start rect twice, each with its own via
+        found = []
+        cell._findRectanglesByRegex(found, regex, layer)
+        for r in found:
+            rr = r.getCopy()
+            rr.net = getattr(r, "net", "")
+            self._transformRect(rr)
+            rr.parent = self
+            rects.append(rr)
 
     def transform(self, rect):
         """Map a rect from THIS instance's cell frame into the parent's.
@@ -423,7 +503,17 @@ class Instance(Cell):
             # No cell set, return self as bounding rect
             return self
 
-        r = cell_to_use.calcBoundingRect()
+        from .route import Route
+        if Route.compat == "ciccreator":
+            #- the STORED box, not a live recompute: the cell's box was
+            #- settled when the cell was built (a CDAC's includes the
+            #- CTOP port its route() published; a TAPCELL's excludes
+            #- the routes that stick out), and the instance mirrors
+            #- that decision instead of re-deciding it
+            r = Rect("", cell_to_use.x1, cell_to_use.y1,
+                     cell_to_use.width(), cell_to_use.height())
+        else:
+            r = cell_to_use.calcBoundingRect()
         if self.angle == "R90":
             r.rotate(90)
         elif self.angle == "MY":

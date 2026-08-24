@@ -99,10 +99,23 @@ class TrackMapPins(unittest.TestCase):
         track and a same-layer test reports nothing. This asserts the
         limitation, so that if someone 'simplifies' column_blockers back
         to a per-layer check the reason is right here.
+
+        The fixture is the live layout, and it has since grown a
+        device-metal strap ON M4 over the span's edge, which free_for
+        legitimately rejects and free_between does not. So the lists may
+        differ by device metal -- but never by VDS, whose M1 pin is the
+        blindness this test documents.
         """
+        from cicpy.core.trackmap import DEVICE_METAL
         free = self.pins.free_between("M4", *VS_SPAN, *RES_COLUMN)
         aware = self.pins.free_for("VS", "M4", *VS_SPAN, *RES_COLUMN)
-        self.assertEqual(sorted(free), sorted(aware))
+        self.assertLessEqual(set(aware), set(free))
+        for i in set(free) - set(aware):
+            nets = set(self.pins.tracks["M4"][i].pins) - {DEVICE_METAL}
+            self.assertFalse(
+                nets,
+                f"track {i} rejected for a net pin on M4 -- the "
+                f"same-layer blindness this test documents is gone")
 
 
 if __name__ == "__main__":

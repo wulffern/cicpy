@@ -823,22 +823,42 @@ class Route(Cell):
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         vertical = re.search(r"vertical(,|\s+|$)", self.options) is not None
+        #- each strap lands on the far rect with a cut when the layers
+        #- differ (Route::routeStrap: 1 x 2 unless the options said)
+        lcuts = self.startCuts if self.startCuts > 0 else 1
+        lvcuts = self.startVCuts if self.startVCuts > 0 else 2
+        from .cut import Cut
         if vertical:
             if len(self.startRects) == 1:
                 sr = self.startRects[0]
                 for r in self.stopRects:
                     rc = Rect(self.routeLayer, r.x1, sr.y1, width, r.y1 - sr.y1)
                     self.add(rc)
+                    if self.routeLayer != sr.layer:
+                        cs = Cut.getInstance(sr.layer, self.routeLayer, lcuts, lvcuts)
+                        if cs is not None:
+                            cs.moveTo(rc.x1, rc.y2)
+                            self.add(cs)
         else:
             if len(self.startRects) == 1:
                 sr = self.startRects[0]
                 for r in self.stopRects:
                     rc = Rect(self.routeLayer, sr.x1, r.y1, r.x1 - sr.x1, width)
                     self.add(rc)
+                    if self.routeLayer != sr.layer:
+                        cs = Cut.getInstance(sr.layer, self.routeLayer, lcuts, lvcuts)
+                        if cs is not None:
+                            cs.moveTo(rc.x1, rc.y2)
+                            self.add(cs)
             elif len(self.stopRects) == 1:
                 sr = self.stopRects[0]
                 for r in self.startRects:
                     rc = Rect(self.routeLayer, r.x2, r.y1, sr.x2 - r.x2, width)
+                    if self.routeLayer != sr.layer:
+                        cs = Cut.getInstance(sr.layer, self.routeLayer, lcuts, lvcuts)
+                        if cs is not None:
+                            cs.moveTo(rc.x2 - cs.width(), rc.y1)
+                            self.add(cs)
                     self.add(rc)
 
 

@@ -61,7 +61,20 @@ class Compiler():
         self.ignoreSetYoffsetHalf = False
         self.topcells = []
         self.patterns = {}
+        #- ONE subckt table for the whole compile, like the reference's
+        #- global registry: library imports fill it first, and a local
+        #- netlist parsed later OVERWRITES a library definition. Two
+        #- dicts here meant the library's node order won -- sun_pll's
+        #- RPPO8 got its N and P pins swapped and both LPF resistors
+        #- routed mirror-image.
         self.spice = None
+        try:
+            import cicspi
+            self.spice = cicspi.SpiceParser()
+            if cicspi.Subckt.circuits is None:
+                cicspi.Subckt.circuits = self.spice
+        except ImportError:
+            pass
 
     #- -----------------------------------------------------------------
     #- Reading

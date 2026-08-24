@@ -39,7 +39,19 @@ IGNORED = ("symbol", "rows", "composite", "comment", "description", "spice")
 
 #- Design::Design()'s nameTranslator: a JSON key that calls a method
 #- by an older name. `type` on a transistor means mosType.
-NAME_TRANSLATOR = {"type": "mosType"}
+NAME_TRANSLATOR = {
+    "type": "mosType",
+    #- the reference's LayoutCell::alternateGroup(QJsonValue) IGNORES
+    #- the value and sets the flag TRUE -- "alternateGroup": 0 turns
+    #- alternate mirroring ON (sun_pll's LPF cap bank is MY-mirrored
+    #- because of it). The quirk lives in alternateGroupFlag; the
+    #- plain attribute must not shadow it.
+    "alternateGroup": "alternateGroupFlag",
+    #- same quirk: noPowerRoute(QJsonValue) sets true regardless, so
+    #- "noPowerRoute": 0 DISABLES the M4 power sheet (RG12TRIX1 keeps
+    #- its ports on the power ring bars because of it)
+    "noPowerRoute": "noPowerRouteFlag",
+}
 
 
 def arity(fn):
@@ -86,8 +98,16 @@ def call(cell, fn, value):
 
 
 def runIfObjectCan(cell, jobj, theme="", fromParent=False, ignoreSetYoffsetHalf=False):
-    """Apply every method-like key in `jobj` to `cell`."""
-    for key, value in jobj.items():
+    """Apply every method-like key in `jobj` to `cell`.
+
+    ALPHABETICAL order, not file order: the reference iterates
+    QJsonObject::keys(), which Qt keeps sorted. It decides real
+    geometry -- DIVN's afterPaint runs addPortOnEdges BEFORE
+    resetOrigin because 'a' < 'r', so the edge port is placed
+    against the un-normalized box and translated with the cell.
+    """
+    for key in sorted(jobj.keys()):
+        value = jobj[key]
         if RESERVED.search(key):
             continue
         if ignoreSetYoffsetHalf and key == "setYoffsetHalf":

@@ -2339,16 +2339,27 @@ class LayoutCell(Cell):
         else:
             xgrid = Rules.getInstance().get(layer, "space")*spacemult + mw
             ygrid = Rules.getInstance().get(layer, "space")*spacemult + mw
-        rr = RouteRing(layer, name, self.getCopy(), location, ygrid, xgrid, mw, straps=straps, strap_gaps=strap_gaps)
-        if rr:
-            rail = f"rail_{name}"
-            self.updatePort(name, rr.getDefault())
-            self.named_rects[rail] = rr
-            self.named_rects[f"rail_b_{name}"] = rr.getPointer("bottom")
-            self.named_rects[f"rail_t_{name}"] = rr.getPointer("top")
-            self.named_rects[f"rail_l_{name}"] = rr.getPointer("left")
-            self.named_rects[f"rail_r_{name}"] = rr.getPointer("right")
-            self.add(rr)
+        #- a bus name is a RING PER BIT (LayoutCell::expandBus,
+        #- high to low). Each add grows the cell box, so the next
+        #- bit's ring is drawn one grid further out -- the staggered
+        #- Y<11:0> ladder on RG12TRIX1 is exactly this.
+        m_bus = re.search(r"<(\d+):(\d+)>", name)
+        if m_bus:
+            hi, lo = int(m_bus.group(1)), int(m_bus.group(2))
+            names = [re.sub(r"<.*>", f"<{i}>", name) for i in range(hi, lo - 1, -1)]
+        else:
+            names = [name]
+        for n in names:
+            rr = RouteRing(layer, n, self.getCopy(), location, ygrid, xgrid, mw, straps=straps, strap_gaps=strap_gaps)
+            if rr:
+                rail = f"rail_{n}"
+                self.updatePort(n, rr.getDefault())
+                self.named_rects[rail] = rr
+                self.named_rects[f"rail_b_{n}"] = rr.getPointer("bottom")
+                self.named_rects[f"rail_t_{n}"] = rr.getPointer("top")
+                self.named_rects[f"rail_l_{n}"] = rr.getPointer("left")
+                self.named_rects[f"rail_r_{n}"] = rr.getPointer("right")
+                self.add(rr)
 
     def addChannelRoute(self, layer:str, name:str, channel:str, track:int=0,
                         widthmult:int=1, key:str=None):
@@ -2788,7 +2799,13 @@ class LayoutCell(Cell):
                     f"addPowerRoute({net}): the technology declares no "
                     f"vertical routing layer; not routing")
                 return
-            cuts = Cut.getCutsForRects(sheet, rects, 2, 1)
+            #- the reference's call is the plain 4-arg form: no fitting
+            #- chain (even PROBING an alternative creates its cut cell,
+            #- which the writer then emits as a cell nothing places)
+            from .route import Route
+            _follow = Route.compat != "ciccreator"
+            cuts = Cut.getCutsForRects(sheet, rects, 2, 1,
+                                       landingFollowsCut=_follow)
             rp = None
 
             if len(cuts) > 0:

@@ -1572,6 +1572,76 @@ class LayoutCell(Cell):
                 self.named_rects[name] = p
             self.add(p)
 
+    def addVia(self, startlayer:str, stoplayer:str, path:str, hcuts:int,
+               vcuts:int=1, offset:float=0, name:str="", yoffset:float=0):
+        """Drop a via on each rect `path` finds on `startlayer`.
+
+        `offset`/`yoffset` are in ROUTE grid pitches. `name` publishes
+        the via's top metal as a named rect for later commands to
+        route to (C++ LayoutCell::addVia).
+        """
+        from .cut import Cut
+        rules = Rules.getInstance()
+        hg = rules.get("ROUTE", "horizontalgrid")
+        vg = rules.get("ROUTE", "verticalgrid")
+        for r in self.findAllRectangles(path, startlayer):
+            if r is None:
+                continue
+            inst = Cut.getInstance(startlayer, stoplayer, int(hcuts), int(vcuts))
+            if inst is None:
+                continue
+            inst.moveTo(int(r.x1 + offset * hg), int(r.y1 + vg * yoffset))
+            if name:
+                p = inst.getRect(stoplayer)
+                if p is not None:
+                    self.named_rects[name] = p
+                else:
+                    self.log.error(f"Unknown rect {name}")
+            self.add(inst)
+
+    def addPortOnRect(self, port:str, layer:str, path:str=""):
+        """Publish `port` on the first rect `path` finds on `layer`.
+
+        `path` defaults to the port's own name (C++ addPortOnRect).
+        """
+        path = path or port
+        rects = self.findAllRectangles(path, layer)
+        if not rects:
+            self.log.error(f"Could not find port {port} on path {path} in layer {layer}")
+            return
+        r = rects[0]
+        if r.layer != layer:
+            self.log.error(f"Layer {r.layer} differs from {port} on rect {path} in layer {layer}")
+            return
+        self.updatePort(port, r)
+
+    def addPortVia(self, startlayer:str, stoplayer:str, port:str, path:str,
+                   vcuts:int, hcuts:int, xoffset:float, yoffset:float, name:str=""):
+        """Drop a via beside each rect `path` finds and publish `port`
+        on the via's TOP metal -- how a buried pin is brought up to
+        where a router can land on it (C++ addPortVia).
+        """
+        from .cut import Cut
+        from .port import Port
+        for r in self.findAllRectangles(path, startlayer):
+            if r is None:
+                continue
+            inst = Cut.getInstance(startlayer, stoplayer, int(hcuts), int(vcuts))
+            if inst is None:
+                continue
+            inst.moveTo(int(r.x2 + xoffset * inst.width()),
+                        int(r.centerY() + yoffset * inst.height()))
+            rstop = inst.getRect(stoplayer)
+            if name:
+                self.named_rects[name] = rstop
+            if port in self.ports:
+                self.ports[port].set(rstop)
+            else:
+                p = Port(port)
+                p.set(rstop)
+                self.add(p)
+            self.add(inst)
+
     def addPowerConnection(self, name:str, includeInstances:str, location:str, excludeInstances:str=""):
         # Check if node exists in nodeGraph
         if name not in self.nodeGraph:

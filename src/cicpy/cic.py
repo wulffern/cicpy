@@ -73,8 +73,21 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
     rules = cic.Rules(techfile)
     design = load_design(cicfile, includes)
 
+    _run_printers(design, rules, library,
+                  layskill=layskill, schskill=schskill, winfo=winfo,
+                  verilog=verilog, spice=spice, xschem=xschem, magic=magic,
+                  smash=smash, exclude=exclude)
 
 
+def _run_printers(design, rules, library, layskill=False, schskill=False,
+                  winfo=False, verilog=False, spice=False, xschem=False,
+                  magic=False, smash=None, exclude=""):
+    """The transpile stage, on a design however it got here.
+
+    Shared between `transpile` (design loaded from a .cic) and
+    `compile` (design still in memory from the build) so a compile
+    can emit its outputs without the write-then-reload round trip.
+    """
     if(layskill):
         la = cic.SkillLayPrinter(library,rules)
         #la.exclude = exclude
@@ -87,7 +100,7 @@ def transpile(ctx,cicfile,techfile,library,layskill,schskill,winfo,rinfo,verilog
 
     if(winfo):
         obj = cic.CellInfoPrinter(library,rules)
-        sc.exclude = exclude
+        obj.exclude = exclude
         obj.print(design)
 
     if(verilog):
@@ -958,19 +971,32 @@ if __name__ == '__main__':
 @click.option("--I", "includes", multiple=True, help="Path to search for include files")
 @click.option("--prefix", default="", help="Prefix for every cell name")
 @click.option("--keep-going", is_flag=True, help="Continue past cells this port cannot build yet")
-def compile_(ctx, objectfile, techfile, library, includes, prefix, keep_going):
+@click.option("--layskill",is_flag=True,help="Also write Skill Layout file")
+@click.option("--schskill",is_flag=True,help="Also write Skill Schematic file")
+@click.option("--verilog",is_flag=True,help="Also write verilog file [EXPERIMENTAL]")
+@click.option("--spice",is_flag=True,help="Also write spice file")
+@click.option("--xschem",is_flag=True,help="Also write xschem schematics")
+@click.option("--magic",is_flag=True,help="Also write magic layout")
+@click.option("--smash",default=None,help="List of transistors to smash schematic hierarchy")
+@click.option("--exclude",default="",help="Regex of cells to ignore")
+def compile_(ctx, objectfile, techfile, library, includes, prefix, keep_going,
+             layskill, schskill, verilog, spice, xschem, magic, smash, exclude):
     """Compile a ciccreator object definition (.json) into a .cic file.
 
     This is the job `bin/cic` does in ciccreator: read an object file,
     its companion .spi netlist and a technology file, run the place /
     route / paint lifecycle over every cell, and write the result.
+
+    The transpile outputs (--spice, --xschem, --magic, ...) run on the
+    compiled design directly, so `compile --spice --magic` replaces a
+    compile followed by a transpile without the .cic reload between.
     """
     from .compiler import Compiler
 
     if not library:
         library = re.sub(r"\.json$", "", os.path.basename(objectfile))
 
-    cic.Rules(techfile)
+    rules = cic.Rules(techfile)
     design = cic.Design()
     design.libname = library
 
@@ -991,3 +1017,22 @@ def compile_(ctx, objectfile, techfile, library, includes, prefix, keep_going):
     with open(out, "w") as fo:
         json.dump(obj, fo, indent=1, sort_keys=True)
     log.info(f"Writing {out}")
+
+    #- the transpile stage, straight from memory -- no reload of the
+    #- .cic that was just written
+    if any((layskill, schskill, verilog, spice, xschem, magic)):
+        if comp.prefix:
+            #- the prefix lands on names at write time, never during
+            #- the build (and the object file can set one itself), so
+            #- prefixed output must come off the file
+            design = load_design(out)
+        else:
+            #- print exactly what the .cic carries: toJson drops the
+            #- unused cells when topcells is set, and an internal
+            #- pattern cell the file never sees must not be printed
+            kept = {c.get("name") for c in obj.get("cells", [])}
+            design.cellnames = [n for n in design.cellnames if n in kept]
+        _run_printers(design, rules, library,
+                      layskill=layskill, schskill=schskill, verilog=verilog,
+                      spice=spice, xschem=xschem, magic=magic,
+                      smash=smash, exclude=exclude)

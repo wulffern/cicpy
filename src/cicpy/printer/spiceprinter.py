@@ -50,7 +50,7 @@ class SpicePrinter(DesignPrinter):
         strports = " ".join(nodes)
         self.f.write(f"""
 *-------------------------------------------------------------
-* {cell.name} {cell.__class__}
+* {cell.name}
 *-------------------------------------------------------------
 .SUBCKT {cell.name} {strports}
 """)

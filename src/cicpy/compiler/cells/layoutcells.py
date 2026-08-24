@@ -35,6 +35,11 @@ class LayoutCell(_CicpyLayoutCell):
         #- ciccreator's packing.
         self.place_xspace = [0]
         self.place_yspace = [0]
+        #- the C++ LayoutCell constructor: boundaryIgnoreRouting_ =
+        #- true. A compiled cell's box is its NON-CUT INSTANCES; the
+        #- routing, ports, vias and paint around them stay out unless
+        #- the object file says "boundaryIgnoreRouting": 0.
+        self.setBoundaryIgnoreRouting(True)
 
     def addConnectivityRoute(self, *args):
         """[layer, regex, routeType, options, cuts, includeInstances]

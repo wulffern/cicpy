@@ -386,8 +386,30 @@ class Compiler():
 
         kw = dict(ignoreSetYoffsetHalf=self.ignoreSetYoffsetHalf)
 
+        #- "decorator": lifecycle hooks that ride along with the cell's
+        #- own methods (C++ LayoutCellDecorator)
+        decorators = []
+        from .decorators import DECORATORS
+        for entry in jobj.get("decorator") or []:
+            if not isinstance(entry, dict) or not entry:
+                continue
+            dname = next(iter(entry))
+            dcls = DECORATORS.get(dname)
+            if dcls is None:
+                log.error("%s: unknown decorator '%s'", name, dname)
+                continue
+            d = dcls()
+            d.setCell(cell)
+            d.setOptions(entry[dname])
+            decorators.append(d)
+
+        def runDecorators(stage):
+            for d in decorators:
+                getattr(d, stage)()
+
         dispatch.runAllParents("afterNew", cell, parents, fromParent=True, **kw)
         dispatch.runAll("afterNew", cell, jobj, **kw)
+        runDecorators("afterNew")
 
         for par in parents:
             dispatch.runIfObjectCan(cell, par, fromParent=True, **kw)
@@ -395,11 +417,11 @@ class Compiler():
 
         self.attachSubckt(cell, jobj, parents, name)
 
-        self.hook("Place", cell, jobj, parents, kw)
-        self.hook("Route", cell, jobj, parents, kw)
+        self.hook("Place", cell, jobj, parents, kw, decorators)
+        self.hook("Route", cell, jobj, parents, kw, decorators)
         if hasattr(cell, "addAllPorts"):
             cell.addAllPorts()
-        self.hook("Paint", cell, jobj, parents, kw)
+        self.hook("Paint", cell, jobj, parents, kw, decorators)
 
         self.design.add(cell)
         self.registerSubckt(cell)
@@ -431,15 +453,30 @@ class Compiler():
         if cell.name not in cicspi.Subckt.circuits:
             cicspi.Subckt.circuits[cell.name] = ckt
 
-    def hook(self, stage, cell, jobj, parents, kw):
-        """before<Stage> -> <stage>() -> after<Stage>."""
+    def hook(self, stage, cell, jobj, parents, kw, decorators=()):
+        """before<Stage> -> <stage>() -> after<Stage>.
+
+        Decorators ride along in the reference's exact order: their
+        before<Stage> runs after the cell's before methods; their
+        <stage>() runs right after the cell's -- but only Place and
+        Paint have that call, Route does not; their after<Stage> runs
+        after the cell's after methods.
+        """
+        def deco(hookname):
+            for d in decorators:
+                getattr(d, hookname)()
+
         dispatch.runAllParents("before" + stage, cell, parents, fromParent=True, **kw)
         dispatch.runAll("before" + stage, cell, jobj, **kw)
+        deco("before" + stage)
         fn = getattr(cell, stage.lower(), None)
         if callable(fn):
             fn()
+        if stage in ("Place", "Paint"):
+            deco(stage.lower())
         dispatch.runAllParents("after" + stage, cell, parents, fromParent=True, **kw)
         dispatch.runAll("after" + stage, cell, jobj, **kw)
+        deco("after" + stage)
 
     def attachSubckt(self, cell, jobj, parents, name):
         """Give the cell its connectivity.

@@ -61,7 +61,13 @@ def snap(v, grid):
     """
     if grid <= 0:
         return int(v)
-    q = (v + grid // 2) // grid if v >= 0 else (v - grid // 2) // grid
+    #- C++ integer division TRUNCATES toward zero; Python's // floors,
+    #- which pushed every negative boundary one grid step further down
+    #- (-1710 snapped to -1800 where the reference says -1700)
+    if v >= 0:
+        q = (v + grid // 2) // grid
+    else:
+        q = -((-v + grid // 2) // grid)
     return int(q * grid)
 
 

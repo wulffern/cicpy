@@ -85,6 +85,9 @@ class Instance(Cell):
     def setSubcktInstance(self,inst:spi.SubcktInstance):
 
         log = logging.getLogger("Instance("+inst.subcktName + ")")
+        #- keep the schematic instance: decorators read its groupName
+        #- (C++ Instance::subcktInstance())
+        self.subcktInstance = inst
         self.instanceName = inst.name
         self.ports.clear()
         self.name = inst.subcktName

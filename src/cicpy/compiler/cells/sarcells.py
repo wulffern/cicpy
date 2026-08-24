@@ -29,6 +29,8 @@ class CapCell(LayoutCell):
 
     def __init__(self, name=""):
         super().__init__(name)
+        #- CapCell's C++ constructor opts back into the full union
+        self.setBoundaryIgnoreRouting(False)
         self.usem3_ = False
         self.usem5_ = False
         self.heightIncreaseMult_ = 1
@@ -216,6 +218,11 @@ class CapCell(LayoutCell):
 class CDAC(LayoutCell):
     """A column of CapCells, one per bit, ringed by the CP<> nets."""
 
+    def __init__(self, name=""):
+        super().__init__(name)
+        #- CDAC's C++ constructor opts back into the full union
+        self.setBoundaryIgnoreRouting(False)
+
     def _fullUnionBox(self):
         xs = [c for c in self.children if c is not None]
         if not xs:
@@ -299,6 +306,8 @@ class SAR(LayoutCell):
 
     def __init__(self, name=""):
         super().__init__(name)
+        #- SAR's C++ constructor opts back into the full union
+        self.setBoundaryIgnoreRouting(False)
         #- true by default (sar.h): the SAR's vertical hop rides M5
         #- unless the object file turns it off
         self.usem5_ = True

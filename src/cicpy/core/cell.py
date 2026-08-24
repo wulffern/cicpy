@@ -291,9 +291,15 @@ class Cell(Rect):
         """Set whether to ignore boundary routing when calculating bounding rect"""
         self.ignoreBoundaryRouting = bool(bir)
     
-    def boundaryIgnoreRouting(self):
-        """Get whether boundary routing is ignored"""
-        return self.ignoreBoundaryRouting
+    def boundaryIgnoreRouting(self, val):
+        """The object-file setter: a JSON "boundaryIgnoreRouting": 0/1
+        dispatches here (C++ Cell::boundaryIgnoreRouting(QJsonValue),
+        true only for exactly 1). The parameter is REQUIRED so the
+        dispatcher passes the value instead of calling a getter."""
+        try:
+            self.setBoundaryIgnoreRouting(int(val) == 1)
+        except (TypeError, ValueError):
+            self.setBoundaryIgnoreRouting(bool(val))
     
     # Add a rectangle to the cell, hooks updated() of the child to updateBoundingRect
     def add(self, child):
@@ -340,6 +346,17 @@ class Cell(Rect):
 
     def _expandBoundingRect(self, child):
         if(self._boundingSkips(child)):
+            return
+        #- the first COUNTED child seeds the box; the birth box
+        #- (0,0,0,0) is not geometry, and min()-ing against it pins
+        #- x1/y1 to the origin for a cell whose content starts at
+        #- 24000 (a full recompute has no such anchor -- match it)
+        if(not getattr(self, "_bbox_has_content", False)):
+            self._bbox_has_content = True
+            self.x1 = child.x1
+            self.y1 = child.y1
+            self.x2 = child.x2
+            self.y2 = child.y2
             return
         if(child.x1 < self.x1):
             self.x1 = child.x1
@@ -431,6 +448,11 @@ class Cell(Rect):
         back a SimpleRect, which has no layer to copy.
         """
         r = self.calcBoundingRect()
+        #- keep the expansion seed honest: after a recompute the box
+        #- has content exactly when some child counted toward it
+        self._bbox_has_content = any(
+            c is not None and not self._boundingSkips(c)
+            for c in self.children)
         self.x1 = r.x1
         self.y1 = r.y1
         self.x2 = r.x2
@@ -453,12 +475,26 @@ class Cell(Rect):
         - a child still at (0,0)-(0,0) is a placeholder, not geometry
           at the origin (see calcBoundingRectFromList).
         """
+        from .route import Route
+        if(Route.compat == "ciccreator"):
+            #- the reference, verbatim: with boundaryIgnoreRouting set
+            #- -- and the C++ LayoutCell constructor sets it -- the box
+            #- is the union of NON-CUT INSTANCES alone; without it,
+            #- everything counts (calcBoundingRect:
+            #- `if(ignoreBoundaryRouting && (!isInstance()||isCut()))`)
+            if(self.ignoreBoundaryRouting):
+                return (not child.isInstance()) or child.isCut()
+            #- a child still at (0,0)-(0,0) is a queued Route, not
+            #- geometry at the origin. The C++ counts it transiently
+            #- and the next add's full recompute washes it out once
+            #- the route has drawn; expansion cannot shrink, so the
+            #- placeholder must never seed the box.
+            if(child.x1 == 0 and child.y1 == 0
+               and child.x2 == 0 and child.y2 == 0):
+                return True
+            return False
         if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
             return True
-        if((child.isRoute() or child.isPort()) and not child.isType("RouteRing") and not self.isType("RouteRing")):
-            from .route import Route
-            if(Route.compat == "ciccreator"):
-                return True
         if(child.x1 == 0 and child.y1 == 0
            and child.x2 == 0 and child.y2 == 0):
             return True

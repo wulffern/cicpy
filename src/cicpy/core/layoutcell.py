@@ -118,7 +118,6 @@ class LayoutCell(Cell):
         self.altenateGroup = False
         self.alternateGroup = False
         self.noPowerRoute = False
-        self.boundaryIgnoreRouting = False
         self.useHalfHeight = False
         self.graph = None
         self._placeHorizontal = False
@@ -205,6 +204,9 @@ class LayoutCell(Cell):
             self.log.warning(f"Could not find cell {cktInst.subcktName} in {self.name}")
             from .cell import Cell as _Cell
             layoutCell = _Cell()
+            missingCell = True
+        else:
+            missingCell = False
         i.cell = layoutCell.name
         #- The name the SCHEMATIC uses, which is not always the layout
         #- cell: a diode connected device is placed as the D variant,
@@ -225,6 +227,10 @@ class LayoutCell(Cell):
         i.xcell = -int(sx)
         i.ycell = -int(sy)
         i.setSubcktInstance(cktInst)
+        if missingCell:
+            #- Instance::setCell left the name EMPTY for an unknown
+            #- cell, and setSubcktInstance never touches it; ours does
+            i.name = ""
 
         self.add(i)
         i.moveTo(x,y)
@@ -1485,7 +1491,10 @@ class LayoutCell(Cell):
                  x = dummy.x1
                  y = dummy.y2
                  next_y = y
-        pass
+        #- C++ place() closes with updateBoundingRect -- for a cell
+        #- with devices but no instances this is the recompute that
+        #- picks up a boundaryIgnoreRouting the object file just set
+        self.updateBoundingRect()
 
     def addPortRectangle(self, layer, x1, y1, width, height, angle, portname):
         self.log.info(f"addPortRectangle(layer={layer}, x1={x1}, y1={y1}, width={width}, height={height}, angle={angle}, portname={portname})")
@@ -2296,8 +2305,14 @@ class LayoutCell(Cell):
         #- what a rail has to be able to carry. Cut.getInstance("M3","M4")
         #- gave the right number for a sky130 M1 ring by coincidence and
         #- nothing anywhere else.
-        above = self._layerAbove(layer)
-        c = Cut.getInstance(layer, above, 2, 2) if above else None
+        from .route import Route
+        if Route.compat == "ciccreator":
+            #- the reference sizes EVERY power ring off the M3-M4 2x2
+            #- via, whatever layer the ring is on (addPowerRing)
+            c = Cut.getInstance("M3", "M4", 2, 2)
+        else:
+            above = self._layerAbove(layer)
+            c = Cut.getInstance(layer, above, 2, 2) if above else None
         if c is None:
             mw = Rules.getInstance().get(layer, "width") * widthmult
         else:
@@ -2862,8 +2877,8 @@ class LayoutCell(Cell):
         if("noPowerRoute" in o):
             self.noPowerRoute = o["noPowerRoute"]
 
-        if("boundarIgnoreRouting" in o):
-            self.boundaryIgnoreRouting = o["boundaryIgnoreRouting"]
+        if("boundaryIgnoreRouting" in o):
+            self.setBoundaryIgnoreRouting(o["boundaryIgnoreRouting"])
 
         self.guiHierarchy = o.get("cellgroups", o.get("guiHierarchy", [])) or []
 

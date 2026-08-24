@@ -80,7 +80,97 @@ class Compiler():
         #- the design before anything that places it -- Design::read puts
         #- them at the front for exactly that reason.
         self.design.addCuts()
+        #- Design::read: options.topcells mark the used set, walking
+        #- every instance so the writer can drop what nothing reaches
+        for name in self.topcells:
+            self._markUsed(self.design.cells.get(name), set())
         return self.design
+
+    def _markUsed(self, cell, seen):
+        """Cell::updateUsedChildren: recurse the child tree, and follow
+        every instance to the design cell it places."""
+        if cell is None or id(cell) in seen:
+            return
+        seen.add(id(cell))
+        cell.cellUsed = True
+        for ch in list(getattr(cell, "children", []) or []):
+            if ch is None:
+                continue
+            sub = getattr(ch, "_cell_obj", None)
+            if sub is None:
+                cn = getattr(ch, "cell", None)
+                if isinstance(cn, str) and cn:
+                    sub = self.design.cells.get(cn)
+            if sub is not None:
+                self._markUsed(sub, seen)
+            if hasattr(ch, "children"):
+                self._markUsed(ch, seen)
+
+    #- these serialize their raw name; everything else gets the prefix
+    #- (Cell::toJson: isText/isPort/isRoute keep name() -- a RouteRing
+    #- is NOT isRoute, and a nameless Guard really does emit "<prefix>")
+    _RAW_NAME_CLASSES = frozenset(("Rect", "Port", "Text", "cIcCore::Route"))
+
+    def toJson(self):
+        """The design as .cic JSON, with options.prefix and topcells
+        applied the way Design::toJson applies them: unused cells are
+        dropped when topcells is set, and the prefix lands on names at
+        write time, never during the build."""
+        obj = self.design.toJson()
+        if self.topcells:
+            used = {n for n, c in self.design.cells.items()
+                    if getattr(c, "cellUsed", False)}
+            obj["cells"] = [c for c in obj["cells"] if c.get("name") in used]
+        if self.prefix:
+            for c in obj["cells"]:
+                self._prefixJson(c)
+        return obj
+
+    def _prefixJson(self, o):
+        p = self.prefix
+        if o.get("class", "") not in Compiler._RAW_NAME_CLASSES and "name" in o:
+            o["name"] = p + (o.get("name") or "")
+        if isinstance(o.get("cell"), str):
+            o["cell"] = p + o["cell"]
+        ckt = o.get("ckt")
+        if isinstance(ckt, dict):
+            if "name" in ckt:
+                ckt["name"] = p + (ckt.get("name") or "")
+            for i in ckt.get("instances") or []:
+                if isinstance(i, dict) and "subcktName" in i:
+                    i["subcktName"] = p + (i.get("subcktName") or "")
+        si = o.get("subcktInstance")
+        if isinstance(si, dict) and "subcktName" in si:
+            si["subcktName"] = p + (si.get("subcktName") or "")
+        for c in o.get("children") or []:
+            if isinstance(c, dict):
+                self._prefixJson(c)
+
+    def readLibrary(self, path):
+        """A `library` entry is a SERIALIZED design -- a .cic another
+        compile already wrote -- so it deserializes straight into cells
+        (Design::readJsonFile -> fromJson); only `include` compiles.
+        The library's subckts go into the spice registry so this
+        design's netlists can instantiate its cells by name.
+        """
+        import re as _re
+        before = set(self.design.cells)
+        self.design.fromJsonFile(path)
+        libpath = _re.sub(r"\.cic(\.gz)?$", "", path)
+        for name, cell in self.design.cells.items():
+            if name in before:
+                continue
+            if not getattr(cell, "libpath", ""):
+                cell.libpath = libpath
+            ckt = getattr(cell, "ckt", None)
+            if ckt is not None:
+                import cicspi
+                if self.spice is not None and name not in self.spice:
+                    self.spice[name] = ckt
+                if cicspi.Subckt.circuits is None:
+                    cicspi.Subckt.circuits = self.spice if self.spice is not None else {}
+                if name not in cicspi.Subckt.circuits:
+                    cicspi.Subckt.circuits[name] = ckt
 
     def readCells(self, filename):
         #- the netlist is the object file's name with .spi in place of
@@ -110,7 +200,7 @@ class Compiler():
             if path is None:
                 raise FileNotFoundError("Could not find library '%s'" % libfile)
             log.info("Reading library '%s'", path)
-            self.readCells(path)
+            self.readLibrary(path)
 
         for incfile in obj.get("include", []) or []:
             path = self.find(incfile, filename)
@@ -181,6 +271,7 @@ class Compiler():
         out = []
         for inst in instances:
             line = getattr(inst, "spiceStr", "") or ""
+            self._applyLineProperties(inst, line)
             m = self._M_RE.search(line)
             if not m or not str(getattr(inst, "name", "")).upper().startswith("X"):
                 out.append(inst)
@@ -196,8 +287,24 @@ class Compiler():
                 clone.parent = getattr(inst, "parent", None)
                 clone.parse(line, getattr(inst, "lineNumber", 0))
                 clone.name = "%s%d" % (base, i)
+                self._applyLineProperties(clone, line)
                 out.append(clone)
         ckt.instances = out
+
+    _PROP_RE = re.compile(r"([A-Za-z_]\w*)\s*=\s*(\S+)")
+
+    def _applyLineProperties(self, inst, line):
+        """xoffset=4 on a netlist line is an instance PROPERTY, and
+        place() reads it (C++ ckt_inst->hasProperty). cicspi keeps only
+        the raw line, so lift every k=v off it."""
+        if not line:
+            return
+        try:
+            props = inst.properties
+        except AttributeError:
+            return
+        for m in Compiler._PROP_RE.finditer(line):
+            props.setdefault(m.group(1), m.group(2))
 
     #- -----------------------------------------------------------------
     #- Building one cell
@@ -253,7 +360,12 @@ class Compiler():
             return None
 
         cell = cls()
-        cell.name = self.prefix + name
+        #- names stay UNPREFIXED while the design builds: the reference
+        #- applies options.prefix at serialization (Design::toJson sets
+        #- it on each cell as it writes), so netlists, inherit chains
+        #- and instance lookups all resolve raw names. Prefixing here
+        #- broke every cross-file lookup the moment ip.json set one.
+        cell.name = name
         cell.design = self.design
         #- placement resolves child cells through the parent design
         cell.parent = self.design
@@ -293,7 +405,9 @@ class Compiler():
         transistors and lost their pins.
         """
         import cicspi
-        ckt = getattr(cell, "subckt", None)
+        #- either attribute: attachSubckt sets both, but a cell whose
+        #- netlist came from a parseSubckt block only has .ckt
+        ckt = getattr(cell, "subckt", None) or getattr(cell, "ckt", None)
         if ckt is None:
             return
         try:
@@ -332,8 +446,12 @@ class Compiler():
         Without (2) such a cell has no nodes, addAllPorts finds nothing
         to publish, and the cell comes out with no ports at all.
         """
+        #- no companion .spi yet does NOT mean no connectivity: an
+        #- inline `spice` array still needs parsing, so make sure the
+        #- parser exists before any lookup
         if self.spice is None:
-            return
+            import cicspi
+            self.spice = cicspi.SpiceParser()
         ckt = self.spice.get(name)
 
         if ckt is None and isinstance(jobj.get("spice"), list):

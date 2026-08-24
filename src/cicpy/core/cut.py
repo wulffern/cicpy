@@ -183,6 +183,75 @@ class Cut(Cell):
 
 
     @staticmethod
+    def getFillCell(startlayer:str, stoplayer:str, rect:Rect):
+        """The C++ fill constructor, Cut(layer1, layer2, Rect*): a fill
+        cut built as a plain CELL positioned at `rect` -- it serializes
+        inline with all its rects, which is how a Guard's contact rows
+        appear in a .cic. getFillInstance is cicpy's own wrapper form;
+        this one follows the reference arithmetic exactly (integer
+        truncation, no minimum cut count).
+        """
+        def trunc(a, b):
+            return int(a / b) if b else 0
+
+        rules = Rules.getInstance()
+        layers = rules.getConnectStack(startlayer, stoplayer)
+        cell = Cell()
+        if len(layers) == 0:
+            logging.getLogger("Cut").debug(
+                f"No layers to cut for {startlayer} {stoplayer}")
+            return cell
+        cell.name = "fillCut"
+        for l in layers:
+            if l.material in [Layer.metal, Layer.poly, Layer.diffusion]:
+                cell.add(Rect(l.name, 0, 0, rect.width(), rect.height()))
+            elif l.material == Layer.cut:
+                enc_opp = rules.get(l.previous, l.name + "encOpposite")
+                enclosure = rules.get(l.previous, "enclosure")
+                cut_width = rules.get(l.name, "width")
+                cut_height = rules.get(l.name, "height")
+                cut_space = rules.get(l.name, "space")
+
+                enc_x, enc_y = enc_opp, enclosure
+                if rect.isHorizontal() and rect.isVertical():
+                    enc_x, enc_y = enc_opp, enc_opp
+                elif rect.isVertical():
+                    enc_x, enc_y = enclosure, enc_opp
+                elif rect.isHorizontal():
+                    enc_x, enc_y = enc_opp, enclosure
+
+                width = rect.width() - enc_x * 2
+                hcuts = trunc(width, cut_width + cut_space)
+                height = rect.height() - enc_y * 2
+                vcuts = trunc(height, cut_height + cut_space)
+                if vcuts == 0:
+                    vcuts = trunc(height, cut_height)
+                if hcuts == 0:
+                    hcuts = trunc(width, cut_width)
+
+                cell.name = Cut.makeName(layers[0].name, layers[-1].name,
+                                         hcuts, vcuts)
+
+                xa1 = enc_x
+                ya1 = enc_y
+                if rect.isHorizontal():
+                    xa1 = trunc(trunc(rect.width() - hcuts*(cut_width + cut_space) + cut_space, 2), 10) * 10
+                if rect.isVertical():
+                    ya1 = trunc(trunc(rect.height() - vcuts*(cut_height + cut_space) + cut_space, 2), 10) * 10
+
+                for _x in range(max(0, hcuts)):
+                    for _y in range(max(0, vcuts)):
+                        cell.add(Rect(l.name, xa1, ya1, cut_width, cut_height))
+                        ya1 += cut_height + cut_space
+                    ya1 = enc_y
+                    xa1 += cut_width + cut_space
+
+        cell.updateBoundingRect()
+        cell.moveTo(rect.x1, rect.y1)
+        cell.updateBoundingRect()
+        return cell
+
+    @staticmethod
     def getFillInstance(startlayer:str, stoplayer:str, rect:Rect):
         """Create a cut instance that fills the provided overlap rectangle."""
         if startlayer == stoplayer or rect is None:
@@ -200,17 +269,11 @@ class Cut(Cell):
             if l.material in [Layer.metal, Layer.poly, Layer.diffusion]:
                 fill_cell.add(Rect(l.name, 0, 0, rect.width(), rect.height()))
             elif l.material == Layer.cut:
-                try:
-                    enc_opp = rules.get(l.previous, l.name + "encOpposite")
-                except Exception:
-                    enc_opp = 0
-                try:
+                enc_opp = rules.get(l.previous, l.name + "encOpposite")
+                if rules.hasRule(l.previous, l.name + "enclosure"):
                     enclosure = rules.get(l.previous, l.name + "enclosure")
-                except Exception:
-                    try:
-                        enclosure = rules.get(l.previous, "enclosure")
-                    except Exception:
-                        enclosure = 0
+                else:
+                    enclosure = rules.get(l.previous, "enclosure")
                 cut_width = rules.get(l.name, "width")
                 cut_height = rules.get(l.name, "height")
                 cut_space = rules.get(l.name, "space")

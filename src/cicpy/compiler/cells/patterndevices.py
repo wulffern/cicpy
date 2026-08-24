@@ -105,7 +105,7 @@ class _ResLayerMixin:
         return rc
 
 
-@cicclass("cIcCore::PatternResistor", "cIcCore::PatternHighResistor")
+@cicclass("cIcCore::PatternResistor")
 class PatternResistor(_ResLayerMixin, PatternTile):
     """A tile whose picture is a resistor: `r` paints the res marker."""
 
@@ -132,6 +132,62 @@ class PatternResistor(_ResLayerMixin, PatternTile):
             self.res.properties["width"] = self.toMicron(self.currentHeight_)
             self.res.properties["length"] = self.toMicron(self.xspace_)
             self.res.properties["layer"] = rect.layer
+
+
+@cicclass("cIcCore::PatternHighResistor")
+class PatternHighResistor(PatternResistor):
+    """A poly resistor with a bulk tie: its device is an `rppo` on
+    N/P/B, its length is measured off the OP enclosure, and
+    `transposed` runs the stripes across the cell instead of up it.
+    """
+
+    def __init__(self, name=""):
+        super().__init__(name)
+        self.transposed = False
+        self.res = _device("R1", ["N", "P", "B"])
+        self.res.deviceName = "rppo"
+        self.subckt = _subcktWith(self.name or "RES", self.res)
+        self.ckt = self.subckt
+
+    def onFillCoordinate(self, c, layer, x, y, data):
+        if not str(layer).startswith("PO"):
+            return
+        if self.transposed:
+            #- stripes run ACROSS, so a finger is a row; the fill loop
+            #- walks y downward, so count row CHANGES, not maxima
+            if data.get("porow") != y:
+                data["nf"] = data.get("nf", 0) + 1
+                data["porow"] = y
+            self.res.properties["width"] = self.toMicron(self.yspace_)
+        else:
+            if data["pofinger"] < x:
+                data["nf"] += 1
+                data["pofinger"] = x
+            self.res.properties["width"] = self.toMicron(self.xspace_)
+
+    def onPaintEnclosure(self, r):
+        if r is not None and r.layer == "OP":
+            #- the OP rectangle spans the resistor; its LONG side is
+            #- the length, and which side that is follows orientation
+            self.res.properties["length"] = self.toMicron(
+                r.width() if self.transposed else r.height())
+
+    def endFillCoordinate(self, data):
+        if "nf" in data:
+            self.res.properties["nf"] = data["nf"]
+
+
+@cicclass("cIcCore::PatternHighResistorNoBulk",
+          "cIcCore::PatternHighResistorNobulk")
+class PatternHighResistorNoBulk(PatternHighResistor):
+    """The bulk-less variant: same rppo device on N/P only."""
+
+    def __init__(self, name=""):
+        super().__init__(name)
+        self.res = _device("R1", ["N", "P"])
+        self.res.deviceName = "rppo"
+        self.subckt = _subcktWith(self.name or "RES", self.res)
+        self.ckt = self.subckt
 
 
 @cicclass("cIcCore::PatternCapacitor")

@@ -319,10 +319,8 @@ class Route(Cell):
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         minwidth = width
-        try:
+        if rules.hasRule(self.routeLayer, "minwidth"):
             minwidth = rules.get(self.routeLayer, "minwidth")
-        except Exception:
-            pass
 
         segments = []
         vrect = self._candidateVerticalRect(x)
@@ -1089,11 +1087,8 @@ class Route(Cell):
         rules = Rules.getInstance()
         width = rules.get(self.routeLayer, self.routeWidthRule)
         minwidth = width
-        try:
+        if rules.hasRule(self.routeLayer, "minwidth"):
             minwidth = rules.get(self.routeLayer, "minwidth")
-        except Exception as e:
-            self.log.debug(f"No minwidth rule for layer {self.routeLayer}, using width: {e}")
-            pass
         for r in rects:
             if offset in ("HIGH", "LOW"):
                 x1 = r.centerX()

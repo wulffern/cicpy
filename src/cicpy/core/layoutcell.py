@@ -189,7 +189,13 @@ class LayoutCell(Cell):
         if layoutCell is None and hasattr(self.parent, "generatePrimitiveLayout"):
             layoutCell = self.parent.generatePrimitiveLayout(cktInst.subcktName, cktInst)
         if layoutCell is None:
-            raise ValueError(f"Could not find layout cell for {cktInst.subcktName}")
+            #- Instance::setCell: an unknown cell WARNS and places an
+            #- empty zero-size cell -- a netlist may name cells the
+            #- object files never define, and the reference builds the
+            #- rest of the layout around the hole rather than dying.
+            self.log.warning(f"Could not find cell {cktInst.subcktName} in {self.name}")
+            from .cell import Cell as _Cell
+            layoutCell = _Cell()
         i.cell = layoutCell.name
         #- The name the SCHEMATIC uses, which is not always the layout
         #- cell: a diode connected device is placed as the D variant,
@@ -1230,6 +1236,23 @@ class LayoutCell(Cell):
             self.translate(-self.x1, -self.y1)
 
     def parseSubckt(self, obj):
+        #- Qt's fromJson reads a missing key as an empty value, and
+        #- hand-written parseSubckt blocks lean on that (none of them
+        #- carry "class"). cicspi indexes the dict strictly, so fill
+        #- the blanks before handing it over.
+        def _norm(o, extra=()):
+            o = dict(o)
+            o.setdefault("class", "")
+            o.setdefault("name", "")
+            o.setdefault("nodes", [])
+            o.setdefault("properties", {})
+            for k in extra:
+                o.setdefault(k, "")
+            return o
+        obj = _norm(obj)
+        obj["devices"] = [_norm(d, ("deviceName",)) for d in obj.get("devices") or []]
+        obj["instances"] = [_norm(i, ("deviceName", "subcktName", "groupName"))
+                            for i in obj.get("instances") or []]
         ckt = spi.Subckt()
         ckt.fromJson(obj)
         self.ckt = ckt
@@ -1379,6 +1402,15 @@ class LayoutCell(Cell):
                         pass
 
             linst = self.addInstance(inst,inst_x,inst_y)
+
+            #- a netlist can pin an instance's orientation (C++ place)
+            if inst.hasProperty("angle"):
+                a = inst.getPropertyString("angle")
+                if a == "180":
+                    linst.setAngle("MY")
+                elif a == "MX":
+                    linst.setAngle("MX")
+
             if(linst.x2 > next_x):
                 next_x = linst.x2
             next_y = linst.y2
@@ -1387,7 +1419,13 @@ class LayoutCell(Cell):
                 ymax = next_y
 
             x = linst.x1
-            y = next_y
+            #- setYoffsetHalf: rows stack at HALF the instance height,
+            #- which is how a standard-cell library shares its supply
+            #- rails between rows (C++: y += (inst->y2()-instance_y)/2)
+            if self.useHalfHeight:
+                y = y + (linst.y2 - inst_y) // 2
+            else:
+                y = next_y
 
             prevcell = linst
             previnst = inst
@@ -1598,6 +1636,28 @@ class LayoutCell(Cell):
                 else:
                     self.log.error(f"Unknown rect {name}")
             self.add(inst)
+
+    def addGuard(self, port:str, gridMultiplier:float, layers:list):
+        """Ring the cell with a guard and publish `port` on its M1
+        (C++ addGuard). The ring stands off the bounding box by
+        `gridMultiplier` vertical route grids on every side.
+        """
+        from .guard import Guard
+        from .port import Port
+        from .rules import Rules
+        rules = Rules.getInstance()
+        r = self.getCopy()
+        enc = rules.get("ROUTE", "verticalgrid") * gridMultiplier
+        r.adjust(-enc, -enc, enc, enc)
+        g = Guard(r, layers)
+        self.add(g)
+        p = self.getPort(port)
+        if p is None:
+            p = Port(port)
+            self.add(p)
+        m1 = g.getRect("M1")
+        if p is not None and m1 is not None:
+            p.set(m1.getCopy())
 
     def addPortOnRect(self, port:str, layer:str, path:str=""):
         """Publish `port` on the first rect `path` finds on `layer`.
@@ -3548,10 +3608,9 @@ class LayoutCell(Cell):
         states no area rule."""
         rules = Rules.getInstance()
         w = int(rules.get(layer, "width"))
-        try:
-            area = int(rules.get(layer, "area"))
-        except Exception:
+        if not rules.hasRule(layer, "area"):
             return w
+        area = int(rules.get(layer, "area"))
         side = int(math.ceil(math.sqrt(area)))
         return max(w, (side + 1) // 2)
 

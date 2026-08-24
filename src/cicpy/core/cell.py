@@ -265,6 +265,28 @@ class Cell(Rect):
                 return child
         return None
     
+    def addEnclosingLayers(self, layers):
+        """Cell::addEnclosingLayers: one rect per layer, each enclosing
+        this cell by that layer's enclosure rule.
+
+        The enclosure accumulates: the C++ adjusts ONE copy of the
+        bounding rect per layer in turn, so the second layer encloses
+        the first layer's rect, not the cell.
+        """
+        from .rules import Rules
+        rules = Rules.getInstance()
+        r = self.getCopy()
+        for lay in layers:
+            encRule = str(self.layer) + "enclosure"
+            if(rules.hasRule(lay, encRule)):
+                enc = rules.get(lay, encRule)
+            else:
+                enc = rules.get(lay, "enclosure")
+            r.adjust(-enc, -enc, enc, enc)
+            r_enc = r.getCopy()
+            r_enc.layer = lay
+            self.add(r_enc)
+
     def setBoundaryIgnoreRouting(self, bir):
         """Set whether to ignore boundary routing when calculating bounding rect"""
         self.ignoreBoundaryRouting = bool(bir)

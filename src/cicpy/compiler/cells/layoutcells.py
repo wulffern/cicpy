@@ -53,9 +53,13 @@ class LayoutCell(_CicpyLayoutCell):
             return None
         def at(i):
             return str(obj[i]) if len(obj) > i else ""
+        #- element 4 reads into `cuts` and then C++ DROPS it: the
+        #- positional overload declares that parameter without a name
+        #- (QString options, QString /*cuts*/, ...), so files in the
+        #- wild park anything there -- SUN_PLL says "track2"
         return super().addConnectivityRoute(
             at(0), at(1), at(2),
-            options=at(3), cuts=at(4),
+            options=at(3), cuts="",
             excludeInstances="", includeInstances=at(5))
 
     def addRouteConnection(self, *args):

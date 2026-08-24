@@ -269,10 +269,8 @@ def cost(ctx, cicfile, techfile, cell, top):
     from cicpy.core.wirecost import report
     rules = cic.Rules(techfile)
     um = 10000
-    try:
+    if rules.hasRule("ROUTE", "um"):
         um = int(rules.get("ROUTE", "um"))
-    except Exception:
-        pass
     click.echo(report(cicfile, cell, um=um, top=top))
 
 
@@ -1004,7 +1002,7 @@ def compile_(ctx, objectfile, techfile, library, includes, prefix, keep_going):
         log.warning(f"{len(comp.failed)} cell(s) not built: "
                     + ", ".join(n for n, _ in comp.failed))
 
-    obj = design.toJson()
+    obj = comp.toJson()
     obj["info"] = {
         "file": objectfile,
         "rules": techfile,

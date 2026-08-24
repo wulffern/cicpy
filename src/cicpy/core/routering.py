@@ -1,3 +1,4 @@
+import logging
 from .cell import Cell
 from .rect import Rect
 from .rules import Rules
@@ -245,7 +246,7 @@ class RouteRing(Cell):
         elif location == "left":
             return self.left
         else:
-            print(f"Could not find location = {location} on {self.name()}. Use top,bottom,left,right")
+            logging.getLogger("RouteRing").error(f"Could not find location = {location} on {self.name()}. Use top,bottom,left,right")
             return None
 
     def trimRouteRing(self, location: str, whichEndToTrim: str):

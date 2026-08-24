@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import re
+from cicpy.logger import console
 
 class Placer():
 
@@ -153,7 +154,7 @@ class Placer():
             y += self.snap(c.toMicron(c.height()))
 
 
-        print(self.df)
+        console.print(self.df)
 
     def placeVertical(self,column=0,x=None,y=None):
 

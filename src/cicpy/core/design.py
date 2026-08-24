@@ -82,7 +82,7 @@ class Design():
         from .cut import Cut
         for cut in Cut.getCuts():
             if cut.name not in self.cells:
-                print(f"Adding cut {cut.name}")
+                logging.getLogger("Design").debug(f"Adding cut {cut.name}")
                 self.cells[cut.name] = cut
                 self.cellnames.insert(0, cut.name)  # Add at the beginning like C++
 

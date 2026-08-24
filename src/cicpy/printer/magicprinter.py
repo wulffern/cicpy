@@ -302,7 +302,7 @@ class MagicPrinter(DesignPrinter):
             tr1, tr2 = orientations[rotation]
         else:
             tr1, tr2 = orientations[""]
-            print(f"Warning: orientation {rotation} of {inst.cell} is not known, placing it unrotated")
+            logging.getLogger("MagicPrinter").warning(f"orientation {rotation} of {inst.cell} is not known, placing it unrotated")
 
         path = ""
         if(inst.libpath != ""):

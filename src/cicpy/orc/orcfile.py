@@ -26,6 +26,7 @@
 ######################################################################
 
 import json
+import logging
 
 import re
 
@@ -78,7 +79,7 @@ class OrcFile(dict):
                 orcc = OrcCell(ckt)
             else:
                 instckt = ckt.makeInstGroupSubckt(g["name"])
-                print(instckt.tospice())
+                logging.getLogger("Orc").debug(instckt.tospice())
                 orcc = OrcCell(instckt)
             for k in g:
                 if(k != "name"):

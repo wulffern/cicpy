@@ -585,9 +585,10 @@ class Route(Cell):
         near = sorted(((abs(int(v) - trunk), k, int(v))
                        for k, v in anchors.items()))
         detail = " ".join(f"{k}={v}" for _, k, v in near)
-        print(f"TRUNKREPORT\t{self.net}\t{self.routeLayer}\t{self.route_}\t"
-              f"trunkx={trunk}\t{hit[0] if hit else 'NONE'}\t"
-              f"off={near[0][0] if near else '-'}\t{detail}")
+        from cicpy.logger import console
+        console.print(f"TRUNKREPORT\t{self.net}\t{self.routeLayer}\t{self.route_}\t"
+                      f"trunkx={trunk}\t{hit[0] if hit else 'NONE'}\t"
+                      f"off={near[0][0] if near else '-'}\t{detail}")
 
     def _resolveTrunkAlign(self):
         """Pin-relative trunk options, resolved against the collected

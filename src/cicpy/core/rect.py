@@ -26,6 +26,7 @@
 ######################################################################
 import json
 import sys
+from cicpy.logger import console
 from .point import Point
 
 INT_MAX = sys.maxsize  
@@ -407,7 +408,7 @@ class Rect:
 
 
     def printToJson(self):
-        print(json.dumps(self.toJson(),indent=4))
+        console.print(json.dumps(self.toJson(),indent=4))
 
     #- class -> frozenset of every name in its MRO, filled on first ask.
     #- isType is the hottest function in a compile (350k calls over one

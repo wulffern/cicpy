@@ -26,7 +26,7 @@
 ######################################################################
 from .designprinter import DesignPrinter
 import sys
-import numpy as np
+import math
 from os import path
 import os
 
@@ -104,7 +104,7 @@ class SkillLayPrinter(DesignPrinter):
         #- Scale font size of pin according to cell size
         w = self.toMicron(self.cell.width())
         l = self.toMicron(self.cell.width())
-        wl = int((np.log2(w) + np.log2(l))/10) + 0.1
+        wl = int((math.log2(w) + math.log2(l))/10) + 0.1
 
 
         self.fcell.write(f"dbCreateLabel(layout list({layerNumber} {dataType}) {x1}:{y1} \"{p.name}\" \"centerLeft\" \"R0\" \"stick\" {wl})\n")

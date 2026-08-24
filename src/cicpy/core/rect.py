@@ -37,11 +37,17 @@ def sortOnTop(rects,left=False,right=False,top=False,bottom=False):
     index = 0
     count = 0
 
-    x =  INT_MAX
+    #- each criterion needs the OPPOSITE extreme as its starting
+    #- value: a `>` test must start from -inf, a `<` test from +inf.
+    #- top started from +inf, so `r.y2 > y` was never true and
+    #- sortTopOnTop was a silent no-op -- every onTopT route trunked
+    #- from whatever rect happened to be first. bottom had the same
+    #- fault mirrored.
+    x = INT_MAX
     y = INT_MAX
     if(right):
         x = INT_MIN
-    elif(bottom):
+    if(top):
         y = INT_MIN
 
     for r in rects:
@@ -376,10 +382,25 @@ class Rect:
     def toJson(self):
         o = dict()
         o["class"] = "Rect"
-        o["x1"] = self.x1
-        o["y1"] = self.y1
-        o["x2"] = self.x2
-        o["y2"] = self.y2
+        #- the .cic format is INTEGER database units -- ciccreator's
+        #- QJson writes ints, and every consumer reads them back as
+        #- coordinates on the manufacturing grid. cicpy's arithmetic
+        #- runs through /2.0 and rotation trig, so a coordinate can
+        #- arrive here as 6300.0 or 10000.000000000002; rounding at
+        #- the boundary keeps the file what the format says it is.
+        #- "Not all programs like negative width/height, so fix it" --
+        #- Rect::toJson swaps an inverted rect at the boundary, and the
+        #- box math upstream has already run on the raw coordinates
+        x1, x2 = self.x1, self.x2
+        if x2 < x1:
+            x1, x2 = x2, x1
+        y1, y2 = self.y1, self.y2
+        if y2 < y1:
+            y1, y2 = y2, y1
+        o["x1"] = int(round(x1))
+        o["y1"] = int(round(y1))
+        o["x2"] = int(round(x2))
+        o["y2"] = int(round(y2))
         o["layer"] = self.layer
         o["net"] = self.net
         return o
@@ -388,15 +409,19 @@ class Rect:
     def printToJson(self):
         print(json.dumps(self.toJson(),indent=4))
 
+    #- class -> frozenset of every name in its MRO, filled on first ask.
+    #- isType is the hottest function in a compile (350k calls over one
+    #- SAR); walking __mro__ and comparing names each time cost more
+    #- than the geometry it was guarding.
+    _typenames_cache = {}
+
     def isType(self,typename):
-        # Check current class
-        if(self.__class__.__name__ == typename):
-            return True
-        # Check all parent classes in the MRO (Method Resolution Order)
-        for base in self.__class__.__mro__[1:]:  # Skip self.__class__ at index 0
-            if base.__name__ == typename:
-                return True
-        return False
+        cls = self.__class__
+        names = Rect._typenames_cache.get(cls)
+        if names is None:
+            names = frozenset(base.__name__ for base in cls.__mro__)
+            Rect._typenames_cache[cls] = names
+        return typename in names
 
     def isInstance(self):
         return self.isType("Instance")

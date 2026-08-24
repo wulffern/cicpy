@@ -102,3 +102,31 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+# test fixtures cloned by tests/sch2mag/Makefile
+tests/sch2mag/jnw_atr_sky130a/
+tests/sch2mag/jnw_tr_sky130a/
+tests/sch2mag/lelo_atr_sky130a/
+tests/sch2mag/lelo_temp_sky130a/
+tests/sch2mag/tech_sky130A/
+# generated test outputs
+tests/*/[A-Z]*_svg/
+tests/*/*_svg.html
+tests/*/ROUTE_DEMOS_svg/
+tests/transpile/SAR9B/
+tests/transpile/*.il
+tests/transpile/*.v
+tests/transpile/*.spice
+tests/transpile/*.spi
+tests/transpile/*.yaml
+tests/jcell/*.json
+tests/minecraft/*.mc
+tests/place/*.il
+tests/place/*_place.csv
+tests/filter/filter.status
+tests/filter/filter.stdout
+tests/orc/demo_out.*
+tests/routes/route_examples.cic.gz
+tests/svg/SAR9B_svg*
+tests/spi2mag/design/TEST_LIB/TOP.cic
+tests/spi2mag/design/TEST_LIB/TOP.mag
+tests/spi2mag/design/TEST_LIB/TOP.py

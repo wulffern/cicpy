@@ -244,6 +244,18 @@ class Cell(Rect):
             p = self.ports[name]
         return p
 
+    def getChildren(self, typename):
+        """Children of one class, by ciccreator's name for it.
+
+        The C++ matches metaObject()->className(), so callers pass
+        namespaced names like "cIcCore::Route"; isType knows classes by
+        their Python names, so strip the namespace before asking.
+        RouteRing.trimRouteRing has called this since it was ported and
+        nothing had ever executed that line until the CDAC did.
+        """
+        name = typename.split("::")[-1]
+        return [c for c in self.children if c is not None and c.isType(name)]
+
     # Find the first rectangle in this cell that uses layer
     def getRect(self,layer):
         for child in self.children:
@@ -253,13 +265,41 @@ class Cell(Rect):
                 return child
         return None
     
+    def addEnclosingLayers(self, layers):
+        """Cell::addEnclosingLayers: one rect per layer, each enclosing
+        this cell by that layer's enclosure rule.
+
+        The enclosure accumulates: the C++ adjusts ONE copy of the
+        bounding rect per layer in turn, so the second layer encloses
+        the first layer's rect, not the cell.
+        """
+        from .rules import Rules
+        rules = Rules.getInstance()
+        r = self.getCopy()
+        for lay in layers:
+            encRule = str(self.layer) + "enclosure"
+            if(rules.hasRule(lay, encRule)):
+                enc = rules.get(lay, encRule)
+            else:
+                enc = rules.get(lay, "enclosure")
+            r.adjust(-enc, -enc, enc, enc)
+            r_enc = r.getCopy()
+            r_enc.layer = lay
+            self.add(r_enc)
+
     def setBoundaryIgnoreRouting(self, bir):
         """Set whether to ignore boundary routing when calculating bounding rect"""
         self.ignoreBoundaryRouting = bool(bir)
     
-    def boundaryIgnoreRouting(self):
-        """Get whether boundary routing is ignored"""
-        return self.ignoreBoundaryRouting
+    def boundaryIgnoreRouting(self, val):
+        """The object-file setter: a JSON "boundaryIgnoreRouting": 0/1
+        dispatches here (C++ Cell::boundaryIgnoreRouting(QJsonValue),
+        true only for exactly 1). The parameter is REQUIRED so the
+        dispatcher passes the value instead of calling a getter."""
+        try:
+            self.setBoundaryIgnoreRouting(int(val) == 1)
+        except (TypeError, ValueError):
+            self.setBoundaryIgnoreRouting(bool(val))
     
     # Add a rectangle to the cell, hooks updated() of the child to updateBoundingRect
     def add(self, child):
@@ -283,9 +323,58 @@ class Cell(Rect):
                 self.routes.append(child)
             child.parent = self
             self.children.append(child)
-            child.connect(self.updateBoundingRect)
+            child.connect(self._childGeometryChanged)
 
+        #- one add is one union step. Recomputing the whole union per
+        #- add made building a cell O(children^2) -- a third of a SAR
+        #- compile spent re-summing boxes that could only grow. A full
+        #- recompute still happens whenever an EXISTING child moves
+        #- (the listener below) or an explicit updateBoundingRect asks.
+        #- only when the box IS the union: a subclass that computes its
+        #- box some other way (PatternTile's grid formula, CapCell's
+        #- trimmed union) must keep being asked, not expanded past
+        #- compat runs the reference's exact semantics: a fresh union
+        #- over the children's CURRENT boxes at every add. Expansion
+        #- cannot express it -- a queued route counts as (0,0,0,0)
+        #- until it draws, and whether that zero ends up in the final
+        #- box depends on whether anything is added afterwards (a ring
+        #- freezes it in, a painted cell washes it out).
+        from .route import Route
+        if(Route.compat == "ciccreator"):
+            self.updateBoundingRect()
+        elif(getattr(self, "_bbox_incremental", False)
+           and type(self).calcBoundingRect is Cell.calcBoundingRect):
+            self._expandBoundingRect(child)
+        else:
+            self.updateBoundingRect()
+
+    def _childGeometryChanged(self):
+        #- an existing child moved or resized: the union may have
+        #- SHRUNK, which expansion cannot express
         self.updateBoundingRect()
+
+    def _expandBoundingRect(self, child):
+        if(self._boundingSkips(child)):
+            return
+        #- the first COUNTED child seeds the box; the birth box
+        #- (0,0,0,0) is not geometry, and min()-ing against it pins
+        #- x1/y1 to the origin for a cell whose content starts at
+        #- 24000 (a full recompute has no such anchor -- match it)
+        if(not getattr(self, "_bbox_has_content", False)):
+            self._bbox_has_content = True
+            self.x1 = child.x1
+            self.y1 = child.y1
+            self.x2 = child.x2
+            self.y2 = child.y2
+            return
+        if(child.x1 < self.x1):
+            self.x1 = child.x1
+        if(child.y1 < self.y1):
+            self.y1 = child.y1
+        if(child.x2 > self.x2):
+            self.x2 = child.x2
+        if(child.y2 > self.y2):
+            self.y2 = child.y2
 
     
     # Move this cell, and all children by dx and dy
@@ -358,11 +447,67 @@ class Cell(Rect):
         pass
 
     def updateBoundingRect(self):
+        """Take the extent of the children, and ONLY the extent.
+
+        calcBoundingRect builds a throwaway Rect to carry four numbers
+        home, and that rect is on no layer. setRect copies the layer
+        too, so routing this through it silently cleared the layer of
+        whatever it was called on -- an Instance is on PR, and every
+        instance came out of here on no layer at all. The C++ hands
+        back a SimpleRect, which has no layer to copy.
+        """
         r = self.calcBoundingRect()
-        self.setRect(r)
-        pass
+        #- keep the expansion seed honest: after a recompute the box
+        #- has content exactly when some child counted toward it
+        self._bbox_has_content = any(
+            c is not None and not self._boundingSkips(c)
+            for c in self.children)
+        self.x1 = r.x1
+        self.y1 = r.y1
+        self.x2 = r.x2
+        self.y2 = r.y2
+        #- the box now reflects every child, so add() may EXPAND it
+        #- instead of recomputing the union from scratch
+        self._bbox_incremental = True
 
     # Calculate the extent of this cell. Should be overriden by children
+    def _boundingSkips(self, child):
+        """Does this child stay OUT of the cell's own box?
+
+        - ignoreBoundaryRouting keeps routing out, so a ring drawn
+          around the cell does not become part of the cell it rings
+          (cIcCore writes this as (!isInstance() || isCut())).
+        - compiled cells: a plain Route or a Port never widens the box
+          (measured against the binary and every golden), but a ring
+          does -- and a ring's own box spans its connections. The
+          spi2mag flow keeps cicpy's union behaviour.
+        - a child still at (0,0)-(0,0) is a placeholder, not geometry
+          at the origin (see calcBoundingRectFromList).
+        """
+        from .route import Route
+        if(Route.compat == "ciccreator"):
+            #- the reference, verbatim: with boundaryIgnoreRouting set
+            #- -- and the C++ LayoutCell constructor sets it -- the box
+            #- is the union of NON-CUT INSTANCES alone; without it,
+            #- everything counts (calcBoundingRect:
+            #- `if(ignoreBoundaryRouting && (!isInstance()||isCut()))`)
+            if(self.ignoreBoundaryRouting):
+                return (not child.isInstance()) or child.isCut()
+            #- and NO placeholder rule: a child at (0,0,0,0) -- a
+            #- queued route, a Text pinned at origin -- is geometry to
+            #- the reference's union. Whether the zero survives into
+            #- the final box depends only on whether the box is
+            #- recomputed after the child draws (a ring's never is;
+            #- CAPT8B's DONE ring and SUN_PLL_BIAS's AVSS route both
+            #- keep the origin edge).
+            return False
+        if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
+            return True
+        if(child.x1 == 0 and child.y1 == 0
+           and child.x2 == 0 and child.y2 == 0):
+            return True
+        return False
+
     def calcBoundingRect(self):
         x1 = INT_MAX
         y1 = INT_MAX
@@ -374,24 +519,7 @@ class Cell(Rect):
 
 
         for child in self.children:
-            #- ignoreBoundaryRouting keeps routing out of the bounding
-            #- box, so a ring drawn around the cell does not become part
-            #- of the cell it rings.
-            #-
-            #- cIcCore::Cell::updateBoundingRect writes this as
-            #-   (!cr->isInstance() || cr->isCut())
-            #- because there every child is an instance or a route. Here
-            #- a LayoutCell's children are CellGroups, so keeping only
-            #- instances keeps nothing and the box comes out INT_MAX.
-            #- Say what is meant instead: routing does not count.
-            #- The port had not(isInstance()) or not(isCut()), true for
-            #- every plain instance, which emptied the box either way
-            if(self.ignoreBoundaryRouting and self._isBoundaryRouting(child)):
-                continue
-            #- see calcBoundingRectFromList: a child still at
-            #- (0,0)-(0,0) is a placeholder, not geometry at the origin
-            if(child.x1 == 0 and child.y1 == 0
-               and child.x2 == 0 and child.y2 == 0):
+            if(self._boundingSkips(child)):
                 continue
             cx1 = child.x1
             cx2 = child.x2
@@ -489,13 +617,13 @@ class Cell(Rect):
     
 
     #- Abstract methods
-    def paint():
+    def paint(self):
         pass
 
-    def route():
+    def route(self):
         pass
 
-    def place():
+    def place(self):
         pass
 
 
@@ -530,6 +658,14 @@ class Cell(Rect):
         if("physicalOnly" in o):
             self.physicalOnly = o["physicalOnly"]
 
+        #- the file records how this cell's box was computed (the C++
+        #- LayoutCell defaults it TRUE: box = non-cut instances only).
+        #- Losing it on a library round trip made every re-read cell's
+        #- box a full union -- a TAPCELLB grew 10800 and every cell
+        #- placed after it shifted right (measured in sun_pll).
+        if("boundaryIgnoreRouting" in o):
+            self.ignoreBoundaryRouting = bool(o["boundaryIgnoreRouting"])
+
         if("libcell" in o):
             self.libcell = o["libcell"]
 
@@ -543,15 +679,39 @@ class Cell(Rect):
             self.ckt.prefix = self.design.prefix
             self.ckt.fromJson(o["ckt"])
 
+        #- Cell::fromJson reads children too -- a plain Cell child (a
+        #- Guard's contact row, a fill cut) has geometry of its own,
+        #- and skipping it here silently emptied every such child on a
+        #- library round trip. LayoutCell.fromJson used to do this
+        #- alone; the shared reader guards against double-reading.
+        if not getattr(self, "_children_from_json", False):
+            self._children_from_json = True
+            from .layoutcell import readJsonChildren
+            readJsonChildren(self, o)
+
 
     def toJson(self):
         o = super().toJson()
         o["class"] = self.__class__.__name__
 
-        if(o["class"] == "Cell"):
-            o["class"] = "cIcCore::Cell"
-        elif(o["class"] == "Layout"):
-            o["class"] = "cIcCore::LayoutCell"
+        #- the names ciccreator's writer uses; its reader and cicpy's
+        #- both accept them, and .cic files on disk say these
+        _CPP_NAMES = {
+            "Cell": "cIcCore::Cell",
+            "Layout": "cIcCore::LayoutCell",
+            "LayoutCell": "cIcCore::LayoutCell",
+            "Route": "cIcCore::Route",
+            "RouteRing": "cIcCore::RouteRing",
+            "Guard": "cIcCore::Guard",
+            #- a Cut CELL: Qt sees it via the Cell metaobject, so
+            #- ciccreator's files call it cIcCore::Cell
+            "Cut": "cIcCore::Cell",
+        }
+        o["class"] = _CPP_NAMES.get(o["class"], o["class"])
+        #- every C++ Rect is born on layer PR and a Cell never changes
+        #- it, so cells in a .cic all say PR; say the same
+        if not o.get("layer"):
+            o["layer"] = "PR"
 
         o["name"] = self.name
         o["has_pr"] = self.has_pr
@@ -563,7 +723,18 @@ class Cell(Rect):
             o["ckt"] = ockt
 
         oc = list()
+        #- plain rectangles are deduplicated by value, exactly as the
+        #- C++ writer does (Cell::toJson keeps a toString() set): a
+        #- generator that paints the same bar once per finger writes it
+        #- once. Only for class Rect precisely -- a Port or a Text with
+        #- the same geometry is still its own thing.
+        printed = set()
         for child in self.children:
+            if child.__class__.__name__ == "Rect":
+                rid = (child.layer, child.x1, child.y1, child.x2, child.y2)
+                if rid in printed:
+                    continue
+                printed.add(rid)
             oc.append(child.toJson())
         o["children"] = oc
         return o
@@ -773,9 +944,13 @@ class Cell(Rect):
                     rr = self._port_rect_on_layer(port, layer)
                     if rr is not None:
                         rects.append(rr)
-                # named_rects entry by exact name.
+                # named_rects entry by exact name. NO layer filter: a
+                # named rect is usually a via's TOP metal, published so
+                # a route on another layer can land on it -- filtering
+                # by the route's layer is exactly what would hide it
+                # (the C++ appends unconditionally).
                 nr = self.named_rects.get(s)
-                if nr is not None and (not layer or getattr(nr, "layer", "") == layer):
+                if nr is not None:
                     rects.append(nr)
 
     def _findRectangles(self, rects, name, layer):
@@ -790,33 +965,44 @@ class Cell(Rect):
                 continue
             if not (hasattr(child, "isInstance") and child.isInstance()):
                 continue
+            #- the C++ searches inst->ports(), a NAME-KEYED MAP: when a
+            #- net lands on two pins of one instance (XA0 ... EN EN),
+            #- the LAST InstancePort with the name is the one the map
+            #- holds, and the one whose rect an addPortOnRect sees
+            by_name = {}
             for pi in getattr(child, "children", []):
                 if pi is None:
                     continue
                 if not (hasattr(pi, "isInstancePort") and pi.isInstancePort()):
                     continue
-                if getattr(pi, "name", "") != name:
-                    continue
+                by_name[getattr(pi, "name", "")] = pi
+            pi = by_name.get(name)
+            if pi is not None:
                 rr = self._port_rect_on_layer(pi, layer)
                 if rr is not None:
                     rects.append(rr)
         nr = self.named_rects.get(name)
-        if nr is not None and (not layer or getattr(nr, "layer", "") == layer):
+        if nr is not None:
             # Already appended in _findRectanglesByRegex when no `:`/`,`; skip
             # to avoid duplication.
             if nr not in rects:
                 rects.append(nr)
 
     def _port_rect_on_layer(self, port, layer):
+        """The port's rect on `layer`, or its route-layer rect.
+
+        The FALLBACK IS NOT FILTERED, and that is the C++'s behaviour
+        exactly (findRectanglesByRegex: `r = p->get(layer); if(!r) r =
+        p->get();` -- and no check after). A route on M2 may start from
+        a port whose metal is on M1; the router drops the via stack.
+        Filtering the fallback turned every such route into 'Route did
+        not work ... start=0'.
+        """
         if port is None or not hasattr(port, "get"):
             return None
         rr = port.get(layer)
         if rr is None:
             rr = port.get()
-        if rr is None:
-            return None
-        if layer and getattr(rr, "layer", "") and getattr(rr, "layer", "") != layer:
-            return None
         return rr
 
     #     QJsonObject toJson();

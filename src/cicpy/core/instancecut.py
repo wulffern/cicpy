@@ -29,7 +29,15 @@ from .instance import Instance
 
 class InstanceCut(Instance):
     """Instance of a Cut cell"""
-    
+
     def __init__(self):
         super().__init__()
+
+    def toJson(self):
+        o = super().toJson()
+        #- "Instance": the class ciccreator writes for a placed cut --
+        #- what makes it a cut is the CELL it places (cut_*), and the
+        #- reader classifies it back by that name.
+        o["class"] = "Instance"
+        return o
 

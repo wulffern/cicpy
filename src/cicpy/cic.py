@@ -269,10 +269,8 @@ def cost(ctx, cicfile, techfile, cell, top):
     from cicpy.core.wirecost import report
     rules = cic.Rules(techfile)
     um = 10000
-    try:
+    if rules.hasRule("ROUTE", "um"):
         um = int(rules.get("ROUTE", "um"))
-    except Exception:
-        pass
     click.echo(report(cicfile, cell, um=um, top=top))
 
 
@@ -972,3 +970,46 @@ def filter(ctx,cicfile,cell,includes):
 
 if __name__ == '__main__':
     cli(obj={})
+
+
+@cli.command("compile")
+@click.pass_context
+@click.argument("objectfile")
+@click.argument("techfile")
+@click.argument("library", required=False, default="")
+@click.option("--I", "includes", multiple=True, help="Path to search for include files")
+@click.option("--prefix", default="", help="Prefix for every cell name")
+@click.option("--keep-going", is_flag=True, help="Continue past cells this port cannot build yet")
+def compile_(ctx, objectfile, techfile, library, includes, prefix, keep_going):
+    """Compile a ciccreator object definition (.json) into a .cic file.
+
+    This is the job `bin/cic` does in ciccreator: read an object file,
+    its companion .spi netlist and a technology file, run the place /
+    route / paint lifecycle over every cell, and write the result.
+    """
+    from .compiler import Compiler
+
+    if not library:
+        library = re.sub(r"\.json$", "", os.path.basename(objectfile))
+
+    cic.Rules(techfile)
+    design = cic.Design()
+    design.libname = library
+
+    comp = Compiler(design, includePaths=includes, prefix=prefix, keepGoing=keep_going)
+    comp.read(objectfile)
+    if comp.failed:
+        log.warning(f"{len(comp.failed)} cell(s) not built: "
+                    + ", ".join(n for n, _ in comp.failed))
+
+    obj = comp.toJson()
+    obj["info"] = {
+        "file": objectfile,
+        "rules": techfile,
+        "library": library,
+        "arguments": " ".join(sys.argv),
+    }
+    out = library + ".cic"
+    with open(out, "w") as fo:
+        json.dump(obj, fo, indent=1, sort_keys=True)
+    log.info(f"Writing {out}")

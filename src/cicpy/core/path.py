@@ -982,11 +982,6 @@ class Path(Route):
 
     def fromJson(self, o):
         super().fromJson(o)
-        #- Cell.fromJson reads no children, so a Path read its own
-        #- metal as nothing. The dispatch that LayoutCell uses is
-        #- shared for exactly this.
-        from .layoutcell import readJsonChildren
-        readJsonChildren(self, o)
         self.net = o.get("net", self.net)
         self.routeLayer = o.get("routeLayer", self.routeLayer)
         self.options = o.get("options", self.options)

@@ -56,6 +56,11 @@ jobs:
 
   # Deployment job
   deploy:
+    # Pages deploys only from the default branch: the github-pages
+    # environment refuses a pull_request run, so this job failed in one
+    # second on EVERY PR and put a red X on branches whose tests passed.
+    # Skip it on PRs -- build still runs, and still builds the docs.
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

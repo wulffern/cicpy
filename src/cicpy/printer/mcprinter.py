@@ -26,7 +26,6 @@
 ######################################################################
 from .designprinter import DesignPrinter
 import sys
-import numpy as np
 from os import path
 import os
 

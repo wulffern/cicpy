@@ -27,9 +27,24 @@
 #Core
 
 from .core import *
-from .printer import *
-from .place import *
-#from .ckt import *
 from .eda import *
 from .orc import *
 from .pdk import *
+
+#- The printers and the placer are NOT star-imported: a star import
+#- would touch every lazy name and drag every printer's dependencies
+#- back onto the startup path. Their names resolve on first use.
+from .printer import _LOCATIONS as _PRINTER_NAMES
+
+
+def __getattr__(name):
+    if name in _PRINTER_NAMES:
+        from . import printer
+        value = getattr(printer, name)
+        globals()[name] = value
+        return value
+    if name == "Placer":
+        from .place.placer import Placer
+        globals()["Placer"] = Placer
+        return Placer
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))

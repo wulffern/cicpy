@@ -27,7 +27,6 @@
 from .designprinter import DesignPrinter
 import sys
 import svgwrite
-import numpy as np
 from os import path
 import logging
 import os

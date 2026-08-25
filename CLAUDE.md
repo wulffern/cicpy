@@ -68,6 +68,26 @@ make upload        # pypi (requires token)
 
 **`place/`** — transistor placement algorithms (diffpair, horizontal, vertical)
 
+### Logging and output
+
+`src/cicpy/logger.py` owns both channels. `setupLogging(level, stderr=False)`
+installs a rich handler on the root logger; `console` is a rich `Console` for
+the data a command was asked for. Diagnostics go to a module logger
+(`logging.getLogger(__name__)`-style, named per class), asked-for output goes to
+`console`. **There are no bare `print()` calls in `src/` — keep it that way.**
+`cicpy-mcp` calls `setupLogging(stderr=True)` because its stdout is the protocol
+channel.
+
+### compile
+
+`compile` builds a design from a ciccreator object file (`compiler/`), then
+optionally runs the transpile printers over the in-memory design via the shared
+`_run_printers` helper in `cic.py` — no reload of the `.cic` it just wrote. Two
+things force it back to the file instead: a prefix (from `--prefix` or the
+object file's `options.prefix`) lands on names at write time, and `topcells`
+drops unused cells, so the in-memory design is trimmed to the written cell set
+before printing.
+
 ### CLI entry point
 
 `src/cicpy/cic.py` defines all Click commands. The `cli` group is registered as `cicpy` in `pyproject.toml`. All commands follow the pattern: load `Rules`, load `Design`, instantiate a printer, call `printer.print(design)`.

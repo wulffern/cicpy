@@ -63,6 +63,14 @@ def build_reference(root):
     if os.path.exists(cic):
         return cic
     print("== building ciccreator (cic-core + cic)")
+    #- the top-level `make compile` generates version.h before qmake;
+    #- building the sub-projects directly must do the same or main.cpp
+    #- dies on the include
+    ver = os.path.join(root, "cic", "src", "version.h")
+    if not os.path.exists(ver):
+        with open(ver, "w") as f:
+            f.write('#define CICVERSION "parity-corpus"\n'
+                    '#define CICHASH "parity-corpus"\n')
     for sub in ("cic-core", "cic"):
         d = os.path.join(root, sub)
         subprocess.run(["qmake6", "DEFINES+=QMAKE_6"], cwd=d, check=True)

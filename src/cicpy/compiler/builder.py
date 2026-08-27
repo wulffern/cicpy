@@ -430,6 +430,20 @@ class Compiler():
 
         self.attachSubckt(cell, jobj, parents, name)
 
+        #- every reference cell HAS a subckt, netlist or not: a plain
+        #- tile with no electrical view still writes ckt{name, nodes:[]}
+        #- to the .cic, and the xschem transpiler dereferences it --
+        #- ckt:{} read back as None crashed on the first tap cell
+        if getattr(cell, "ckt", None) is None:
+            try:
+                import cicspi
+                empty = cicspi.Subckt()
+                empty.name = cell.name
+                cell.ckt = empty
+                cell.subckt = empty
+            except ImportError:
+                pass
+
         self.hook("Place", cell, jobj, parents, kw, decorators)
         self.hook("Route", cell, jobj, parents, kw, decorators)
         if hasattr(cell, "addAllPorts"):
@@ -517,6 +531,15 @@ class Compiler():
         if ckt is None and isinstance(jobj.get("spice"), list):
             lines = [str(v) for v in jobj["spice"]]
             ckt = self.parseInlineSpice(self.applySpiceRegex(lines, jobj), name)
+
+        #- a pattern device CONSTRUCTED its subckt: the measured Mosfet
+        #- or resistor lives in ckt.devices, and the reference keeps it
+        #- (no netlist names the cell, so nothing overrides). Deriving
+        #- one from a parent's netlist here replaced the device with an
+        #- empty body and the transpiled spice lost the transistor.
+        own = getattr(cell, "subckt", None)
+        if ckt is None and own is not None and getattr(own, "devices", None):
+            return
 
         if ckt is None:
             #- inherit the NEAREST parent's netlist, REPARSED under this

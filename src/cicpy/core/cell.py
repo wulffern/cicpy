@@ -45,6 +45,7 @@ class Cell(Rect):
         self.ignoreBoundaryRouting = False
         self.physicalOnly = False
         self.abstract = False
+        self.libcell = False
         self.children  = list()
         self.ports = dict()
         self.routes = list()
@@ -641,6 +642,10 @@ class Cell(Rect):
         self.name = self.design.prefix  + o["name"]
 
 
+        if("meta" in o and isinstance(o["meta"], dict)):
+            #- keep the WHOLE meta object: it round-trips to toJson,
+            #- and the transpiler reads more of it than symbol
+            self.meta = o["meta"]
         if("meta" in o and "symbol" in o["meta"]):
             self.symbol = o["meta"]["symbol"]
         else:
@@ -715,6 +720,19 @@ class Cell(Rect):
 
         o["name"] = self.name
         o["has_pr"] = self.has_pr
+
+        #- the object file's meta rides through to the .cic: the xschem
+        #- transpiler picks its SYMBOL from meta.symbol, so dropping it
+        #- turned every hand-drawn library symbol into a generated box
+        if isinstance(self.meta, dict) and self.meta:
+            o["meta"] = self.meta
+
+        #- the printers SKIP on these (an abstract tap tile must not
+        #- become an empty .SUBCKT in the netlist), so they must
+        #- survive the write like the reference's Cell::toJson
+        o["abstract"] = bool(self.abstract)
+        o["physicalOnly"] = bool(self.physicalOnly)
+        o["libcell"] = bool(self.libcell)
 
         ckt = self.ckt
         o["ckt"] = dict()

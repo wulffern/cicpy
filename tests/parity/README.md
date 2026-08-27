@@ -6,6 +6,18 @@ rather than asserted.
 
 ## Measuring
 
+The whole corpus, exactly as CI runs it -- `config.yaml` names every
+corpus repository (cicconf format, the same tool the IP repositories
+use), `run_corpus.py` builds the reference from source, compiles every
+design with both tools and fails on any regression:
+
+```sh
+pip install cicconf        # and qt6-base-dev for the reference build
+make parity
+```
+
+One design by hand:
+
 ```sh
 # reference
 git clone https://github.com/wulffern/ciccreator

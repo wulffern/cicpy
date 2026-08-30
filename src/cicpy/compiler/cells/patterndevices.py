@@ -21,10 +21,13 @@ log = logging.getLogger("cicpy.compiler")
 INT_MIN = -2**31
 
 
-def _device(name, nodes):
+def _device(name, nodes, classname):
     d = cicspi.Device()
     d.name = name
     d.nodes = list(nodes)
+    #- the .cic writes the DEVICE CLASS, and the spice/CDL transpiler
+    #- dispatches on it ("Mosfet" in classname -> printMosfet)
+    d.classname = classname
     return d
 
 
@@ -32,7 +35,10 @@ def _subcktWith(name, dev):
     ckt = cicspi.Subckt()
     ckt.name = name
     ckt.nodes = list(dev.nodes)
-    ckt.addInstance(dev)
+    #- a DEVICE, not an instance: ckt.devices is what both the .cic
+    #- writer and the spice transpiler read (the reference's
+    #- PatternTransistor ckt carries devices:[Mosfet], instances:[])
+    ckt.devices.append(dev)
     return ckt
 
 
@@ -47,7 +53,10 @@ class PatternTransistor(PatternTile):
 
     def __init__(self, name=""):
         super().__init__(name)
-        self.mos = _device("M1", ["D", "G", "S", "B"])
+        self.mos = _device("M1", ["D", "G", "S", "B"], "cIcSpice::Mosfet")
+        #- the reference Mosfet is BORN an nch (Mosfet::Mosfet sets
+        #- deviceName "nch"); an object file with no `type` keeps it
+        self.mos.deviceName = "nch"
         self.subckt = _subcktWith(self.name or "MOS", self.mos)
         self.ckt = self.subckt
 
@@ -80,6 +89,7 @@ class PatternTransistor(PatternTile):
         self.mos.properties["width"] = self.toMicron(width)
         self.mos.properties["length"] = self.toMicron(minlength)
         self.mos.properties["nf"] = data["nf"]
+        self.mos.properties["multiplier"] = 1
         self.mos.properties["drainWidth"] = self.toMicron(self.yspace_)
         self.mos.properties["sourceWidth"] = self.toMicron(self.yspace_)
 
@@ -111,16 +121,24 @@ class PatternResistor(_ResLayerMixin, PatternTile):
 
     def __init__(self, name=""):
         super().__init__(name)
-        self.res = _device("R1", ["A", "B"])
+        self.res = _device("R1", ["A", "B"], "cIcSpice::Resistor")
+        #- the reference Resistor is born an "mres" (Resistor::init)
+        self.res.deviceName = "mres"
         self.subckt = _subcktWith(self.name or "RES", self.res)
         self.ckt = self.subckt
 
     def initFillCoordinates(self):
-        return {"pofinger": 0, "nf": 0}
+        #- MEASURED on the binary, against the source's word: each fill
+        #- string is its own pass with its own data, and "nf" enters
+        #- the map only when a PO pass COUNTS a finger. A later non-PO
+        #- pass (RES2's M1 comes after its POR) then ends with no "nf"
+        #- and leaves the device property alone. Preset it and that
+        #- pass resets a measured nf=2 to 0.
+        return {}
 
     def onFillCoordinate(self, c, layer, x, y, data):
-        if data["pofinger"] < x:
-            data["nf"] += 1
+        if data.get("pofinger", 0) < x:
+            data["nf"] = data.get("nf", 0) + 1
             data["pofinger"] = x
         if layer == "PO":
             self.res.properties["width"] = self.toMicron(self.xspace_)
@@ -144,7 +162,7 @@ class PatternHighResistor(PatternResistor):
     def __init__(self, name=""):
         super().__init__(name)
         self.transposed = False
-        self.res = _device("R1", ["N", "P", "B"])
+        self.res = _device("R1", ["N", "P", "B"], "cIcSpice::Resistor")
         self.res.deviceName = "rppo"
         self.subckt = _subcktWith(self.name or "RES", self.res)
         self.ckt = self.subckt
@@ -160,8 +178,8 @@ class PatternHighResistor(PatternResistor):
                 data["porow"] = y
             self.res.properties["width"] = self.toMicron(self.yspace_)
         else:
-            if data["pofinger"] < x:
-                data["nf"] += 1
+            if data.get("pofinger", 0) < x:
+                data["nf"] = data.get("nf", 0) + 1
                 data["pofinger"] = x
             self.res.properties["width"] = self.toMicron(self.xspace_)
 
@@ -184,7 +202,7 @@ class PatternHighResistorNoBulk(PatternHighResistor):
 
     def __init__(self, name=""):
         super().__init__(name)
-        self.res = _device("R1", ["N", "P"])
+        self.res = _device("R1", ["N", "P"], "cIcSpice::Resistor")
         self.res.deviceName = "rppo"
         self.subckt = _subcktWith(self.name or "RES", self.res)
         self.ckt = self.subckt
@@ -213,11 +231,13 @@ class PatternCapacitor(_ResLayerMixin, PatternTile):
     def onFillCoordinate(self, c, layer, x, y, data):
         if c in "BAPNDSG":
             res = _device("R%d" % (self._rindex + 1),
-                          [str(c), "NC%d" % self._rindex])
+                          [str(c), "NC%d" % self._rindex],
+                          "cIcSpice::Resistor")
+            res.deviceName = "mres"
             self._rindex += 1
             self._nodes.append(str(c))
             self.subckt.nodes = list(self._nodes)
-            self.subckt.addInstance(res)
+            self.subckt.devices.append(res)
             self.resistors.append(res)
             res.properties["layer"] = layer
 

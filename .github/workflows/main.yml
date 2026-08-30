@@ -54,6 +54,29 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@main
 
+  # Parity job: compile every corpus design with ciccreator AND cicpy
+  # on identical inputs and compare shape for shape. The corpus repos
+  # are pulled with cicconf; the reference is built from source.
+  parity:
+    runs-on: ubuntu-latest
+    container:
+      image: wulffern/aicex:26.04_latest
+      options: --user root
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+      - name: install toolchain
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qt6-base-dev g++ make git
+      - name: run parity corpus
+        run: |
+          export PATH=$HOME/.local/bin:$PATH
+          python3 -m pip install --upgrade pip
+          python3 -m pip uninstall cicpy -y
+          python3 -m pip install . cicconf
+          make parity PYTHON=python3
+
   # Deployment job
   deploy:
     # Pages deploys only from the default branch: the github-pages

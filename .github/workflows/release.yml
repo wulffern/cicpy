@@ -70,6 +70,14 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A tag run whose files are already on PyPI (a manual
+          # `make upload` first, or a re-run) must not die on
+          # "400 File already exists" -- 0.3.1 did, and the
+          # github-release job downstream never ran. PyPI rejects
+          # CHANGED content for an existing filename either way, so
+          # this only skips true duplicates.
+          skip-existing: true
 
   github-release:
     runs-on: ubuntu-latest

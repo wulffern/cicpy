@@ -130,3 +130,9 @@ tests/svg/SAR9B_svg*
 tests/spi2mag/design/TEST_LIB/TOP.cic
 tests/spi2mag/design/TEST_LIB/TOP.mag
 tests/spi2mag/design/TEST_LIB/TOP.py
+# parity corpus clones (cicconf) and their compile outputs
+tests/parity/ciccreator/
+tests/parity/*_sky130a/
+tests/parity/*_sky130A/
+tests/parity/*_sky130nm/
+tests/parity/*_ihp13g2/

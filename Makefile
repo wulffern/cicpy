@@ -29,6 +29,14 @@ test: unit_test
 
 tests: test
 
+#- Compile every corpus design with ciccreator AND cicpy on identical
+#- inputs and compare shape for shape. The corpus repositories are
+#- pulled with cicconf; the reference is built from source on first
+#- run. See tests/parity/README.md.
+parity:
+	cd tests/parity && cicconf --config config.yaml clone --https
+	cd tests/parity && ${PYTHON} run_corpus.py
+
 clean:
 	${foreach d, ${dirs} ${docs}, cd ${cwd}; cd ${d} && make clean PYTHON=${PYTHON} >/dev/null 2>&1 || true ;}
 

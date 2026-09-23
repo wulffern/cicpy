@@ -735,7 +735,16 @@ class Route(Cell):
         x_right = max(r.x2 for r in self.startRects) if self.startRects else 0
         hgrid = rules.get("ROUTE", "horizontalgrid")
         x = 0
-        if self.routeType == "RIGHT":
+        #- an absolute trunk wins over the computed column, same contract
+        #- as routeVertical's connection_center() and OrthogonalLayerRoute:
+        #- UNCONDITIONALLY. The caller that set trunkx (route_spec() in
+        #- mazerouter.py) already ran its own obstacle-aware search to pick
+        #- this column, so re-running a different unblocking heuristic on
+        #- top of an already-proven-clear coordinate would be redundant at
+        #- best, and could silently move the trunk again at worst.
+        if self.hasAbsoluteTrunk:
+            x = int(self.absoluteTrunk)
+        elif self.routeType == "RIGHT":
             x = x_left - space - width
             if self.hasTrack:
                 x = x - hgrid*self.track - space

@@ -735,15 +735,20 @@ class Route(Cell):
         x_right = max(r.x2 for r in self.startRects) if self.startRects else 0
         hgrid = rules.get("ROUTE", "horizontalgrid")
         x = 0
-        #- an absolute trunk wins over the computed column, same contract
+        #- a resolved trunk wins over the computed column, same contract
         #- as routeVertical's connection_center() and OrthogonalLayerRoute:
-        #- UNCONDITIONALLY. The caller that set trunkx (route_spec() in
-        #- mazerouter.py) already ran its own obstacle-aware search to pick
-        #- this column, so re-running a different unblocking heuristic on
-        #- top of an already-proven-clear coordinate would be redundant at
-        #- best, and could silently move the trunk again at worst.
+        #- UNCONDITIONALLY. It arrives from a pin anchor (trunkright,
+        #- trunkleft, trunktab, resolved in _resolveTrunkAlign) or from
+        #- the maze router's own obstacle-aware search; either way it is
+        #- already the answer, and a second unblocking heuristic would
+        #- only move it again for a reason nobody asked for.
+        #-
+        #- It names the CENTRELINE, as it does everywhere else, but x
+        #- here is the vertical's LEFT edge (addVertical draws from x):
+        #- without the half width, trunkright straddles the pin's edge
+        #- instead of lying on the pin.
         if self.hasAbsoluteTrunk:
-            x = int(self.absoluteTrunk)
+            x = int(self.absoluteTrunk) - width//2
         elif self.routeType == "RIGHT":
             x = x_left - space - width
             if self.hasTrack:

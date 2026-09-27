@@ -1,12 +1,14 @@
-"""routeOne() must honor an absolute trunkx, same contract as routeVertical.
+"""routeOne() must honor a resolved trunk, same contract as routeVertical.
 
-Reproduces the gap directly: a "-|--"/"--|-" route drawn via the same
-call shape addConnectivityRoute uses (start=[], stop=[pin rects]) must
-draw its vertical run at the requested trunkx, not at a position derived
-from whichever pin rect the empty-start fallback happens to promote.
-mazerouter.py's route_spec() computes trunkx from its own obstacle-aware
-search specifically for this route type -- silently discarding it here
-reintroduces the trunk-collision failure the search was built to avoid.
+A "-|--"/"--|-" route drawn via the call shape addConnectivityRoute uses
+(start=[], stop=[pin rects]) must draw its vertical run CENTRED on the
+resolved trunk -- whether that came from a pin anchor (trunkright,
+trunkleft, trunktab) or from the maze router's trunkx -- not at a
+position derived from whichever pin rect the empty-start fallback
+happens to promote.
+
+The anchors are the interface a design should use; trunkx is the
+resolved form and is tested here only because the router emits it.
 """
 import os
 import unittest
@@ -22,37 +24,39 @@ class RouteOneTrunk(unittest.TestCase):
         from cicpy.core.rules import Rules
         Rules(TECH)
 
-    def _drawn_x_span(self, route):
-        route.route()
-        xs = [g.x1 for g in route.children if hasattr(g, "x1")]
-        return xs
-
-    def test_left_route_honors_absolute_trunk(self):
+    def _route(self, options, route_type):
         from cicpy.core.rect import Rect
         from cicpy.core.route import Route
-        pin1 = Rect("M1", 0, 0, 400, 2000)
-        pin2 = Rect("M1", 50000, 0, 400, 2000)
-        trunk = 25000
-        r = Route("TESTNET", "M1", [], [pin1, pin2], f"trunkx={trunk}", "-|--")
-        self.assertTrue(r.hasAbsoluteTrunk)
-        self.assertEqual(r.absoluteTrunk, trunk)
-        xs = self._drawn_x_span(r)
-        #- the vertical run must include the requested trunk column
-        self.assertTrue(any(abs(x - trunk) < 100 for x in xs),
-                         f"drawn geometry at {xs} does not include "
-                         f"requested trunkx={trunk}")
+        self.pin1 = Rect("M1", 0, 0, 400, 2000)
+        self.pin2 = Rect("M1", 50000, 4000, 400, 2000)
+        r = Route("TESTNET", "M1", [], [self.pin1, self.pin2], options,
+                  route_type)
+        r.route()
+        return r
 
-    def test_right_route_honors_absolute_trunk(self):
-        from cicpy.core.rect import Rect
-        from cicpy.core.route import Route
-        pin1 = Rect("M1", 0, 0, 400, 2000)
-        pin2 = Rect("M1", 50000, 0, 400, 2000)
-        trunk = 25000
-        r = Route("TESTNET", "M1", [], [pin1, pin2], f"trunkx={trunk}", "--|-")
-        xs = self._drawn_x_span(r)
-        self.assertTrue(any(abs(x - trunk) < 100 for x in xs),
-                         f"drawn geometry at {xs} does not include "
-                         f"requested trunkx={trunk}")
+    def _trunk(self, route):
+        """The vertical run: the tallest rect the route drew."""
+        rects = [g for g in route.children if hasattr(g, "x1")]
+        return max(rects, key=lambda g: g.height())
+
+    def test_trunkx_is_the_centreline(self):
+        for rt in ("-|--", "--|-"):
+            with self.subTest(route=rt):
+                t = self._trunk(self._route("trunkx=25000", rt))
+                self.assertEqual(t.centerX(), 25000)
+
+    def test_trunkright_lies_on_the_pin(self):
+        for rt in ("-|--", "--|-"):
+            with self.subTest(route=rt):
+                t = self._trunk(self._route("trunkright", rt))
+                #- the rightmost trunk that still lies on every pin
+                self.assertEqual(t.x2, self.pin1.x2)
+
+    def test_trunkleft_lies_on_the_pin(self):
+        for rt in ("-|--", "--|-"):
+            with self.subTest(route=rt):
+                t = self._trunk(self._route("trunkleft", rt))
+                self.assertEqual(t.x1, self.pin2.x1)
 
 
 if __name__ == "__main__":

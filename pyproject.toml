@@ -16,7 +16,7 @@ dependencies = [
   "pyyaml",
   "matplotlib",
   "rich",
-  "cicspi"
+  "cicspi>=0.1.6"
 ]
 license = {text = "MIT"}
 description = "Custom IC Creator Python Frontend"

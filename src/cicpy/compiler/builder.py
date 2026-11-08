@@ -56,6 +56,14 @@ class Compiler():
         #- the first gap. The names are collected, never swallowed.
         self.keepGoing = keepGoing
         self.failed = []
+        #- names the prefix does not touch: every cell read from a
+        #- `library` (finished cells, already named by the compile that
+        #- built them) and every cell whose JSON says "noPrefix". One
+        #- object file can then hold prefixed pattern cells next to cells
+        #- whose names are fixed by a schematic elsewhere -- REY_PLL's
+        #- loop filter units (REYPLL_*) beside its digital blocks
+        #- (REY_PLL_PFD, LVS'd against the xschem view of that name).
+        self.noPrefix = set()
         #- every cell's JSON, by name, so `inherit` and `leech` can find it
         self._json = {}
         self.ignoreSetYoffsetHalf = False
@@ -139,22 +147,26 @@ class Compiler():
                 self._prefixJson(c)
         return obj
 
+    def _pre(self, name):
+        name = name or ""
+        return name if name in self.noPrefix else self.prefix + name
+
     def _prefixJson(self, o):
-        p = self.prefix
+        pre = self._pre
         if o.get("class", "") not in Compiler._RAW_NAME_CLASSES and "name" in o:
-            o["name"] = p + (o.get("name") or "")
+            o["name"] = pre(o.get("name"))
         if isinstance(o.get("cell"), str):
-            o["cell"] = p + o["cell"]
+            o["cell"] = pre(o["cell"])
         ckt = o.get("ckt")
         if isinstance(ckt, dict):
             if "name" in ckt:
-                ckt["name"] = p + (ckt.get("name") or "")
+                ckt["name"] = pre(ckt.get("name"))
             for i in ckt.get("instances") or []:
                 if isinstance(i, dict) and "subcktName" in i:
-                    i["subcktName"] = p + (i.get("subcktName") or "")
+                    i["subcktName"] = pre(i.get("subcktName"))
         si = o.get("subcktInstance")
         if isinstance(si, dict) and "subcktName" in si:
-            si["subcktName"] = p + (si.get("subcktName") or "")
+            si["subcktName"] = pre(si.get("subcktName"))
         for c in o.get("children") or []:
             if isinstance(c, dict):
                 self._prefixJson(c)
@@ -173,6 +185,7 @@ class Compiler():
         for name, cell in self.design.cells.items():
             if name in before:
                 continue
+            self.noPrefix.add(name)
             if not getattr(cell, "libpath", ""):
                 cell.libpath = libpath
             #- the reference resurrects each library cell as its REAL
@@ -389,6 +402,8 @@ class Compiler():
         #- and instance lookups all resolve raw names. Prefixing here
         #- broke every cross-file lookup the moment ip.json set one.
         cell.name = name
+        if jobj.get("noPrefix"):
+            self.noPrefix.add(name)
         cell.design = self.design
         #- placement resolves child cells through the parent design
         cell.parent = self.design

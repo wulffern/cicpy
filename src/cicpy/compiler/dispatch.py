@@ -35,7 +35,9 @@ RESERVED = re.compile(
 #- `spice` is here for a different reason: it IS read, by the compiler's
 #- own attachSubckt, as the cell's inline netlist -- it was never a
 #- method for the dispatcher to find.
-IGNORED = ("symbol", "rows", "composite", "comment", "description", "spice")
+#- noPrefix is read by the Compiler (names), not the cell
+IGNORED = ("symbol", "rows", "composite", "comment", "description", "spice",
+           "noPrefix")
 
 #- Design::Design()'s nameTranslator: a JSON key that calls a method
 #- by an older name. `type` on a transistor means mosType.

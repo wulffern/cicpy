@@ -1521,6 +1521,77 @@ def draw_supplies_first(layout, log=None):
     return drawn
 
 
+def _rail_metal(net, layer, pin_layer, lane_x, pins, router):
+    """The metal a canned route will draw, as (net, layer, rect) tuples.
+
+    A vertical rail on `layer` at `lane_x` spanning the pins (when
+    there is a lane), and where the rail is not on the pins' own layer,
+    a cut's pad on each pin, on both layers, at the rail's x (route.py
+    moves every cut onto the trunk) or the pin's centre. Sized from the
+    real cut, because a pad is taller than a lane.
+    """
+    out = []
+    pins = [p for p in (pins or []) if p is not None]
+    if not pins:
+        return out
+    if lane_x is not None:
+        w2 = router.rule(layer, "width") // 2
+        out.append((net, layer, (int(lane_x) - w2,
+                                 min(int(p.y1) for p in pins),
+                                 int(lane_x) + w2,
+                                 max(int(p.y2) for p in pins))))
+    if layer != pin_layer:
+        w, h = router.via_extent(pin_layer, layer)
+        for p in pins:
+            x = int(lane_x) if lane_x is not None else int(p.centerX())
+            y = int(p.centerY())
+            for lay in (pin_layer, layer):
+                out.append((net, lay, (x - w // 2, y - h // 2,
+                                       x + w // 2, y + h // 2)))
+    return out
+
+
+def _leg_metal(net, nodes, a, b, router):
+    """The metal a searched leg will draw, as (net, layer, rect) tuples.
+
+    What `Path.fromNodes` makes of the same nodes: a wire between
+    consecutive corners on one layer, a cut's pad on BOTH layers where
+    the layer changes, and the landing cut where the leg leaves pin `a`
+    or arrives on pin `b` on another layer. Sized from the real cut
+    (`via_extent`), because a pad is taller than a lane.
+    """
+    from .path import simplify
+    out = []
+    corners = simplify(nodes)
+    if not corners:
+        return out
+
+    def wire(layer, x1, y1, x2, y2):
+        w2 = router.rule(layer, "width") // 2
+        out.append((net, layer, (min(x1, x2) - w2, min(y1, y2) - w2,
+                                 max(x1, x2) + w2, max(y1, y2) + w2)))
+
+    def pad(x, y, l0, l1):
+        w, h = router.via_extent(l0, l1)
+        for layer in (l0, l1):
+            out.append((net, layer, (x - w // 2, y - h // 2,
+                                     x + w // 2, y + h // 2)))
+
+    first, last = corners[0], corners[-1]
+    la = getattr(a, "layer", None)
+    lb = getattr(b, "layer", None)
+    if la and la != first[2]:
+        pad(first[0], first[1], la, first[2])
+    for c0, c1 in zip(corners, corners[1:]):
+        if c0[2] != c1[2]:
+            pad(c1[0], c1[1], c0[2], c1[2])
+        else:
+            wire(c0[2], c0[0], c0[1], c1[0], c1[1])
+    if lb and lb != last[2]:
+        pad(last[0], last[1], last[2], lb)
+    return out
+
+
 def _internal_nets_by_stack(layout):
     """{stack: nets wholly inside it} -- one source, shared with the
     plan. Not recomputed independently on purpose: the stack cell's
@@ -1662,6 +1733,12 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                   max(r.x2 for r in allr) + margin,
                   max(r.y2 for r in allr) + margin)
         claimed = set()
+        #- METAL OF NETS ALREADY DRAWN AS SEARCHED LEGS in this stack,
+        #- (net, layer, (x1, y1, x2, y2)). Path legs become rects only
+        #- when the path runs, so the map each later net is searched on
+        #- is blind to them. Measured on REY_PLL_ROSC_N_SU: XST's li run
+        #- placed 0.08 um from VG's via pads, where li wants 0.17.
+        drawn = []
         #- THE PARENT'S QUEUED ROUTES CLAIM THEIR LANDINGS TOO. A route
         #- the top level created in its own beforeRoute is not drawn yet
         #- -- nothing is, that is this flow's original sin -- so the
@@ -1771,6 +1848,9 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                     routed.append((stack, net))
                     continue
             tm = TrackMap(layout, block_pins=True, extent=extent).build()
+            for n2, lay, rc in drawn:
+                if n2 != net:
+                    tm.occupy_rect(n2, lay, *rc)
             r = MazeRouter(tm, net)
             try:
                 #- No routeMirror fast path. It was tried for gate nets and
@@ -1815,6 +1895,9 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             tm.pin_layer, f"^{re.escape(net)}$", "||",
                             f"trunkx={lane0}", 0)
                         claimed.add((lane0, min(ys0), max(ys0)))
+                        drawn.extend(_rail_metal(net, tm.pin_layer,
+                                                 tm.pin_layer, lane0,
+                                                 rects, r))
                         routed.append((stack, net))
                         captured_by_stack.setdefault(stack, []).append(
                             (net, tm.pin_layer, "||",
@@ -1934,6 +2017,7 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                               [rects[0]], list(rects[1:]))
                         for aa, bb, nodes in searched:
                             pth.fromNodes(nodes, aa, bb)
+                            drawn.extend(_leg_metal(net, nodes, aa, bb, r))
                         log.info(f"{net}: {why}; drawn as {len(searched)} "
                                  f"leg(s) of the searched shape")
                         try:
@@ -2019,6 +2103,9 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                             claimed.add((lane,
                                          min(int(g.y1) for g in group),
                                          max(int(g.y2) for g in group)))
+                            drawn.extend(_rail_metal(net, tm.pin_layer,
+                                                     tm.pin_layer, lane,
+                                                     group, r))
                         else:
                             _sh = sorted({getattr(rr, "instName", "")
                                           for rr in rects
@@ -2291,6 +2378,12 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                                      int(pr.y1) - pad_w,
                                      int(pr.y2) + pad_w,
                                      int((pr.x2 - pr.x1) // 2 + pad_w // 2)))
+                #- and as METAL, on the layers it will really be on, for
+                #- the search of the nets after this one (see `drawn`)
+                lane_x = (int(trunk) if isinstance(trunk, (int, float))
+                          and "||" in str(rtype) else None)
+                drawn.extend(_rail_metal(net, layer, tm.pin_layer, lane_x,
+                                         rects, r))
                 routed.append((stack, net))
                 captured_by_stack.setdefault(stack, []).append(
                     (net, layer, rtype,

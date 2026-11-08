@@ -966,7 +966,21 @@ class Route(Cell):
         #- stack). The second connection adds nothing the trunk metal
         #- does not already carry.
         placed_cut_ys = []
+        placed_cut_spans = []
         placed_cut_ids = set()
+        #- CROWDED IS ABOUT THE PADS, not the centres. A diode variant's
+        #- 2x1 cut on the bar and 1x2 cut on the tab sit 0.67 um apart
+        #- centre to centre -- clear of the 0.48 um rule below -- while
+        #- their M1 pads are 0.06 um apart (measured on REY_PLL_ROSC_
+        #- P_DIODE: 80 met1.2/mcon.2 errors, two per device). Every cut
+        #- here is moved onto the same trunk x, so the y extents decide:
+        #- closer than the metal spacing is crowded.
+        try:
+            from .rules import Rules as _Rules
+            _space = max(int(_Rules.getInstance().get(self.routeLayer, "space")),
+                         int(_Rules.getInstance().get("M1", "space")))
+        except Exception:
+            _space = 0
 
         def _cut_crowded(cut):
             if cut is None:
@@ -976,7 +990,10 @@ class Route(Cell):
                 #- it again is not a collision with itself
                 return False
             yc = cut.centerY()
-            if any(abs(yc - y) < 4800 for y in placed_cut_ys):
+            y1, y2 = int(cut.y1), int(cut.y2)
+            if (any(abs(yc - y) < 4800 for y in placed_cut_ys)
+                    or any(y1 - _space < b and a < y2 + _space
+                           for a, b in placed_cut_spans)):
                 #- drop it entirely: left in place it is a stray pad
                 #- on the pin, and the pad gap it was skipped for
                 #- would just reappear there
@@ -984,6 +1001,7 @@ class Route(Cell):
                     self.children.remove(cut)
                 return True
             placed_cut_ys.append(yc)
+            placed_cut_spans.append((y1, y2))
             placed_cut_ids.add(id(cut))
             return False
 

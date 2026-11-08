@@ -460,6 +460,30 @@ class TrackMap:
             self._mark_pins()
         return self
 
+    def occupy_rect(self, net, layer, x1, y1, x2, y2):
+        """Mark metal that is not in the layout yet, as `build` marks
+        metal that is.
+
+        The stack search draws a net as path legs that only become
+        rects when the path RUNS, long after the next net has been
+        searched against a map built from the layout. Without this the
+        next net cannot see the previous one's via pads.
+        """
+        if layer not in self.tracks or not self.extent:
+            return
+        ex1, ey1, ex2, ey2 = self.extent
+        horizontal = self.directions[layer] == "h"
+        pitch = self.vpitch if horizontal else self.hpitch
+        lo = ey1 if horizontal else ex1
+        a = y1 if horizontal else x1
+        b = y2 if horizontal else x2
+        first = max(0, int((a - lo) // pitch))
+        last = min(len(self.tracks[layer]) - 1, int((b - lo) // pitch))
+        span_lo = x1 if horizontal else y1
+        span_hi = x2 if horizontal else y2
+        for i in range(first, last + 1):
+            self.tracks[layer][i].occupy(net or "?", span_lo, span_hi)
+
     def _mark_pins(self):
         x1, y1, x2, y2 = self.extent
         for net, r in self._pin_rects():

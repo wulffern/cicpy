@@ -877,8 +877,50 @@ class Path(Route):
                       f"{toLayer}")
             return None
         cut.moveCenter(int(x), int(y))
+        #- ONE VIA PER PLACE, even when two legs both ask for it. A net
+        #- drawn as several legs (draw_as_paths: a chain A->B, B->C)
+        #- lands on the shared pin twice, and each leg centres its own
+        #- cut on the point IT arrived at. Measured on REY_PLL_ROSC_N_SU:
+        #- two li->M1 pads on one pin 0.2 um apart, 157 DRC errors of
+        #- mcon.2, li.3 and met1.2 in a three-transistor column. Two cuts
+        #- of one net closer than the metal spacing have no legal form,
+        #- so the second leg joins the first one's cut instead: a short
+        #- wire on BOTH layers from where it is to that cut, and no new
+        #- cut.
+        near = self._ownViaNear(cut, fromLayer, toLayer)
+        if near is not None:
+            nx, ny = int(near.centerX()), int(near.centerY())
+            for layer in (fromLayer, toLayer):
+                if int(x) != nx:
+                    self.drawSegment(int(x), int(y), nx, int(y), layer)
+                if int(y) != ny:
+                    self.drawSegment(nx, int(y), nx, ny, layer)
+            return near
         self.add(cut)
+        self._ownVias.append((frozenset((fromLayer, toLayer)), cut))
         return cut
+
+    def _ownViaNear(self, cut, fromLayer, toLayer):
+        """This path's own cut between the same two layers that `cut`
+        would sit too close to: its box grown by the larger metal
+        spacing overlaps the other's box. None when there is none."""
+        if not hasattr(self, "_ownVias"):
+            self._ownVias = []
+        key = frozenset((fromLayer, toLayer))
+        try:
+            space = max(int(Rules.getInstance().get(fromLayer, "space")),
+                        int(Rules.getInstance().get(toLayer, "space")))
+        except Exception:
+            space = 0
+        for k, other in self._ownVias:
+            if k != key:
+                continue
+            if (int(cut.x1) - space < int(other.x2) and
+                    int(other.x1) < int(cut.x2) + space and
+                    int(cut.y1) - space < int(other.y2) and
+                    int(other.y1) < int(cut.y2) + space):
+                return other
+        return None
 
     #- -- drawing ---------------------------------------------------
     def route(self):

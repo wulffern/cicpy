@@ -84,8 +84,19 @@ def plan_from_netlist(ckt, specs, parent_name=None):
         ports = sorted(n for n in nets
                        if len(touch.get(n, ())) > 1 or n in parent_ports)
         internal = sorted(n for n in nets if n not in ports)
+        name = f"{parent}_{s['name']}".upper()
+        #- A GENERATED NAME MAY NOT BE A CELL THAT EXISTS. The subcell is
+        #- written as <name>.mag/.sch/.sym, so a stack `ctrl` in REY_PLL
+        #- became REY_PLL_CTRL -- the block it was wrapping -- and every
+        #- block's views were overwritten with the wrapper's stub.
+        taken = _existing_cells(ckt, insts)
+        if name in taken:
+            raise ValueError(
+                f"{parent}: stack '{s['name']}' would be written as "
+                f"{name}, which is a cell this design already uses; "
+                f"rename the stack")
         out.append({
-            "name": f"{parent}_{s['name']}".upper(),
+            "name": name,
             "stack": s["name"],
             "type": s.get("type", "stack"),
             "instances": sorted(getattr(i, "name", "") for i in mine),
@@ -99,6 +110,19 @@ def plan_from_netlist(ckt, specs, parent_name=None):
                     f"instance(s): {', '.join(sorted(unclaimed)[:8])}"
                     f"{' ...' if len(unclaimed) > 8 else ''}")
     return out
+
+
+def _existing_cells(ckt, insts):
+    """Upper-cased names of every cell the netlist knows: what the
+    instances instantiate, and every subckt the parser read."""
+    names = {(getattr(i, "subcktName", "") or "").upper() for i in insts}
+    parser = getattr(ckt, "parser", None)
+    for attr in ("subckts", "circuits"):
+        d = getattr(parser, attr, None)
+        if isinstance(d, dict):
+            names |= {str(k).upper() for k in d}
+    names.discard("")
+    return names
 
 
 def split_subckt(ckt, plan):

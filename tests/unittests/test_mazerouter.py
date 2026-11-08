@@ -140,8 +140,30 @@ class MazeRouterTest(unittest.TestCase):
 
     #-- search ------------------------------------------------------
 
+    def flat_router(self, net):
+        """A router that prices every layer alike.
+
+        The straight-run tests are about what a CLEAR span does, not
+        about the technology's prices. sky130.tech prices M3 at twice
+        M1, so a dip to M1 and back is the cheaper route over 39 um
+        whenever the vias down are legal -- and they are: the via under
+        another net's M3 pin was refused only while a foreign pin
+        blocked every layer of its column, which it does not (a pin
+        reserves its column from its own layer up)."""
+        r = self.router(net)
+        r.tm = type("FlatCosts", (), {})()
+        tm = self.tm
+        for k in dir(tm):
+            if not k.startswith("__"):
+                try:
+                    setattr(r.tm, k, getattr(tm, k))
+                except AttributeError:
+                    pass
+        r.tm.layer_cost = lambda layer, net=None: 1
+        return r
+
     def test_free_span_is_a_straight_run(self):
-        r = self.router("VS")
+        r = self.flat_router("VS")
         path = r.search((200000, 269000, "M3"), (239000, 269000, "M3"))
         self.assertEqual({n[2] for n in path}, {"M3"},
                          "a clear horizontal span should need no via")
@@ -188,7 +210,7 @@ class MazeRouterTest(unittest.TestCase):
 
     def test_straight_path_collapses_to_one_run(self):
         """A path is per-track; geometry should not be."""
-        r = self.router("VS")
+        r = self.flat_router("VS")
         path = r.search((200000, 269000, "M3"), (239000, 269000, "M3"))
         runs, vias = r.segments(path)
         self.assertEqual(len(runs), 1, "14 nodes should be one rect")

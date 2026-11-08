@@ -938,14 +938,27 @@ class LayoutCell(Cell):
                     #- HIDDEN ONLY: the walk above already descended
                     #- into every instance the cell names, and asking
                     #- for the whole subtree would count those twice.
+                    #-
+                    #- But hidden metal is not all obstacle. It is the
+                    #- devices' own drains and the cells' supply via
+                    #- stacks, so a hidden rect TOUCHING attributed
+                    #- metal of the cell on its layer is that conductor
+                    #- and takes its net (flooded, as in
+                    #- _attributeInstanceBody). Marking it all as device
+                    #- metal blocked a standard cell's output by its own
+                    #- drain: REYTR_IVX1_CV's Y lies on MN0's drain li,
+                    #- the via onto Y read "pin of !device", and the
+                    #- buffer could not be routed at all.
                     flat = getattr(child_cell, "flatMetal", None)
                     if flat is not None:
+                        hidden = []
                         for r in flat(hidden_only=True):
                             rr = r.getCopy()
                             self._applyTransformChain(rr, inner)
                             rr.parent = child
-                            rr.device_metal = True
-                            out.append(rr)
+                            hidden.append(rr)
+                        self._floodHidden(out[start:], hidden)
+                        out.extend(hidden)
                 continue
 
             if child.isCell():
@@ -1030,6 +1043,37 @@ class LayoutCell(Cell):
                 rr.setNet(alias[n])
             elif complete and iname and n not in boundary:
                 rr.setNet(f"{iname}/{n}")
+
+    @staticmethod
+    def _floodHidden(visible, hidden):
+        """Give hidden rects the net of attributed metal they touch on
+        their layer, to a fixpoint; the rest is device metal."""
+        known = {}
+        for rr in visible:
+            n = getattr(rr, "net", "")
+            if n and not getattr(rr, "device_metal", False):
+                known.setdefault(rr.layer, []).append(rr)
+        pending = list(hidden)
+        changed = True
+        while changed and pending:
+            changed = False
+            rest = []
+            for rr in pending:
+                hit = None
+                for other in known.get(rr.layer, ()):
+                    if (rr.x1 <= other.x2 and rr.x2 >= other.x1
+                            and rr.y1 <= other.y2 and rr.y2 >= other.y1):
+                        hit = other
+                        break
+                if hit is None:
+                    rest.append(rr)
+                    continue
+                rr.setNet(hit.net)
+                known.setdefault(rr.layer, []).append(rr)
+                changed = True
+            pending = rest
+        for rr in pending:
+            rr.device_metal = True
 
     def _attributeInstanceBody(self, inst, out, start, xforms=()):
         """Resolve the rects inside one instance: a net, or an obstacle.

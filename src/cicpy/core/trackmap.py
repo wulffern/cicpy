@@ -60,12 +60,42 @@ class Track:
         #- Measured -- using the merged extent to check via columns
         #- blocked every via off every pin in the switch column.
         self.wires = defaultdict(list)
+        #- net -> list of (lo, hi) ACROSS the track, one per entry in
+        #- `wires`, or None when the caller did not say. A rect is
+        #- filed on every track its width touches, and the track alone
+        #- says only that the metal is somewhere within a pitch of it;
+        #- a via pad next to it needs the real edge. Measured on two
+        #- stacked rey_tr cells: a VSS stack at y 18500 filed on the
+        #- track at 18000 read as metal down to 16500 and blocked the
+        #- only legal via off the output pin below it.
+        self.across = defaultdict(list)
+        #- the same for `pins`
+        self.pin_across = defaultdict(list)
 
-    def occupy(self, net, lo, hi):
+    def occupy(self, net, lo, hi, across=None):
         span = self.spans[net]
         span[0] = lo if span[0] is None else min(span[0], lo)
         span[1] = hi if span[1] is None else max(span[1], hi)
         self.wires[net].append((lo, hi))
+        self.across[net].append(across)
+
+    def foreign_extents(self, net, lo, hi, tolerate_unattributed=None):
+        """Like foreign_spans, with each span's across extent:
+        [(net, a, b, across)], across being (lo, hi) or None."""
+        if tolerate_unattributed is None:
+            tolerate_unattributed = self.layer in self.TOLERATE_UNATTRIBUTED_ON
+        out = []
+        for other, spans in self.wires.items():
+            if other == net:
+                continue
+            if other in self.UNATTRIBUTED and tolerate_unattributed:
+                continue
+            acr = self.across.get(other, [])
+            for i, (a, b) in enumerate(spans):
+                if not (hi <= a or lo >= b):
+                    out.append((other, a, b,
+                                acr[i] if i < len(acr) else None))
+        return out
 
     #- Geometry with no net. `_collectPhysicalRects` cannot resolve a
     #- rect inside an instance to a net -- only PORTS are attributable,
@@ -111,8 +141,24 @@ class Track:
         """Foreign wire actually inside lo..hi on this track."""
         return bool(self.foreign_spans(net, lo, hi, tolerate_unattributed))
 
-    def block(self, net, lo, hi):
+    def block(self, net, lo, hi, across=None):
         self.pins[net].append((lo, hi))
+        self.pin_across[net].append(across)
+
+    def foreign_items(self, net, lo, hi, tolerate_unattributed=None):
+        """Every other net's wire AND pin overlapping lo..hi along the
+        track: [(net, a, b, across, is_pin)]."""
+        out = [(n, a, b, acr, False) for n, a, b, acr in
+               self.foreign_extents(net, lo, hi, tolerate_unattributed)]
+        for other, spans in self.pins.items():
+            if other == net:
+                continue
+            acr = self.pin_across.get(other, [])
+            for i, (a, b) in enumerate(spans):
+                if not (hi <= a or lo >= b):
+                    out.append((other, a, b,
+                                acr[i] if i < len(acr) else None, True))
+        return out
 
     def blocking(self, net):
         """Spans on this track that `net` may not cross: every other
@@ -451,11 +497,13 @@ class TrackMap:
             #- a via pad fell through on five of eight subcells.
             if getattr(r, "device_metal", False):
                 for i in range(first, last + 1):
-                    self.tracks[layer][i].block(DEVICE_METAL, span_lo, span_hi)
+                    self.tracks[layer][i].block(DEVICE_METAL, span_lo,
+                                                span_hi, across=(a, b))
                 continue
             net = getattr(r, "net", "") or "?"
             for i in range(first, last + 1):
-                self.tracks[layer][i].occupy(net, span_lo, span_hi)
+                self.tracks[layer][i].occupy(net, span_lo, span_hi,
+                                             across=(a, b))
         if self.block_pins:
             self._mark_pins()
         return self
@@ -482,7 +530,8 @@ class TrackMap:
         span_lo = x1 if horizontal else y1
         span_hi = x2 if horizontal else y2
         for i in range(first, last + 1):
-            self.tracks[layer][i].occupy(net or "?", span_lo, span_hi)
+            self.tracks[layer][i].occupy(net or "?", span_lo, span_hi,
+                                         across=(a, b))
 
     def _mark_pins(self):
         x1, y1, x2, y2 = self.extent
@@ -500,7 +549,8 @@ class TrackMap:
             span_lo = r.x1 if horizontal else r.y1
             span_hi = r.x2 if horizontal else r.y2
             for i in range(first, last + 1):
-                self.tracks[layer][i].block(net, span_lo, span_hi)
+                self.tracks[layer][i].block(net, span_lo, span_hi,
+                                            across=(a, b))
 
     def _pin_rects(self):
         """(net, rect) for every pin, with the net resolved properly.

@@ -27,6 +27,7 @@ import re
 from .rules import Rules
 from .route import Route
 from collections import defaultdict
+from cicpy.core.trackmap import DEVICE_METAL
 
 
 class Blocked(Exception):
@@ -166,16 +167,21 @@ class MazeRouter:
                 for other, spans in t.pins.items():
                     if other == self.net:
                         continue
-                    for s0, s1 in spans:
+                    acrs = t.pin_across.get(other, [])
+                    for k, (s0, s1) in enumerate(spans):
                         #- (x1, x2, y1, y2) of the pin, whichever way
-                        #- its layer runs
-                        box = ((s0, s1, t.coord, t.coord) if horizontal
-                               else (t.coord, t.coord, s0, s1))
+                        #- its layer runs; across it, its real edges
+                        #- when the map has them, else the track line
+                        acr = acrs[k] if k < len(acrs) else None
+                        c0, c1 = acr if acr is not None else (t.coord,
+                                                              t.coord)
+                        box = ((s0, s1, c0, c1) if horizontal
+                               else (c0, c1, s0, s1))
                         for bx in range(int(box[0] // bucket),
                                         int(box[1] // bucket) + 1):
                             for by in range(int(box[2] // bucket),
                                             int(box[3] // bucket) + 1):
-                                index[(bx, by)].add((other, box))
+                                index[(bx, by)].add((other, box, layer))
         return {k: list(v) for k, v in index.items()}
 
     def _pins_near(self, x1, x2, y1, y2):
@@ -244,12 +250,30 @@ class MazeRouter:
         #- strictly within one clearance either side; the coordinates
         #- are integers on a fixed pitch, so the open interval is the
         #- closed one a unit in
+        #- this wire's own edges across the track, and the space it
+        #- needs: what a neighbour must clear when the map knows where
+        #- the neighbour really is. A rect is filed on every track its
+        #- width touches, so the track alone puts it up to a pitch
+        #- closer than it is -- measured, a cell's M3 via stack at
+        #- y 34500 filed on the track at 32000 refused an M3 wire at
+        #- 28000 that clears it by 5000 against a space of 3000.
+        half = self.net_width(layer) // 2
+        space = self.rule(layer, "space", 0)
+        mlo, mhi = coord - half, coord + half
         for t in self.tm.track_range(layer, coord - reach + 1,
                                      coord + reach - 1):
             near = True
-            if t.wire_overlaps(self.net, lo, hi):
-                return False
-            if t.crosses_pin(self.net, lo, hi):
+            for _o, _a, _b, acr, _pin in t.foreign_items(self.net, lo, hi):
+                #- DEVICE METAL ONLY. Its edges are the cell's own and
+                #- final. A routed net's metal is not: the search proves
+                #- a minimum width path and route.py then draws its own
+                #- shapes (2-cut pads, trunks), so the track's pitch of
+                #- slack is what keeps those legal -- measured, giving
+                #- it up for every net doubled R_TRIM's DRC count.
+                if (_o == DEVICE_METAL and acr is not None
+                        and (acr[0] >= mhi + space
+                             or acr[1] <= mlo - space)):
+                    continue
                 return False
         return near
 
@@ -434,6 +458,9 @@ class MazeRouter:
         return None
 
     def via_is_free(self, x, y, a_layer=None, b_layer=None, cut_wh=None):
+        return self.via_blocker(x, y, a_layer, b_layer, cut_wh) is None
+
+    def via_blocker(self, x, y, a_layer=None, b_layer=None, cut_wh=None):
         """Can this net drop a via column at (x, y)?
 
         The column is the cut's real size and claims every layer, so this is
@@ -448,9 +475,29 @@ class MazeRouter:
         w, h = cut_wh or self.via_extent(a_layer or d0, b_layer or d1)
         hw, hh = w // 2, h // 2
         ax1, ax2, ay1, ay2 = x - hw, x + hw, y - hh, y + hh
-        for _net, (bx1, bx2, by1, by2) in self._pins_near(ax1, ax2, ay1, ay2):
+        #- A foreign PIN blocks the via only on the layers the via
+        #- connects, the same reasoning as the wire check below. Taking
+        #- every layer made an M1->M2 via illegal under another net's
+        #- M4 pin: a standard cell's output sits under its own M4
+        #- supply strip (REYTR_IVX1_CV: Y at x 31500..40500, AVSS on
+        #- M4 at 31500..40300, full height), so the search could not
+        #- take a single step off the pin.
+        #- But a pin is also an ACCESS COLUMN: its own route comes down
+        #- onto it from above, so a foreign pin on layer L reserves its
+        #- column on L and every layer over it. Below L there is nothing
+        #- to reserve. Device metal is never accessed and only blocks
+        #- the layers it is on.
+        vl = self._via_layers(a_layer or d0, b_layer or d1)
+        top = max((self._layers.index(l) for l in vl
+                   if l in self._layers), default=-1)
+        for _net, (bx1, bx2, by1, by2), player in self._pins_near(
+                ax1, ax2, ay1, ay2):
+            if player not in vl:
+                if _net == DEVICE_METAL or player not in self._layers \
+                        or self._layers.index(player) > top:
+                    continue
             if not (ax2 <= bx1 or ax1 >= bx2) and not (ay2 <= by1 or ay1 >= by2):
-                return False
+                return f"pin of {_net} on {player} at {bx1},{by1}..{bx2},{by2}"
         #- and other nets' WIRE, not only their pins. Checking pins alone
         #- was not enough: routing five ladder nets in one column landed
         #- a via of one on the metal of another and shorted them, with
@@ -481,13 +528,21 @@ class MazeRouter:
                 #- let the route's own pins through. Everywhere else the
                 #- layer rule stands.
                 strict = layer in self.pin_only
-                for _other, s0, s1 in t.foreign_spans(
+                space = self.rule(layer, "space")
+                for _other, s0, s1, acr in t.foreign_extents(
                         self.net, a, b,
                         tolerate_unattributed=(not strict)):
+                    #- the metal's real edge across the track, when the
+                    #- map knows it: clear by the space rule is clear
+                    if (_other == DEVICE_METAL and acr is not None
+                            and (acr[0] >= hi + space
+                                 or acr[1] <= lo - space)):
+                        continue
                     if strict and self.own_metal(ax1, ax2, ay1, ay2):
                         continue
-                    return False
-        return True
+                    return (f"{_other} on {layer} track {t.coord} "
+                            f"{s0}..{s1} across {acr}")
+        return None
 
     #-----------------------------------------------------------------
     #- the search
@@ -526,7 +581,109 @@ class MazeRouter:
         of those, cheapest first. Raises `Blocked` with how far it got
         and what stopped it, because a router that says only "no" cannot
         be debugged.
+
+        The search runs on the track grid. When that is blocked it is
+        tried once more with PIN ACCESS at the ends (`pin_access`): a
+        via at the pin's own position, off the grid, and a jog on the
+        layer above onto it. Only as a fallback, so a net that routes on
+        the grid keeps exactly the route it had.
         """
+        try:
+            return self._search(start, goal, heuristic)
+        except Blocked as first:
+            a = self.pin_access(start)
+            b = self.pin_access(goal)
+            self.log.debug(f"{self.net}: grid search blocked, pin access "
+                           f"{a} / {b}")
+            for end in (start, goal):
+                sx, sy, sl = self.snap(end)
+                for up in self._adj.get(sl, ()):
+                    self.log.debug(
+                        f"{self.net}: via {sl}->{up} at {sx},{sy}: "
+                        f"{self.via_blocker(sx, sy, sl, up) or 'free'}")
+            if a is None and b is None:
+                raise
+            a = a or [self.snap(start)]
+            b = b or [self.snap(goal)]
+            try:
+                mid = self._search(a[-1], b[-1], heuristic)
+            except Blocked:
+                raise first
+            self.log.debug(f"{self.net}: routed through pin access "
+                           f"{a[0]} / {b[0]}")
+            return a[:-1] + mid + list(reversed(b[:-1]))
+
+    def _explain(self, node, seen=()):
+        """Log why each move off `node` is refused (debug)."""
+        x, y, layer = node
+        horizontal = self.tm.directions.get(layer) == "h"
+        step = self.tm.hpitch if horizontal else self.tm.vpitch
+        for delta in (-step, step):
+            nx, ny = (x + delta, y) if horizontal else (x, y + delta)
+            lo, hi = sorted(((x, nx) if horizontal else (y, ny)))
+            coord = y if horizontal else x
+            t = self.tm.track_at(layer, coord)
+            why = "free" if self.is_free(layer, coord, lo, hi) else (
+                f"pins {t.blocking(self.net) if t else None} "
+                f"wires {t.foreign_spans(self.net, lo, hi) if t else None}")
+            self.log.debug(f"{self.net}: step {layer} {x},{y} -> {nx},{ny}"
+                           f"{' (seen)' if (nx, ny, layer) in seen else ''}"
+                           f": {why}")
+        for other in self._adj.get(layer, ()):
+            self.log.debug(f"{self.net}: via {layer}->{other} at {x},{y}: "
+                           f"{self.via_blocker(x, y, layer, other) or 'free'}")
+
+    def pin_access(self, node):
+        """Nodes from a pin's own position onto the grid, or None.
+
+        The grid does not know where pins are. A standard cell puts its
+        pins where its devices need them, so a pin's centre can sit
+        between two tracks, and a via pad at either track can then be
+        illegal while one at the centre is not. Measured on
+        REYTR_IVX1_CV under REYTR_IVX4_CV: Y is centred at y 12000 and
+        the M1 tracks are at 10000 and 14000; a pad at 10000 comes 2100
+        from the cell's own VSS stack below and at 14000 2500 from the
+        one above, against a space of 3000. At 12000 it clears both.
+
+        So: keep the coordinate the pin layer is gridded in ALONG
+        (x on a horizontal layer is on the step grid already), take the
+        pin's own coordinate across, via up there, then jog along the
+        layer above (which runs the other way) to the nearest grid node
+        it can reach. Returns [pin node, via node, grid node].
+        """
+        x, y, layer = node
+        if not self.in_bounds(x, y):
+            return None
+        sx, sy, _ = self.snap(node)
+        horizontal = self.tm.directions.get(layer) == "h"
+        #- the pin's own position across the layer's tracks
+        px, py = (sx, y) if horizontal else (x, sy)
+        if (px, py) == (sx, sy):
+            return None
+        for up in self._adj.get(layer, ()):
+            if self.tm.directions.get(up) == self.tm.directions.get(layer):
+                continue
+            if self.via_candidate(px, py, layer, up) is None:
+                continue
+            g = self.snap((px, py, up))
+            #- both neighbouring grid nodes along the upper layer
+            along = self.tm.vpitch if horizontal else self.tm.hpitch
+            here = py if horizontal else px
+            base = g[1] if horizontal else g[0]
+            for to in sorted({base, base - along, base + along},
+                             key=lambda v: abs(v - here)):
+                if to == here:
+                    continue
+                gx, gy = (g[0], to) if horizontal else (to, g[1])
+                if not self.in_bounds(gx, gy):
+                    continue
+                lo, hi = sorted((here, to))
+                coord = gx if horizontal else gy
+                if self.is_free(up, coord, lo, hi):
+                    return [(px, py, layer), (px, py, up), (gx, gy, up)]
+        return None
+
+    def _search(self, start, goal, heuristic=None):
         start, goal = self.snap(start), self.snap(goal)
         h = heuristic or (lambda n: 0)
         dist = {start: 0}
@@ -555,6 +712,9 @@ class MazeRouter:
                     prev[nxt] = node
                     heapq.heappush(pq, (nd + h(nxt), nd, nxt))
 
+        if self.log.isEnabledFor(logging.DEBUG):
+            for n in (sorted(seen) if len(seen) <= 12 else [best]):
+                self._explain(n, seen)
         raise Blocked(
             f"no path for {self.net} from {start} to {goal}; "
             f"closest approach {best} ({best_d} away)",

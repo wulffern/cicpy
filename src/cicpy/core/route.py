@@ -213,6 +213,18 @@ class Route(Cell):
         if re.search(r"cutaligncenter", self.options):
             self.centerAlignCut = True
         self.routeWidthRule = get_str(r"routeWidth=([^,\s+,$]+)", "width")
+        #- A WIDTH RULE THE TECHNOLOGY DOES NOT HAVE IS AN ERROR, not a
+        #- zero. Rules.get returns 0 for a missing key, so a route asking
+        #- for routeWidth=wide_width in a technology without it was drawn
+        #- 0 wide -- REY_PLL_CTRL's supply straps were lines, and the
+        #- block's VSS/VDD ports came out disconnected in LVS.
+        if self.routeWidthRule != "width":
+            _r = Rules.getInstance()
+            if (_r is not None and _r.hasRules()
+                    and not _r.hasRule(self.routeLayer, self.routeWidthRule)):
+                self.log.error(f"Route {self.net}: {self.routeLayer} has no rule "
+                          f"'{self.routeWidthRule}'; using 'width'")
+                self.routeWidthRule = "width"
         self.startLayer = get_str(r"startLayer=([^,\s+,$]+)", "")
         self.stopLayer = get_str(r"stopLayer=([^,\s+,$]+)", "")
 

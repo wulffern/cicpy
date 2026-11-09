@@ -457,6 +457,33 @@ class MazeRouter:
                 return cand
         return None
 
+    def via_for_path(self, x, y, a_layer, b_layer):
+        """The cut array a drawn path should place at (x, y): what the
+        search would accept, and failing that a single cut where one
+        clears its neighbours. A lone via is a reliability compromise,
+        but a two-cut pad that breaks a spacing rule is not a via at
+        all -- it is a DRC error (REY_PLL_ROSC_STAGE: xip's source, 0.12
+        um from the gate contact)."""
+        from cicpy.core.cut import Cut
+        cut = self.via_candidate(x, y, a_layer, b_layer)
+        if cut is not None:
+            return cut
+        one = Cut.getInstance(a_layer, b_layer, 1, 1) \
+            or Cut.getInstance(b_layer, a_layer, 1, 1)
+        if one is not None and self.via_is_free(
+                x, y, a_layer, b_layer,
+                cut_wh=(int(one.width()), int(one.height()))):
+            self.log.info(f"{self.net}: single cut at {x},{y}, no array "
+                          f"fits there")
+            return one
+        if one is not None:
+            self.log.debug(f"{self.net}: no cut fits at {x},{y}: "
+                           + str(self.via_blocker(
+                               x, y, a_layer, b_layer,
+                               cut_wh=(int(one.width()),
+                                       int(one.height())))))
+        return None
+
     def via_is_free(self, x, y, a_layer=None, b_layer=None, cut_wh=None):
         return self.via_blocker(x, y, a_layer, b_layer, cut_wh) is None
 
@@ -490,13 +517,25 @@ class MazeRouter:
         vl = self._via_layers(a_layer or d0, b_layer or d1)
         top = max((self._layers.index(l) for l in vl
                    if l in self._layers), default=-1)
+        #- A foreign pin or device metal on a layer the via has a pad on
+        #- must be CLEARED by that layer's space, not merely missed: its
+        #- edges are the cell's own and final. Measured on REY_PLL_ROSC_STAGE: a 2x1
+        #- pad on xip's source passed 0.12 um from the cell's gate
+        #- contact li (li.3 wants 0.17) because only overlap was tested.
+        reach = max((self.rule(l, "space", 0) for l in vl), default=0)
         for _net, (bx1, bx2, by1, by2), player in self._pins_near(
-                ax1, ax2, ay1, ay2):
+                ax1 - reach, ax2 + reach, ay1 - reach, ay2 + reach):
             if player not in vl:
                 if _net == DEVICE_METAL or player not in self._layers \
                         or self._layers.index(player) > top:
                     continue
-            if not (ax2 <= bx1 or ax1 >= bx2) and not (ay2 <= by1 or ay1 >= by2):
+            #- only when sizing a real array (cut_wh): the general
+            #- single-via question keeps the overlap test, which is what
+            #- every pin's own via relies on
+            sp = (self.rule(player, "space", 0)
+                  if cut_wh and player in vl else 0)
+            if not (ax2 + sp <= bx1 or ax1 - sp >= bx2) and \
+                    not (ay2 + sp <= by1 or ay1 - sp >= by2):
                 return f"pin of {_net} on {player} at {bx1},{by1}..{bx2},{by2}"
         #- and other nets' WIRE, not only their pins. Checking pins alone
         #- was not enough: routing five ladder nets in one column landed
@@ -2175,6 +2214,9 @@ def route_stack_level(layout, margin=None, log=None, only=None,
                         #- other's metal; one path merges its own.
                         pth = grp.layout.path(net, tm.pin_layer,
                                               [rects[0]], list(rects[1:]))
+                        #- draw the cut array the search checked, not
+                        #- the first one the technology has
+                        pth.via_chooser = r.via_for_path
                         for aa, bb, nodes in searched:
                             pth.fromNodes(nodes, aa, bb)
                             drawn.extend(_leg_metal(net, nodes, aa, bb, r))

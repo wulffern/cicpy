@@ -871,7 +871,24 @@ class Path(Route):
     def drawVia(self, x, y, fromLayer, toLayer):
         if fromLayer == toLayer:
             return None
-        cut = self.viaArray(fromLayer, toLayer)
+        #- a router that searched this path knows what fits at (x, y):
+        #- ask it (MazeRouter.via_candidate) before taking the first
+        #- array the technology has. Measured on REY_PLL_ROSC_STAGE: the
+        #- default 2x1 on xip's source came 0.12 um from the cell's gate
+        #- contact li, where the search had only cleared a narrower cut
+        cut = None
+        chooser = getattr(self, "via_chooser", None)
+        if chooser is not None:
+            try:
+                cut = chooser(int(x), int(y), fromLayer, toLayer)
+            except Exception as e:
+                log.debug(f"{self.net}: via chooser failed: {e}")
+                cut = None
+            log.debug(f"{self.net}: via at {int(x)},{int(y)} "
+                      f"{fromLayer}-{toLayer}: chooser gave "
+                      f"{getattr(cut, 'name', None) or cut}")
+        if cut is None:
+            cut = self.viaArray(fromLayer, toLayer)
         if cut is None:
             log.error(f"{self.net}: no cut between {fromLayer} and "
                       f"{toLayer}")

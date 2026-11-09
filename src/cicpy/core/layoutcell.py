@@ -2600,6 +2600,7 @@ class LayoutCell(Cell):
                         ct.moveCenter(int(xc), int(yc))
                         routering.add(ct)
             return
+        obstacles = self._dropObstacles(name)
         for r in rects:
             if align == "left":
                 x = r.x1 + w / 2
@@ -2607,61 +2608,281 @@ class LayoutCell(Cell):
                 x = r.x2 - w / 2
             else:
                 x = r.centerX()
-            drop = VerticalRectangleFromTo(layer, int(x - w / 2),
-                                           int(r.centerY()),
-                                           int(rail.centerY()), int(w))
-            drop.net = name
+            #- A LANE THAT IS FREE. The drop is a straight vertical from
+            #- the pin to the rail, so in a stack where another net's
+            #- pin or wire lies between them the requested lane can run
+            #- straight through it (REY_PLL_ROSC_BIAS's trim stack: RT0
+            #- and RT2 climbing past RT1's own via). Keep the requested
+            #- lane when it is clear; otherwise scan the pin's width, and
+            #- a narrower cut shape, for the first that is.
+            shape = cut_shape
+            built = self._buildDrop(name, layer, r, rail, x, w, cuts,
+                                    shape, align, pin_cut)
+            #- unattributed metal touching any of this net's pins is that
+            #- pin's own via (REY_PLL_ROSC_STAGE: A's port via on xin's
+            #- gate), not something to dodge
+            mine = [o for o in obstacles if not o[2] and any(
+                o[1].x1 <= q.x2 and o[1].x2 >= q.x1
+                and o[1].y1 <= q.y2 and o[1].y2 >= q.y1 for q in rects)]
+            if mine:
+                ids = {id(o) for o in mine}
+                obs_r = [o for o in obstacles if id(o) not in ids]
+            else:
+                obs_r = obstacles
+            if self._dropCollides(built, obs_r):
+                found = None
+                step = max(1, int(w // 6))
+                xs = sorted(range(int(r.x1 + w / 2), int(r.x2 - w / 2) + 1,
+                                  step), key=lambda v: abs(v - x))
+                for sh in ([cut_shape, "v"] if cut_shape != "v"
+                           else ["v"]):
+                    for xx in xs:
+                        cand = self._buildDrop(name, layer, r, rail, xx, w,
+                                               cuts, sh, "lane", pin_cut)
+                        if not self._dropCollides(cand, obs_r):
+                            found = (xx, sh, cand)
+                            break
+                        if __import__("os").environ.get(
+                                "CICPY_DROP_DEBUG") == name:
+                            d_, cl_ = cand
+                            self.log.warning(
+                                f"  lane {xx} {sh}: {self._lastDropHit} "
+                                f"drop {int(d_.x1)},{int(d_.y1)},"
+                                f"{int(d_.x2)},{int(d_.y2)} cuts "
+                                + str([(int(c.x1), int(c.y1), int(c.x2),
+                                        int(c.y2)) for c in cl_])
+                                + f" rail {rail.layer} {int(rail.y1)}.."
+                                f"{int(rail.y2)}")
+                    if found:
+                        break
+                if found:
+                    self.log.info(f"{name}: drop moved to x={found[0]} "
+                                  f"({found[1]}): the requested lane was "
+                                  f"not clear")
+                    x, shape, built = found
+                else:
+                    #- no straight lane: SEARCH the drop, pin to rail,
+                    #- over the cell's own track map, and draw what was
+                    #- found with the vias the search checked
+                    if self._searchDrop(name, r, rail, routering, layer):
+                        continue
+                    self.log.warning(f"{name}: no clear lane for the drop "
+                                     f"at {int(r.centerX())},"
+                                     f"{int(r.centerY())}; drawn as asked"
+                                     f" (last in the way: "
+                                     f"{getattr(self, '_lastDropHit', None)})")
+            drop, cutlist = built
             routering.add(drop)
-            #- pin_cut=False lands the drop on metal the subcell
-            #- already provides at the pin (its own via stack); a
-            #- second stack there is a partial via overlap, which the
-            #- rules forbid. Cuts go through getCutsForRects: two
-            #- cuts along the target's long side for reliability,
-            #- auto-shrunk where a narrow tab only fits one.
             self._drop_rects.append(drop)
-            ends = ((r, r.centerY(), False),
-                    (rail, rail.centerY(), True))
-            if not pin_cut:
-                ends = ends[1:]
-            for target, yc, at_rail in ends:
-                if layer == target.layer:
-                    continue
-                #- "auto" asks for cuts along the target's long side
-                #- and lets getCutsForRects swap them to the rect's
-                #- aspect. That is right until the pad it makes is
-                #- what collides: a 2x1 on a horizontal rail is 8.8 um
-                #- wide over a 3 um wire and reaches into whatever
-                #- runs beside it. "v"/"h" force the direction so the
-                #- SAME two cuts occupy the axis that has room.
-                hc, vc = (1, cuts) if cut_shape == "v" else (cuts, 1)
-                cs = Cut.getCutsForRects(layer, [target.getCopy()],
-                                         hc, vc, True,
-                                         forceShape=cut_shape in ("v", "h"))
+            for ct in cutlist:
+                routering.add(ct)
+            #- what this call placed is in the way of the next drop
+            obstacles.extend((g.layer, g, name) for g in [drop])
+            for ct in cutlist:
+                for L in getattr(ct, "_drop_layers", ()):
+                    obstacles.append((L, ct, name))
+
+    def _searchDrop(self, name, r, rail, routering=None, layer="M2"):
+        """Route one drop with the maze router, pin to rail. True when
+        drawn.
+
+        The search ends on the drop's own layer over the bar, not on the
+        bar: a channel bar's centre line is not on the search grid, and
+        a goal snapped beside it drew a zig-zag of short pieces (notches,
+        met2.2) into it. From there a straight piece and one cut finish
+        the drop on the bar's centre line, as a plain drop does.
+        """
+        from .trackmap import TrackMap
+        from .mazerouter import MazeRouter, Blocked
+        from .cut import Cut
+        from .rect import VerticalRectangleFromTo
+        try:
+            tm = TrackMap(self, block_pins=True).build()
+            #- a drop leaves its pin upward: no travel on the pin layer,
+            #- where a subcell's device li is unattributed and tolerated
+            #- (REY_PLL_ROSC_BIAS: XST's drop ran along li into xms1's
+            #- VDD source)
+            tm.pin_travel = ""
+            rt = MazeRouter(tm, name, log=self.log)
+            pin_layer = getattr(r, "layer", None) or self._pinLayer()
+            start = (int(r.centerX()), int(r.centerY()), pin_layer)
+            rt._own = [r, rail]
+            nodes = None
+            #- on the drop's layer first; on the bar's own layer when
+            #- that has no way down
+            for gl in dict.fromkeys((layer, rail.layer)):
+                goal = (int(r.centerX()), int(rail.centerY()), gl)
+                try:
+                    nodes = rt.search(start, goal,
+                                      rt.manhattan_heuristic(rt.snap(goal)))
+                    break
+                except Blocked as e:
+                    last = e
+            if nodes is None:
+                raise last
+        except Blocked as e:
+            self.log.warning(f"{name}: drop search blocked: {e}")
+            return False
+        except Exception as e:
+            self.log.warning(f"{name}: drop search failed: {e}")
+            return False
+        pth = self.path(name, pin_layer, [r], [rail])
+        pth.via_chooser = rt.via_for_path
+        pth.fromNodes(nodes, r, rail)
+        if routering is not None and nodes:
+            gx, gy, gl = nodes[-1]
+            wl = Rules.getInstance().get(gl, "width")
+            ext = VerticalRectangleFromTo(gl, int(gx - wl / 2), int(gy),
+                                          int(rail.centerY()), int(wl))
+            ext.net = name
+            routering.add(ext)
+            if gl != rail.layer:
+                cs = Cut.getCutsForRects(gl, [rail.getCopy()], 2, 1, True)
                 if cs:
                     ct = cs[0]
-                    half = ct.width() / 2
-                    if at_rail:
-                        #- on the rail the cut starts under the wire
-                        #- and slides along the bar away from foreign
-                        #- drops crossing the trunk -- their vertical
-                        #- and this cut's pad share a layer.
-                        xc = self._avoidForeignDrops(ct, x, yc, name,
-                                                     (layer,
-                                                      target.layer))
-                    elif align == "left":
-                        #- the cut follows the align: a left-aligned
-                        #- wire with a centered two-cut pad overhangs
-                        #- the pin edge into the neighbouring lane
-                        #- (li.3, measured). Flush against the edge
-                        #- the wide pad still covers the wire.
-                        xc = target.x1 + half
-                    elif align == "right":
-                        xc = target.x2 - half
-                    else:
-                        lo, hi = target.x1 + half, target.x2 - half
-                        xc = x if lo > hi else min(max(x, lo), hi)
-                    ct.moveCenter(int(xc), int(yc))
+                    ct.moveCenter(int(gx), int(rail.centerY()))
+                    ct.net = name
                     routering.add(ct)
+            #- the rail keeps only the stretch its connections reach
+            #- (ChannelRoute.trim): this landing is one
+            land = Rect(rail.layer, int(gx - wl / 2), int(rail.y1),
+                        int(wl), int(rail.height()))
+            land.net = name
+            routering.add(land)
+        self.log.info(f"{name}: drop at {start[0]},{start[1]} searched, "
+                      f"{len(nodes)} nodes")
+        return True
+
+    def _buildDrop(self, name, layer, r, rail, x, w, cuts, cut_shape,
+                   align, pin_cut):
+        """The drop's wire and its cuts at lane x, not yet placed."""
+        from .cut import Cut
+        from .rect import VerticalRectangleFromTo
+        drop = VerticalRectangleFromTo(layer, int(x - w / 2),
+                                       int(r.centerY()),
+                                       int(rail.centerY()), int(w))
+        drop.net = name
+        cutlist = []
+        ends = ((r, r.centerY(), False), (rail, rail.centerY(), True))
+        if not pin_cut:
+            ends = ends[1:]
+        for target, yc, at_rail in ends:
+            if layer == target.layer:
+                continue
+            #- "auto" asks for cuts along the target's long side and lets
+            #- getCutsForRects swap them to the rect's aspect; "v"/"h"
+            #- force the direction so the same two cuts occupy the axis
+            #- that has room
+            hc, vc = (1, cuts) if cut_shape == "v" else (cuts, 1)
+            cs = Cut.getCutsForRects(layer, [target.getCopy()], hc, vc,
+                                     True,
+                                     forceShape=cut_shape in ("v", "h"))
+            if not cs:
+                continue
+            ct = cs[0]
+            half = ct.width() / 2
+            if at_rail:
+                #- on the rail the cut starts under the wire and slides
+                #- along the bar away from foreign drops crossing it
+                xc = self._avoidForeignDrops(ct, x, yc, name,
+                                             (layer, target.layer))
+            elif align == "left":
+                #- flush with the pin edge: a centred two-cut pad on a
+                #- left-aligned wire overhangs into the next lane (li.3)
+                xc = target.x1 + half
+            elif align == "right":
+                xc = target.x2 - half
+            else:
+                lo, hi = target.x1 + half, target.x2 - half
+                xc = x if lo > hi else min(max(x, lo), hi)
+            ct.moveCenter(int(xc), int(yc))
+            ct._drop_layers = (layer, target.layer)
+            #- the cut belongs to the net: the shape collector then
+            #- attributes its body to it, and a later drop of the same net
+            #- (one call per subcell instance) does not dodge it
+            ct.net = name
+            cutlist.append(ct)
+        return drop, cutlist
+
+    def _dropObstacles(self, name):
+        """[(layer, rect, net)] of everything a drop of `name` must
+        clear: other nets' metal and device metal, read off the
+        layout as it stands (subcells' insides included)."""
+        out = []
+        try:
+            rects = self._collectPhysicalRects()
+        except Exception as e:
+            self.log.warning(f"{name}: no obstacle map for drops: {e}")
+            return out
+        #- the cuts the rails and drops placed carry no net; the ring
+        #- that holds each one says whose it is
+        ring_of = {}
+
+        def index(obj, ring):
+            for ch in getattr(obj, "children", []) or []:
+                if isinstance(ch, RouteRing):
+                    index(ch, getattr(ch, "name", "") or ring)
+                elif ring and not isinstance(ch, Rect):
+                    ring_of[id(ch)] = ring
+                    index(ch, ring)
+                else:
+                    index(ch, ring) if hasattr(ch, "children") else None
+        index(self, "")
+        #- the rails themselves are kept in named_rects, not always
+        #- among the children
+        for v in list(getattr(self, "named_rects", {}).values()):
+            if isinstance(v, RouteRing):
+                index(v, getattr(v, "name", "") or "")
+
+        for o in rects:
+            net = getattr(o, "net", "") or ""
+            if not net:
+                owner = ring_of.get(id(getattr(o, "parent", None)))
+                if owner is not None:
+                    #- a rail's or drop's own cut: that ring's net, and
+                    #- never an obstacle of unknown origin
+                    if owner == name:
+                        continue
+                    net = owner
+            if net == name:
+                continue
+            if net or getattr(o, "device_metal", False):
+                out.append((getattr(o, "layer", ""), o, net))
+        for d in getattr(self, "_drop_rects", []):
+            if (getattr(d, "net", "") or "") != name:
+                out.append((d.layer, d, d.net))
+        return out
+
+    def _dropCollides(self, built, obstacles):
+        """Does any part of a drop come within its layer's space of
+        another net's metal?"""
+        drop, cutlist = built
+        geoms = [(drop.layer, drop)]
+        for ct in cutlist:
+            for L in getattr(ct, "_drop_layers", ()):
+                geoms.append((L, ct))
+        rules = Rules.getInstance()
+        #- not on the pin layer: the pin's pad lands on the cell's own li,
+        #- whose neighbours the cell was drawn to clear; what the lane
+        #- has to dodge is other nets' wires and vias above it
+        pin_layer = self._pinLayer()
+        for L, g in geoms:
+            if L == pin_layer:
+                continue
+            try:
+                sp = rules.get(L, "space")
+            except Exception:
+                sp = 0
+            gx1, gy1, gx2, gy2 = g.x1 - sp, g.y1 - sp, g.x2 + sp, g.y2 + sp
+            for ol, o, _n in obstacles:
+                if ol != L:
+                    continue
+                if o.x1 < gx2 and o.x2 > gx1 and o.y1 < gy2 and o.y2 > gy1:
+                    self._lastDropHit = (L, _n, int(o.x1), int(o.y1),
+                                         int(o.x2), int(o.y2),
+                                         type(o).__name__)
+                    return True
+        return False
 
     def _avoidForeignDrops(self, ct, x:float, yc:float, net:str,
                            layers):

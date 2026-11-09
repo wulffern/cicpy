@@ -169,6 +169,15 @@ class Rules:
             logging.getLogger("Rules").warning(msg)
         return 0
 
+    def getArea(self, layer):
+        """The layer's minimum area in database units, 0 when the
+        technology states none. An area is written in rule units
+        squared, like every other rule is written in rule units, so it
+        scales by gamma twice -- `get` would scale it once."""
+        if not self.hasRule(layer, "area"):
+            return 0
+        return int(self.getValue("rules", layer)["area"]) * self.gamma * self.gamma
+
     def hasRule(self, layer, key):
         try:
             obj = self.getValue("rules", layer)

@@ -276,7 +276,8 @@ def cost(ctx, cicfile, techfile, cell, top):
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 @click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
-def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
+@click.option("--tech","techfile",default=None,help="Tech file (.tech); default ../tech/cic/<techlib>.tech. For an IP that keeps its own rules beside the shared technology.")
+def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,techfile):
     """Netlist a xschem to spice, and load file to Magic.
 
     ONE command for every cell, and one pass. The design file decides
@@ -300,7 +301,7 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 
     spi = "xsch/" + cell + ".spice"
 
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,techfile)
 
 
 
@@ -316,17 +317,18 @@ def xsch2mag(ctx,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
 @click.option("--gbreak",default="10",help="Increment Y every gbreak groups")
 @click.option("--check-connectivity", is_flag=True, help="Run full connectivity check after routing")
 @click.option("--strict", is_flag=True, help="Check connectivity after every route and stop at the first short")
-def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict):
+@click.option("--tech","techfile",default=None,help="Tech file (.tech); default ../tech/cic/<techlib>.tech. For an IP that keeps its own rules beside the shared technology.")
+def spi2mag(ctx,spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,techfile):
     """Translate a SPICE file to Magic"""
-    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict)
+    _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity,strict,techfile)
 
 
 
-def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
+def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,techfile=None):
     """Build one cell, or leave nothing behind claiming to be it."""
     try:
         return _spi2mag_build(spi,lib,cell,libdir,techlib,xspace,yspace,
-                              gbreak,check_connectivity,strict)
+                              gbreak,check_connectivity,strict,techfile)
     except Exception:
         #- A BUILD THAT FAILED MUST NOT LEAVE LAST RUN'S ANSWER
         #- STANDING. Nothing is written until the printer runs at the
@@ -348,9 +350,9 @@ def _spi2mag(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity
         raise
 
 
-def _spi2mag_build(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False):
+def _spi2mag_build(spi,lib,cell,libdir,techlib,xspace,yspace,gbreak,check_connectivity=False,strict=False,techfile=None):
 
-    techfile = f"../tech/cic/{techlib}.tech"
+    techfile = techfile or f"../tech/cic/{techlib}.tech"
     log.info(f"Loading rules {techfile}")
     rules = cic.Rules(techfile)
 

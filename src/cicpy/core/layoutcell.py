@@ -3953,9 +3953,9 @@ class LayoutCell(Cell):
         states no area rule."""
         rules = Rules.getInstance()
         w = int(rules.get(layer, "width"))
-        if not rules.hasRule(layer, "area"):
+        area = rules.getArea(layer)
+        if not area:
             return w
-        area = int(rules.get(layer, "area"))
         side = int(math.ceil(math.sqrt(area)))
         return max(w, (side + 1) // 2)
 

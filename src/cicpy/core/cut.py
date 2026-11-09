@@ -31,6 +31,7 @@ from .rules import Rules
 from .layer import Layer
 from .instancecut import InstanceCut
 import logging
+import math
 
 class Cut(Cell):
     
@@ -93,6 +94,27 @@ class Cut(Cell):
                     r_width = enclosure*2 + cut_width*hcuts + cut_space*(hcuts - 1)
                     r_height = encOpposite*2 + cut_height*vcuts + cut_space*(vcuts - 1)
                 
+                #- AN INTERMEDIATE PAD MEETS THE LAYER'S MINIMUM AREA.
+                #- A stack's first and last metal join the wires it
+                #- connects; the ones in between are only the cut's
+                #- enclosure, and on a thick metal that is under the
+                #- area rule (met3.6, measured: 0.44 x 0.44 um on every
+                #- li-to-met4 stack REY_PLL_ROSC drops onto a pin).
+                #- Grown square, about its own centre.
+                if l is not layers[0] and l is not layers[-1]:
+                    area = rules.getArea(l.name)
+                    if area and r_width * r_height < area:
+                        #- on the grid: two rule units, so each side
+                        #- grows by a whole one
+                        step = 2 * rules.gamma
+                        side = int(math.ceil(math.sqrt(area) / step)) * step
+                        side = max(side, r_width, r_height)
+                        dx = (side - r_width) // 2
+                        dy = (side - r_height) // 2
+                        r = Rect(l.name, -dx, -dy, r_width + 2 * dx,
+                                 r_height + 2 * dy)
+                        self.add(r)
+                        continue
                 r = Rect(l.name, 0, 0, r_width, r_height)
                 self.add(r)
                 

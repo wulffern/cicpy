@@ -2729,6 +2729,32 @@ class LayoutCell(Cell):
         pth = self.path(name, pin_layer, [r], [rail])
         pth.via_chooser = rt.via_for_path
         pth.fromNodes(nodes, r, rail)
+        #- THE PATH IS DRAWN AT ROUTE TIME, the drops now. A drop placed
+        #- after this one in the same pass looked for its lane in a
+        #- layout that did not have this route yet and ran straight
+        #- through it (REY_PLL_ROSC_BIAS: VBP's drop through VG's
+        #- searched jog, VG = VBP = XST at LVS). Its segments, and a
+        #- pad where it changes layer, stand in until it is drawn.
+        if not hasattr(self, "_drop_rects"):
+            self._drop_rects = []
+        rules = Rules.getInstance()
+        for (x1, y1, l1), (x2, y2, l2) in zip(nodes, nodes[1:]):
+            for L in dict.fromkeys((l1, l2)):
+                try:
+                    wl = int(rules.get(L, "width"))
+                except Exception:
+                    continue
+                ax1, ax2 = sorted((int(x1), int(x2)))
+                ay1, ay2 = sorted((int(y1), int(y2)))
+                if l1 != l2:
+                    #- a via: its pad, a cut's width either way
+                    wl = 2 * wl
+                    ax1 = ax2 = int(x1)
+                    ay1 = ay2 = int(y1)
+                seg = Rect(L, ax1 - wl // 2, ay1 - wl // 2,
+                           ax2 - ax1 + wl, ay2 - ay1 + wl)
+                seg.net = name
+                self._drop_rects.append(seg)
         if routering is not None and nodes:
             gx, gy, gl = nodes[-1]
             wl = Rules.getInstance().get(gl, "width")

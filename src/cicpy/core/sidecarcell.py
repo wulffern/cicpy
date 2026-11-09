@@ -759,12 +759,28 @@ class HierPycell:
         for e in plan:
             for net in e["ports"]:
                 owners.setdefault(net, []).append(e["stack"])
+        #- ONE ROW WITH ROUTES: the channel is over the row (placeHier),
+        #- so a net shared between columns leaves every one of them UP,
+        #- whichever side its other owners are on. Read as "beside", the
+        #- port went to a side end -- the column's lowest pin -- and the
+        #- drop climbed the whole column from there through every other
+        #- net's pins (REY_PLL_ROSC_BIAS: n_su's VG from y 4.8 um)
+        rows = self.spec.get("rows", []) or []
+        over = (len(rows) == 1
+                and bool(self.spec.get("hier", {}).get("routes")))
         out = {}
         for e in plan:
             me = where.get(e["stack"])
             if me is None:
                 continue
             mine = {}
+            if over:
+                for net in e["ports"]:
+                    if any(o != e["stack"] and o in where
+                           for o in owners.get(net, [])):
+                        mine[net] = (0, 1)
+                out[e["stack"]] = mine
+                continue
             for net in e["ports"]:
                 others = [where[o] for o in owners.get(net, [])
                           if o != e["stack"] and o in where]
@@ -983,6 +999,19 @@ class HierPycell:
         if len(rows) >= 2 and rows[1] and rows[1][0] in slots:
             self.addRoutingChannel("mid", row_tops[0],
                                    slots[rows[1][0]][1])
+        elif len(rows) == 1 and hier.get("routes"):
+            #- ONE ROW: the channel is ABOVE it. A cell split into
+            #- columns side by side -- pmos | nmos, the wells kept apart
+            #- by an `xspace` gap rather than by a row -- still has
+            #- nets crossing between its columns, and they climb out
+            #- of the top of each column to bars over the row. Same
+            #- name, so a route reads the same either way.
+            self.addRoutingChannel("mid", row_tops[0],
+                                   row_tops[0] + channel)
+            #- and the cell owns it: the rings go round the box, and a
+            #- channel over the last row is otherwise outside it (the
+            #- top ring was drawn under the bars, measured)
+            self.y2 = max(int(self.y2), row_tops[0] + channel)
         for e in spec.get("subcells", []):
             inst = self.getInstanceFromInstanceName("x" + e["name"])
             if inst is not None and e.get("channel"):

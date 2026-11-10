@@ -184,6 +184,11 @@ class _PinAnchor(Anchor):
             log.error(f"{path.net}: no terminal {self.terminal} on "
                       f"{self.instance}")
             return None
+        #- "x"/"y" the centre; "x1"/"x2"/"y1"/"y2" an EDGE -- for a
+        #- terminal that is a long rail (a block's ring side), whose
+        #- centre is mid-block and whose end is where a route arrives
+        if self.axis in ("x1", "x2", "y1", "y2"):
+            return getattr(r, self.axis)
         return r.centerX() if self.axis == "x" else r.centerY()
 
 

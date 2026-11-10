@@ -2675,12 +2675,49 @@ class LayoutCell(Cell):
             routering.add(drop)
             self._drop_rects.append(drop)
             for ct in cutlist:
+                #- ONE CUT PER SPOT ON A RAIL. Two drops of the net that
+                #- reach the bar from either side at nearly one x each
+                #- placed a cut, tens of nanometres apart, and the two
+                #- merged into a via that is not a square (REY_PLL_CP's
+                #- VCTRL: n_sink from below, p_src from above, via.1a).
+                #- Within a cut and its space of one already there, the
+                #- drop lands on that one instead, with a jog on its own
+                #- layer to the cut's centre.
+                if getattr(ct, "_at_rail", False):
+                    near = self._railCutNear(routering, ct)
+                    if near is not None:
+                        jog = HorizontalRectangleFromTo(
+                            layer, int(drop.centerX()),
+                            int(near.centerX()),
+                            int(near.centerY() - w / 2), int(w))
+                        jog.net = name
+                        routering.add(jog)
+                        self._drop_rects.append(jog)
+                        continue
+                    routering._rail_cuts = getattr(
+                        routering, "_rail_cuts", []) + [ct]
                 routering.add(ct)
             #- what this call placed is in the way of the next drop
             obstacles.extend((g.layer, g, name) for g in [drop])
             for ct in cutlist:
                 for L in getattr(ct, "_drop_layers", ()):
                     obstacles.append((L, ct, name))
+
+    def _railCutNear(self, routering, ct):
+        """A cut already on this rail within one cut and its space of
+        `ct`, else None."""
+        rules = Rules.getInstance()
+        try:
+            sp = max(int(rules.get(L, "space"))
+                     for L in getattr(ct, "_drop_layers", ()))
+        except Exception:
+            sp = 0
+        for o in getattr(routering, "_rail_cuts", []):
+            if (int(o.x1) - sp < int(ct.x2) and int(ct.x1) - sp < int(o.x2)
+                    and int(o.y1) - sp < int(ct.y2)
+                    and int(ct.y1) - sp < int(o.y2)):
+                return o
+        return None
 
     def _searchDrop(self, name, r, rail, routering=None, layer="M2"):
         """Route one drop with the maze router, pin to rail. True when
@@ -2823,6 +2860,7 @@ class LayoutCell(Cell):
                 xc = x if lo > hi else min(max(x, lo), hi)
             ct.moveCenter(int(xc), int(yc))
             ct._drop_layers = (layer, target.layer)
+            ct._at_rail = at_rail
             #- the cut belongs to the net: the shape collector then
             #- attributes its body to it, and a later drop of the same net
             #- (one call per subcell instance) does not dodge it
@@ -3825,7 +3863,8 @@ class LayoutCell(Cell):
             p.set(rp)
 
     def promoteInstancePort(self, node, instanceRegex, location, layer,
-                            excludeInstances="", stopLayer=""):
+                            excludeInstances="", stopLayer="", offset=0,
+                            jog=None):
         """Carry a SUBCELL's port out to this cell's edge, as a pin.
 
         `addPortOnEdge` does this for a net that is already one of this
@@ -3870,9 +3909,6 @@ class LayoutCell(Cell):
         the pin on the metal it has been brought up to, and leave one
         via where there were two.
         """
-        from .cut import Cut
-        from .rect import Rect
-        rules = Rules.getInstance()
         made = 0
         for inst in self.iterInstances():
             nm = getattr(inst, "instanceName", "") or ""
@@ -3884,94 +3920,184 @@ class LayoutCell(Cell):
             r = pt.get() if pt is not None else None
             if r is None:
                 continue
-
-            w = int(rules.get(layer, "width"))
-            #- in from the END of a wide pin, not its middle
-            reach = int(rules.get(r.layer, "space")) + \
-                int(rules.get(r.layer, "width")) // 2
-            pad = self._minAreaPad(layer)
-            if int(r.x2 - r.x1) > 2 * pad:
-                cx = int(r.x1) + reach
+            if jog:
+                r = self._promoteJog(node, r, *jog)
+                if r is None:
+                    continue
+                self._promoteRect(node, r, location, layer, "", 0, True)
             else:
-                cx = int(r.centerX())
-            cy = int(r.centerY())
-
-            horizontal = location in ("left", "right")
-            if location == "top":
-                lo, hi = cy - w, int(self.y2)
-            elif location == "bottom":
-                lo, hi = int(self.y1), cy + w
-            elif location == "right":
-                lo, hi = cx - w, int(self.x2)
-            else:
-                lo, hi = int(self.x1), cx + w
-            if horizontal:
-                riser = Rect(layer, lo, cy - w, hi - lo, 2 * w)
-            else:
-                riser = Rect(layer, cx - w, lo, 2 * w, hi - lo)
-            riser.setNet(node)
-            self.add(riser)
-
-            #- the bottom of the stack: the pin's own layer, unless the
-            #- subcell has already brought the net up and said so
-            base = stopLayer or r.layer
-            if base != r.layer:
-                rb = r.getCopy()
-                rb.layer = base
-                ct = (self._fittedCut(rb, layer)
-                      or Cut.getInstance(base, layer, 1, 1)
-                      or Cut.getInstance(layer, base, 1, 1))
-            else:
-                ct = (self._fittedCut(r, layer)
-                      or Cut.getInstance(r.layer, layer, 1, 1)
-                      or Cut.getInstance(layer, r.layer, 1, 1))
-            if ct is not None:
-                ct.moveCenter(cx, cy)
-                self.add(ct)
-
-            #- magic refuses a PARTIAL overlap of top-level geometry on
-            #- a subcell's on the same layer, and covering the pin
-            #- EXACTLY is not enough: a via that lands on a pin is
-            #- wider than the pin (a 1x1 M1-M5 stack is 4800 against a
-            #- 3200 tab), so its own enclosure is top-level metal
-            #- hanging over the subcell's edge -- which is the partial
-            #- overlap, one step out. The cover is the union of the pin
-            #- and the via, so the subcell's shape is wholly inside it.
-            #- ...and NOT when the stack starts above the pin: this cell
-            #- then paints nothing on the pin's layer, so there is
-            #- nothing of its own to make wholly cover the subcell's
-            if ct is not None and base == r.layer and (
-                    r.layer == layer or r.layer == self._pinLayer()):
-                ux1 = min(int(r.x1), int(ct.x1))
-                uy1 = min(int(r.y1), int(ct.y1))
-                ux2 = max(int(r.x2), int(ct.x2))
-                uy2 = max(int(r.y2), int(ct.y2))
-                cov = Rect(r.layer, ux1, uy1, ux2 - ux1, uy2 - uy1)
-                cov.setNet(node)
-                self.add(cov)
-            #- the intermediate layers' own pads: a via stack leaves a
-            #- cut-sized shape on each, and a cut-sized shape is under
-            #- the minimum area every one of them asks for
-            for mid in self._layersBetween(base, layer):
-                p = self._minAreaPad(mid)
-                mp = Rect(mid, cx - p, cy - p, 2 * p, 2 * p)
-                mp.setNet(node)
-                self.add(mp)
-
-            #- the EDGE is the pin the level above reaches
-            if horizontal:
-                px = int(self.x1) if location == "left" else int(self.x2) - 4 * w
-                pin = Rect(layer, px, cy - w, 4 * w, 2 * w)
-            else:
-                py = int(self.y1) if location == "bottom" else int(self.y2) - 4 * w
-                pin = Rect(layer, cx - w, py, 2 * w, 4 * w)
-            pin.setNet(node)
-            self.updatePort(node, pin)
+                self._promoteRect(node, r, location, layer, stopLayer,
+                                  offset)
             made += 1
         if not made:
             self.log.warning(f"promoteInstancePort: no instance matching "
                              f"{instanceRegex} exposes {node}")
         return self
+
+    def promoteRailPort(self, node, location, layer, stopLayer="",
+                        offset=0, key=None, center=False):
+        """promoteInstancePort for this cell's OWN channel bar: the net
+        crosses the cell on `rail_<node>` (or `rail_<key>`) rather than
+        living on one subcell's pin, and that bar is what the riser
+        leaves from."""
+        rr = (getattr(self, "named_rects", {}) or {}).get(
+            f"rail_{key or node}")
+        r = rr.getDefault() if rr is not None and hasattr(
+            rr, "getDefault") else rr
+        if r is None:
+            self.log.error(f"promoteRailPort: no rail for {node}")
+            return self
+        self._promoteRect(node, r, location, layer, stopLayer, offset,
+                          center)
+        return self
+
+    def _promoteJog(self, node, r, jlayer, x):
+        """Out of the pin sideways before the riser: up to `jlayer` on
+        the pin, along it to `x` at the pin's height. For a pin the
+        straight riser cannot leave from -- an output under a standard
+        cell's supply strip (REY_PLL_ROSC's CK, under the buffer's VSS
+        M4) leaves on the layer below the strip to a free column. Returns
+        the rect at `x` the riser then starts from."""
+        from .cut import Cut
+        from .rect import Rect
+        rules = Rules.getInstance()
+        cx, cy = int(r.centerX()), int(r.centerY())
+        ct = (self._fittedCut(r, jlayer)
+              or Cut.getInstance(r.layer, jlayer, 1, 1))
+        if ct is None:
+            self.log.error(f"promote {node}: no cut {r.layer}-{jlayer}")
+            return None
+        ct.moveCenter(cx, cy)
+        self.add(ct)
+        if r.layer == self._pinLayer():
+            ux1, uy1 = min(int(r.x1), int(ct.x1)), min(int(r.y1), int(ct.y1))
+            ux2, uy2 = max(int(r.x2), int(ct.x2)), max(int(r.y2), int(ct.y2))
+            cov = Rect(r.layer, ux1, uy1, ux2 - ux1, uy2 - uy1)
+            cov.setNet(node)
+            self.add(cov)
+        wj = int(rules.get(jlayer, "width"))
+        x = int(x)
+        bar = Rect(jlayer, min(cx, x) - wj // 2, cy - wj // 2,
+                   abs(x - cx) + wj, wj)
+        bar.setNet(node)
+        self.add(bar)
+        end = Rect(jlayer, x - wj // 2, cy - wj // 2, wj, wj)
+        end.setNet(node)
+        return end
+
+    def _promoteRect(self, node, r, location, layer, stopLayer="",
+                     offset=0, center=False):
+        """The riser, its stack and the edge pin for one rect `r` --
+        see promoteInstancePort. `offset` (database units) moves the
+        riser along the pin from where it would stand: the lane that
+        clears the neighbours' risers is the caller's to choose."""
+        from .cut import Cut
+        from .rect import Rect
+        rules = Rules.getInstance()
+        w = int(rules.get(layer, "width"))
+        #- in from the END of a wide pin, not its middle
+        reach = int(rules.get(r.layer, "space")) + \
+            int(rules.get(r.layer, "width")) // 2
+        pad = self._minAreaPad(layer)
+        if int(r.x2 - r.x1) > 2 * pad and not center:
+            cx = int(r.x1) + reach
+        else:
+            cx = int(r.centerX())
+        cy = int(r.centerY())
+        if location in ("left", "right"):
+            cy += int(offset)
+        else:
+            cx += int(offset)
+
+        horizontal = location in ("left", "right")
+        if location == "top":
+            lo, hi = cy - w, int(self.y2)
+        elif location == "bottom":
+            lo, hi = int(self.y1), cy + w
+        elif location == "right":
+            lo, hi = cx - w, int(self.x2)
+        else:
+            lo, hi = int(self.x1), cx + w
+        if horizontal:
+            riser = Rect(layer, lo, cy - w, hi - lo, 2 * w)
+        else:
+            riser = Rect(layer, cx - w, lo, 2 * w, hi - lo)
+        riser.setNet(node)
+        self.add(riser)
+
+        #- the bottom of the stack: the pin's own layer, unless the
+        #- subcell has already brought the net up and said so
+        base = stopLayer or r.layer
+        if base != r.layer:
+            rb = r.getCopy()
+            rb.layer = base
+            ct = (self._fittedCut(rb, layer)
+                  or Cut.getInstance(base, layer, 1, 1)
+                  or Cut.getInstance(layer, base, 1, 1))
+        else:
+            ct = (self._fittedCut(r, layer)
+                  or Cut.getInstance(r.layer, layer, 1, 1)
+                  or Cut.getInstance(layer, r.layer, 1, 1))
+        if ct is not None:
+            ct.moveCenter(cx, cy)
+            self.add(ct)
+
+        #- magic refuses a PARTIAL overlap of top-level geometry on
+        #- a subcell's on the same layer, and covering the pin
+        #- EXACTLY is not enough: a via that lands on a pin is
+        #- wider than the pin (a 1x1 M1-M5 stack is 4800 against a
+        #- 3200 tab), so its own enclosure is top-level metal
+        #- hanging over the subcell's edge -- which is the partial
+        #- overlap, one step out. The cover is the union of the pin
+        #- and the via, so the subcell's shape is wholly inside it.
+        #- ...and NOT when the stack starts above the pin: this cell
+        #- then paints nothing on the pin's layer, so there is
+        #- nothing of its own to make wholly cover the subcell's
+        if ct is not None and base == r.layer and (
+                r.layer == layer or r.layer == self._pinLayer()):
+            ux1 = min(int(r.x1), int(ct.x1))
+            uy1 = min(int(r.y1), int(ct.y1))
+            ux2 = max(int(r.x2), int(ct.x2))
+            uy2 = max(int(r.y2), int(ct.y2))
+            cov = Rect(r.layer, ux1, uy1, ux2 - ux1, uy2 - uy1)
+            cov.setNet(node)
+            self.add(cov)
+        #- the intermediate layers' own pads: a via stack leaves a
+        #- cut-sized shape on each, and a cut-sized shape is under
+        #- the minimum area every one of them asks for
+        #- ONLY WHERE THE TECHNOLOGY STATES AN AREA: _minAreaPad falls
+        #- back to the routing WIDTH as a half side, so without an area
+        #- rule this drew a 0.6 um square of met1 on every pin's stack
+        #- and it reached the next device's wiring (REY_PLL_CP: UP onto
+        #- VBN, DN_N onto VBP). The cut's own pads are its enclosure,
+        #- and Cut grows them to the area where there is one.
+        for mid in self._layersBetween(base, layer):
+            area = rules.getArea(mid)
+            if not area:
+                continue
+            p = (int(math.ceil(math.sqrt(area))) + 1) // 2
+            mp = Rect(mid, cx - p, cy - p, 2 * p, 2 * p)
+            mp.setNet(node)
+            self.add(mp)
+
+        #- the EDGE is the pin the level above reaches
+        if horizontal:
+            px = int(self.x1) if location == "left" else int(self.x2) - 4 * w
+            pin = Rect(layer, px, cy - w, 4 * w, 2 * w)
+        else:
+            py = int(self.y1) if location == "bottom" else int(self.y2) - 4 * w
+            pin = Rect(layer, cx - w, py, 2 * w, 4 * w)
+        pin.setNet(node)
+        #- PART OF THE CELL, not only the port's: a port FOLLOWS its
+        #- rect, and a rect nobody holds is not moved when the cell is
+        #- translated after this. A net that was already a port (a
+        #- channel bar's) kept its pad where it was drawn, 0.48 x 1.5 um
+        #- off the riser, and the riser and the pin came apart
+        #- (REY_PLL_CP's VCTRL and VBP). A NEW port is a child itself
+        #- and moves on its own; holding its rect too moved it twice.
+        if node in self.ports:
+            self.add(pin)
+        self.updatePort(node, pin)
 
     def _minAreaPad(self, layer):
         """Half the side of the smallest square meeting the layer's

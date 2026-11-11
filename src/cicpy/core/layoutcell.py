@@ -3841,6 +3841,22 @@ class LayoutCell(Cell):
             rp.moveTo(self.x1,rp.y1)
             if offset_tracks != 0 and rules is not None:
                 rp.translate(0, offset_tracks * rules.get("ROUTE", "verticalgrid"))
+        #- `narrowpin`: the edge pin is one wire of `layer` across, about
+        #- the middle of where the port's copy stands. A port drawn wide
+        #- for the cell's own hops (a 0.9 um li pin) otherwise comes out
+        #- on the edge at that width, on the edge's layer, and a
+        #- neighbouring pin's riser a lane away in the parent lands on it
+        #- (REY_PLL_DIVN: CK_FB on M5 beside CKO0)
+        if options and re.search(r"narrowpin", options) and rules is not None:
+            w = int(rules.get(layer, "width"))
+            if location in ("top", "bottom") and rp.width() > w:
+                c = int(rp.centerX())
+                rp.setLeft(c - w // 2)
+                rp.setRight(c - w // 2 + w)
+            elif location in ("left", "right") and rp.height() > w:
+                c = int(rp.centerY())
+                rp.setBottom(c - w // 2)
+                rp.setTop(c - w // 2 + w)
         start = [p]
         stop = [rp]
         try:
@@ -3957,19 +3973,27 @@ class LayoutCell(Cell):
         straight riser cannot leave from -- an output under a standard
         cell's supply strip (REY_PLL_ROSC's CK, under the buffer's VSS
         M4) leaves on the layer below the strip to a free column. Returns
-        the rect at `x` the riser then starts from."""
+        the rect at `x` the riser then starts from.
+
+        `jlayer` may be the pin's own layer: the pin then only grows a
+        bar to `x`, with no cut. That is a pin whose straight riser
+        would stand a fraction of a lane from a neighbour's (REY_PLL's
+        CKO0 beside CK_FB at the divider's edge): it steps aside on the
+        metal it is already on."""
         from .cut import Cut
         from .rect import Rect
         rules = Rules.getInstance()
         cx, cy = int(r.centerX()), int(r.centerY())
-        ct = (self._fittedCut(r, jlayer)
-              or Cut.getInstance(r.layer, jlayer, 1, 1))
-        if ct is None:
-            self.log.error(f"promote {node}: no cut {r.layer}-{jlayer}")
-            return None
-        ct.moveCenter(cx, cy)
-        self.add(ct)
-        if r.layer == self._pinLayer():
+        ct = None
+        if jlayer != r.layer:
+            ct = (self._fittedCut(r, jlayer)
+                  or Cut.getInstance(r.layer, jlayer, 1, 1))
+            if ct is None:
+                self.log.error(f"promote {node}: no cut {r.layer}-{jlayer}")
+                return None
+            ct.moveCenter(cx, cy)
+            self.add(ct)
+        if ct is not None and r.layer == self._pinLayer():
             ux1, uy1 = min(int(r.x1), int(ct.x1)), min(int(r.y1), int(ct.y1))
             ux2, uy2 = max(int(r.x2), int(ct.x2)), max(int(r.y2), int(ct.y2))
             cov = Rect(r.layer, ux1, uy1, ux2 - ux1, uy2 - uy1)

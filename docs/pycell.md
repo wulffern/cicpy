@@ -456,6 +456,15 @@ Move the port rectangle for net `node` to the cell edge (`"top"`, `"bottom"`, `"
 layout.addPortOnEdge("M2", "VOUT", "left", "||", "")
 ```
 
+The pin on the edge is a copy of the port's rectangle on `layer`, and
+`routeType` draws from the port to it. Besides the route's own options,
+`options` takes:
+
+| Option            | Effect                                                        |
+|-------------------|---------------------------------------------------------------|
+| `offset_track<n>` | move the edge pin `n` route grids along the edge              |
+| `narrowpin`       | make the edge pin one wire of `layer` across, about its middle. A port drawn wide for the cell's own hops otherwise reaches the edge at that width, where a neighbouring pin's riser in the parent can land on it |
+
 ---
 
 ### Query methods

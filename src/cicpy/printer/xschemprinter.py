@@ -551,7 +551,10 @@ E {}
                 self.fcell.write(f"N {xb1} {yb} {xb2} {yb} " + "{lab=" + netName + "}\n")
                 self.fcell.write("C {devices/lab_pin.sym}" + f" {xlab} {yb} {rot} 0 " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")
             else:
-                rot = 3 if side == "top" else 1
+                #- rot 1 stands the text up from the stub's end, rot 3
+                #- hangs it below (xschem turns clockwise, y down): the
+                #- other way round the label is written across the body
+                rot = 1 if side == "top" else 3
                 yb1 = yb - 20 if side == "top" else yb + 20
                 self.fcell.write(f"N {xb2} {yb1} {xb2} {yb} " + "{lab=" + netName + "}\n")
                 self.fcell.write("C {devices/lab_pin.sym}" + f" {xb2} {yb1} {rot} 0 " + "{name=l" + str(self.label_count) + " sig_type=std_logic lab=" + netName + " }\n")

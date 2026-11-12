@@ -15,9 +15,10 @@ themselves, so a generator never hard codes a pin offset::
     sh.write("../design/MY_LIB")      # MY_CELL.sch and a box MY_CELL.sym
 
 ``inst`` puts a label on each pin it is given, pointing away from the
-symbol body. ``pin`` returns a pin's absolute position for drawing wires,
-and ``wlab`` draws a wire with a label at its middle, split there,
-because xschem only joins a label to a wire END.
+symbol body (``sides`` turns one another way). ``pin`` returns a pin's
+absolute position for drawing wires, and ``wlab`` draws a wire with a
+label at its middle, split there, because xschem only joins a label to
+a wire END. ``write`` draws a frame round the sheet, see ``frame``.
 
 Instances are placed unrotated; that is enough for generated sheets and
 keeps the pin arithmetic exact.
@@ -28,9 +29,12 @@ import re
 
 log = logging.getLogger("schgen")
 
-#- lab_pin rotations: the label's connection point is on its right for
-#- rot 0, so a pin on the LEFT of a body takes rot 0
-LEFT, DOWN, RIGHT, UP = 0, 1, 2, 3
+#- lab_pin rotations, named by where the TEXT goes from the connection
+#- point: rot 0 has the point on its right, so a pin on the LEFT of a
+#- body takes LEFT. xschem turns clockwise with y down, so rot 1 stands
+#- the text up from the point and rot 3 hangs it below: a pin on top of
+#- a body takes UP, or its label is written across the body
+LEFT, UP, RIGHT, DOWN = 0, 1, 2, 3
 
 _PIN = re.compile(r"^B\s+5\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+\{(.*)")
 _LINE = re.compile(r"^L\s+\d+\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)")
@@ -81,6 +85,7 @@ class Symbol:
                         body += list(zip(v[0::2], v[1::2]))
         pts = body or [(x, y) for _, x, y in pins]
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        self.box = (min(xs), min(ys), max(xs), max(ys))
         cx, cy = (min(xs) + max(xs))/2, (min(ys) + max(ys))/2
         hx = max((max(xs) - min(xs))/2, 1e-9)
         hy = max((max(ys) - min(ys))/2, 1e-9)
@@ -117,10 +122,7 @@ class Sheet:
         self.local = {}
         if title:
             self.text(title, -1450, -820, 0.5)
-        for i, (p, d) in enumerate(self.pins):
-            sym = {"in": "ipin", "out": "opin"}.get(d, "iopin")
-            self.L.append(f"C {{devices/{sym}.sym}} {-1400 + 160*i} -740 "
-                          f"0 0 {{name=p{i} lab={p}}}")
+        self.L += port_row(self.pins)
 
     # -- symbols -----------------------------------------------------
     def symbol(self, ref):
@@ -170,7 +172,8 @@ class Sheet:
             self.wire(x1, y1, x2, y2)
 
     def lab(self, x, y, rot, net):
-        """A label; rot LEFT (0) has its connection point on its right."""
+        """A label; rot is where the text goes from the point: LEFT,
+        RIGHT, UP or DOWN."""
         self.L.append(f"C {{devices/lab_pin.sym}} {_n(x)} {_n(y)} {rot} 0 "
                       f"{{name=l{self.nid()} sig_type=std_logic lab={net}}}")
 
@@ -182,10 +185,15 @@ class Sheet:
         self.wire(xm, ym, x2, y2)
         self.lab(xm, ym, rot, net)
 
-    def inst(self, ref, name, x, y, props="", **conn):
+    def inst(self, ref, name, x, y, props="", sides=None, **conn):
         """Place symbol ref unrotated at (x, y) and label the pins in
         conn (pin=net). Pin names that are not Python identifiers go in
-        as a dict: inst(..., **{"in": "A"})."""
+        as a dict: inst(..., **{"in": "A"}).
+
+        sides  {pin: LEFT | RIGHT | UP | DOWN} where a label should not
+               point away from the body: a supply pin on top of a gate
+               reads better with its net beside it (RIGHT) than stood
+               on end above it, and a column of gates packs closer."""
         sym = self.symbol(ref)
         if not hasattr(self, "_placed"):
             self._placed = {}
@@ -199,18 +207,107 @@ class Sheet:
             if p not in sym.pins:
                 raise KeyError(f"{ref} has no pin {p}, it has {sym.order}")
             px, py, side = sym.pins[p]
+            if sides and p in sides:
+                side = sides[p]
             self.lab(x + px, y + py, side, net)
         return sym
 
     # -- output ------------------------------------------------------
     def write(self, outdir, symbol=True):
         """Write <cell>.sch, and unless symbol=False a box <cell>.sym."""
+        boxes = [(x + s.box[0], y + s.box[1], x + s.box[2], y + s.box[3])
+                 for s, x, y in getattr(self, "_placed", {}).values()]
         with open(os.path.join(outdir, self.cell + ".sch"), "w") as f:
-            f.write("\n".join(self.L) + "\n")
+            f.write("\n".join(frame(self.L, boxes=boxes)) + "\n")
         if symbol:
             write_box_symbol(os.path.join(outdir, self.cell + ".sym"),
                              self.pins)
         log.info(f"wrote {self.cell}")
+
+
+#- xschem's text, measured on its SVG: a character of size 1 is about
+#- 25 wide in the proportional font and a line 50 high. A label is 0.33
+_CW, _CH, _LAB = 25, 50, 0.33
+_C = re.compile(r"^C\s+\{([^}]*)\}\s+(\S+)\s+(\S+)\s+(\d)\s+\d\s+\{(.*)")
+_T = re.compile(r"^T\s+\{(.*)\}\s+(\S+)\s+(\S+)\s+\d\s+\d\s+(\S+)")
+_N = re.compile(r"^N\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)")
+
+
+def _labw(name):
+    """The room a label or port takes from its point, text and arrow."""
+    return 20 + _CW*_LAB*len(name)
+
+
+def port_row(pins, x=-1400, y=-740, pitch=160):
+    """The ipin/opin lines of a sheet's ports, in order, left to right.
+    They sit a pitch apart, further where two names would meet: an
+    input has its name on the left of its arrow, an output on the
+    right, so a long output followed by an input needs both widths."""
+    L = []
+    room = None
+    for i, (p, d) in enumerate(pins):
+        left, right = (_labw(p), 20) if d == "in" else (20, _labw(p))
+        if room is not None:
+            x += max(pitch, 10*round((room + left + 30)/10))
+        room = right
+        sym = {"in": "ipin", "out": "opin"}.get(d, "iopin")
+        L.append(f"C {{devices/{sym}.sym}} {_n(x)} {y} "
+                 f"0 0 {{name=p{i} lab={p}}}")
+    return L
+
+
+def frame(lines, margin=40, boxes=None):
+    """The lines of a schematic with a frame drawn round all of it.
+
+    xschem leaves text out of the area it fits to the page when it
+    plots without a display (``xschem -x --svg``, which is how the
+    documentation is made): a title, a note that runs past the last
+    device and the names of the ports at the edge are cut off. A frame
+    is a drawn object, so the plot keeps everything inside it. The
+    extent of text and labels is estimated from their length.
+
+    boxes  [(x1, y1, x2, y2)] of the placed symbols, when known (Sheet
+           knows); without it every instance counts as 150 each way."""
+    xs, ys = [], []
+
+    def see(x1, y1, x2, y2):
+        xs.extend((x1, x2))
+        ys.extend((y1, y2))
+
+    for l in lines:
+        m = _T.match(l)
+        if m:
+            x, y, size = float(m.group(2)), float(m.group(3)), float(m.group(4))
+            see(x, y, x + _CW*size*len(m.group(1)), y + _CH*size)
+            continue
+        m = _N.match(l)
+        if m:
+            see(*map(float, m.groups()))
+            continue
+        m = _C.match(l)
+        if not m:
+            continue
+        ref, x, y, rot = m.group(1), float(m.group(2)), float(m.group(3)), int(m.group(4))
+        lab = re.search(r"lab=([^\s}]+)", m.group(5))
+        kind = os.path.basename(ref)
+        if kind in ("lab_pin.sym", "ipin.sym", "opin.sym", "iopin.sym") and lab:
+            w = _labw(lab.group(1))
+            if kind in ("opin.sym", "iopin.sym"):
+                rot = RIGHT
+            dx, dy = {LEFT: (-w, 0), RIGHT: (w, 0),
+                      UP: (0, -w), DOWN: (0, w)}[rot]
+            see(x - 15, y - 15, x + 15, y + 15)
+            see(x, y, x + dx, y + dy)
+        elif boxes is None:
+            see(x - 150, y - 150, x + 150, y + 150)
+    for b in boxes or ():
+        see(*b)
+    if not xs:
+        return list(lines)
+    x1, y1 = _n(10*((min(xs) - margin)//10)), _n(10*((min(ys) - margin)//10))
+    x2, y2 = _n(10*(-((-max(xs) - margin)//10))), _n(10*(-((-max(ys) - margin)//10)))
+    return list(lines) + [
+        f"P 4 5 {x1} {y1} {x2} {y1} {x2} {y2} {x1} {y2} {x1} {y1} {{dash=4}}"]
 
 
 def _n(v):
@@ -233,7 +330,8 @@ def box_symbol(pins):
     s = Symbol.__new__(Symbol)
     s.path = None
     s.pins, s.order = {}, []
-    _, left, right = _box(pins)
+    h, left, right = _box(pins)
+    s.box = (-150, -h - 22, 150, h)
     for p, x, y in left:
         s.pins[p] = (x, y, LEFT)
         s.order.append(p)
@@ -252,7 +350,9 @@ def write_box_symbol(path, pins):
          'K {type=subcircuit\nformat="@name @pinlist @symname"\n'
          'template="name=x1"\n}',
          "T {@symname} -60 -6 0 0 0.3 0.3 {}",
-         "T {@name} 135 -52 0 0 0.2 0.2 {}",
+         #- the instance name over the box's corner: beside the box
+         #- it lands on the label of the third output
+         f"T {{@name}} -130 {-h - 22} 0 0 0.25 0.25 {{}}",
          f"P 4 5 130 {-h} -130 {-h} -130 {h} 130 {h} 130 {-h} {{}}"]
     for p, x, y in left:
         Y += [f"B 5 -152.5 {y-2.5} -147.5 {y+2.5} {{name={p} dir={d[p]}}}",
